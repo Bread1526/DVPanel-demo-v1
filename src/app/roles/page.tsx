@@ -8,12 +8,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { MoreHorizontal, UserPlus, Edit, Trash2, ShieldQuestion, AlertCircle, Loader2 } from "lucide-react";
+import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye, ArrowLeft, ShieldQuestion } from "lucide-react"; // Added Eye, ArrowLeft
 import AddUserRoleDialog from "./components/add-user-role-dialog";
 import { loadUsers, deleteUser, type UserData, type UserActionState } from "./actions";
 import { useToast } from "@/hooks/use-toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-
 
 const rolesDefinitions = [
   { name: "Owner", description: "Full system access. Cannot be modified or managed here." },
@@ -31,7 +30,7 @@ export default function RolesPage() {
   const { toast } = useToast();
   const [isPendingDelete, startDeleteTransition] = useTransition();
   const [userToDelete, setUserToDelete] = useState<UserData | null>(null);
-
+  const [viewingUserAsRole, setViewingUserAsRole] = useState<UserData | null>(null);
 
   const fetchUsers = useCallback(async () => {
     setIsLoading(true);
@@ -54,8 +53,10 @@ export default function RolesPage() {
   }, []);
 
   useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
+    if (!viewingUserAsRole) { // Only fetch users if not in "View Role" mode
+      fetchUsers();
+    }
+  }, [fetchUsers, viewingUserAsRole]);
 
   const handleDeleteUser = async () => {
     if (!userToDelete) return;
@@ -72,13 +73,88 @@ export default function RolesPage() {
     });
   };
 
+  const handleUserChange = () => {
+    fetchUsers();
+    if (viewingUserAsRole) { // If editing from view mode, refresh the viewed user's data
+        const updatedUser = users.find(u => u.id === viewingUserAsRole.id);
+        if (updatedUser) {
+            setViewingUserAsRole(updatedUser);
+        } else { // User might have been deleted or ID changed, unlikely but good to handle
+            setViewingUserAsRole(null); 
+        }
+    }
+  };
+
+  if (viewingUserAsRole) {
+    return (
+      <div>
+        <PageHeader 
+          title={`Viewing Role: ${viewingUserAsRole.username}`}
+          description={`Details for role: ${viewingUserAsRole.role}`}
+          actions={
+            <div className="flex gap-2">
+              <Button onClick={() => setViewingUserAsRole(null)} variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                <ArrowLeft className="mr-2 h-4 w-4" /> Go Back
+              </Button>
+              <AddUserRoleDialog
+                isEditing={true}
+                userData={viewingUserAsRole}
+                onUserChange={handleUserChange}
+                triggerButton={
+                  <Button variant="default" className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                    <Edit className="mr-2 h-4 w-4" /> Edit Role
+                  </Button>
+                }
+              />
+            </div>
+          }
+        />
+        <Card>
+          <CardHeader>
+            <CardTitle>Role Information</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p><span className="font-semibold">Username:</span> {viewingUserAsRole.username}</p>
+            <p><span className="font-semibold">Role:</span> <Badge variant={viewingUserAsRole.role === 'Administrator' ? 'secondary' : 'outline'}>{viewingUserAsRole.role}</Badge></p>
+            <p><span className="font-semibold">Status:</span> <Badge variant={viewingUserAsRole.status === 'Active' ? 'default' : 'destructive'} className={viewingUserAsRole.status === 'Active' ? 'bg-green-500/20 text-green-700 dark:bg-green-500/10 dark:text-green-400 border-green-500/30' : ''}>{viewingUserAsRole.status}</Badge></p>
+            
+            { (viewingUserAsRole.role === 'Admin' || viewingUserAsRole.role === 'Custom') && viewingUserAsRole.projects && viewingUserAsRole.projects.length > 0 && (
+              <div>
+                <h4 className="font-semibold">Assigned Projects:</h4>
+                <ul className="list-disc list-inside pl-4">
+                  {viewingUserAsRole.projects.map(pId => <li key={pId}>{pId}</li>)} {/* Replace pId with actual project name later */}
+                </ul>
+              </div>
+            )}
+            { viewingUserAsRole.role === 'Custom' && viewingUserAsRole.assignedPages && viewingUserAsRole.assignedPages.length > 0 && (
+              <div>
+                <h4 className="font-semibold">Accessible Pages:</h4>
+                <ul className="list-disc list-inside pl-4">
+                  {viewingUserAsRole.assignedPages.map(pageId => <li key={pageId}>{pageId}</li>)} {/* Replace pageId with actual page name later */}
+                </ul>
+              </div>
+            )}
+             { (viewingUserAsRole.role === 'Administrator' || viewingUserAsRole.role === 'Admin' || viewingUserAsRole.role === 'Custom') && viewingUserAsRole.allowedSettingsPages && viewingUserAsRole.allowedSettingsPages.length > 0 && (
+              <div>
+                <h4 className="font-semibold">Accessible Settings Modules:</h4>
+                <ul className="list-disc list-inside pl-4">
+                  {viewingUserAsRole.allowedSettingsPages.map(settingId => <li key={settingId}>{settingId}</li>)} {/* Replace settingId with actual module name later */}
+                </ul>
+              </div>
+            )}
+            {/* TODO: Add more detailed permission breakdown here in the future */}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div>
       <PageHeader 
         title="User Roles & Permissions" 
         description="Manage users and their access levels within DVPanel."
-        actions={<AddUserRoleDialog onUserChange={fetchUsers} />}
+        actions={<AddUserRoleDialog onUserChange={handleUserChange} />}
       />
 
       {error && (
@@ -106,7 +182,6 @@ export default function RolesPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Username</TableHead>
-                    {/* Email column removed as per previous request */}
                     <TableHead>Role</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -116,7 +191,6 @@ export default function RolesPage() {
                   {users.map((user) => (
                     <TableRow key={user.id}>
                       <TableCell className="font-medium">{user.username}</TableCell>
-                      {/* Email cell removed */}
                       <TableCell>
                         <Badge variant={user.role === 'Administrator' ? 'secondary' : 'outline'}>
                           {user.role}
@@ -138,19 +212,29 @@ export default function RolesPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setViewingUserAsRole(user); }}>
+                              <Eye className="mr-2 h-4 w-4" /> View Role
+                            </DropdownMenuItem>
                             <AddUserRoleDialog 
                               isEditing={true} 
                               userData={user} 
-                              onUserChange={fetchUsers}
+                              onUserChange={handleUserChange}
                               triggerButton={
                                 <DropdownMenuItem onSelect={(e) => e.preventDefault()}> 
                                   <Edit className="mr-2 h-4 w-4" /> Edit User / Role
                                 </DropdownMenuItem>
                               }
                             />
-                            <DropdownMenuItem><ShieldQuestion className="mr-2 h-4 w-4" /> View Permissions</DropdownMenuItem>
-                            
-                            {/* Removed AlertDialogTrigger wrapper */}
+                             <DropdownMenuItem 
+                                onSelect={(e) => {
+                                    e.preventDefault(); 
+                                    // Placeholder for a more detailed permission view if needed in future
+                                    // For now, "View Role" provides a summary
+                                    toast({title: "Permissions Hint", description: "Detailed permissions view can be expanded here or within 'View Role' mode."})
+                                }}
+                            >
+                              <ShieldQuestion className="mr-2 h-4 w-4" /> View Permissions
+                            </DropdownMenuItem>
                             <DropdownMenuItem 
                               className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground"
                               onSelect={(e) => { 
@@ -194,7 +278,7 @@ export default function RolesPage() {
         }}
       >
         <AlertDialogContent>
-          {userToDelete && ( // Conditionally render content based on userToDelete being non-null
+          {userToDelete && ( 
             <>
               <AlertDialogHeader>
                 <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
@@ -217,3 +301,5 @@ export default function RolesPage() {
     </div>
   );
 }
+
+    
