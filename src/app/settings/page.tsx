@@ -13,7 +13,7 @@ import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import Image from 'next/image';
-import { Save, Loader2, Settings as SettingsIcon, SlidersHorizontal, Shield, MessageSquareMore, Info, AlertTriangle, Bug, Link as LinkIcon, ExternalLink, Wifi, User, Users as UsersIcon } from "lucide-react";
+import { Save, Loader2, Settings as SettingsIcon, SlidersHorizontal, Shield, MessageSquareMore, Info, AlertTriangle, Bug, Link as LinkIcon, ExternalLink, Wifi, User, Users as UsersIcon, HardDrive } from "lucide-react";
 import { savePanelSettings, loadPanelSettings, type SavePanelSettingsState, type PanelSettingsData } from './actions';
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -52,6 +52,7 @@ export default function SettingsPage() {
 
   const updateLocalState = (data?: PanelSettingsData) => {
     if (data) {
+      console.log("[SettingsPage] updateLocalState: Updating with data:", data);
       setCurrentPanelPort(data.panelPort);
       setCurrentPanelIp(data.panelIp || ""); 
       setCurrentDebugMode(data.debugMode ?? false);
@@ -60,6 +61,8 @@ export default function SettingsPage() {
       setCurrentDisableAutoClose(data.popup?.disableAutoClose ?? defaultPopupSettings.disableAutoClose);
       setCurrentEnableCopyError(data.popup?.enableCopyError ?? defaultPopupSettings.enableCopyError);
       setCurrentShowConsoleErrors(data.popup?.showConsoleErrorsInNotifications ?? defaultPopupSettings.showConsoleErrorsInNotifications);
+    } else {
+      console.log("[SettingsPage] updateLocalState: No data provided, state remains unchanged or uses initial defaults.");
     }
   };
 
@@ -70,7 +73,6 @@ export default function SettingsPage() {
       console.log("[SettingsPage] useEffect: loadPanelSettings result:", result);
       updateLocalState(result.data);
       
-      // Store fetched popup settings in localStorage for Toaster to use
       if (result.data?.popup) {
         localStorage.setItem('dvpanel-popup-settings', JSON.stringify(result.data.popup));
       }
@@ -101,9 +103,9 @@ export default function SettingsPage() {
       }
     };
     fetchSettings();
-  }, []); // Empty dependency array: run only on mount
+  }, []); 
 
-  const [formState, formAction, isActionPending] = useActionState(savePanelSettings, initialSaveState);
+  const [formState, formAction] = useActionState(savePanelSettings, initialSaveState);
 
   useEffect(() => {
     const toastDurationSource = formState.data?.popup?.notificationDuration ?? currentNotificationDuration;
@@ -136,7 +138,7 @@ export default function SettingsPage() {
     }
   }, [formState, currentNotificationDuration]);
 
-  const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+ const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     
     const submittedData: PanelSettingsData = {
@@ -206,7 +208,7 @@ export default function SettingsPage() {
     }
   };
 
-  const isPending = isActionPending || isTransitionPendingForAction;
+  const isPending = isActionStatePending || isTransitionPendingForAction;
 
   return (
     <div>
@@ -216,30 +218,32 @@ export default function SettingsPage() {
       />
 
       <Tabs defaultValue="panel" className="w-full">
-        <TabsList className="inline-flex flex-wrap w-full justify-start h-auto items-center gap-1 py-1 px-1 mb-2">
-          <TabsTrigger value="panel">
-            <SlidersHorizontal className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Panel
-          </TabsTrigger>
-          <TabsTrigger value="daemon">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 h-4 w-4 md:hidden lg:inline-block"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12z"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19 12h2"/><path d="M3 12h2"/><path d="M12 5V3"/><path d="M12 21v-2"/></svg>
-            Daemon
-          </TabsTrigger>
-          <TabsTrigger value="security">
-            <Shield className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Security
-          </TabsTrigger>
-          <TabsTrigger value="popups">
-            <MessageSquareMore className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Popups
-          </TabsTrigger>
-           <TabsTrigger value="debug">
-            <Bug className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Debug
-          </TabsTrigger>
-          <TabsTrigger value="general">
-            <SettingsIcon className="mr-2 h-4 w-4 md:hidden lg:inline-block" />General
-          </TabsTrigger>
-           <TabsTrigger value="info">
-            <Info className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Info
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto py-1 border-b border-border mb-2 whitespace-nowrap">
+          <TabsList className="inline-flex h-10 items-center justify-start rounded-none border-none bg-transparent p-0 gap-1">
+            <TabsTrigger value="panel">
+              <SlidersHorizontal className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Panel
+            </TabsTrigger>
+            <TabsTrigger value="daemon">
+              <HardDrive className="mr-2 h-4 w-4 md:hidden lg:inline-block" />
+              Daemon
+            </TabsTrigger>
+            <TabsTrigger value="security">
+              <Shield className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Security
+            </TabsTrigger>
+            <TabsTrigger value="popups">
+              <MessageSquareMore className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Popups
+            </TabsTrigger>
+            <TabsTrigger value="debug">
+              <Bug className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Debug
+            </TabsTrigger>
+            <TabsTrigger value="general">
+              <SettingsIcon className="mr-2 h-4 w-4 md:hidden lg:inline-block" />General
+            </TabsTrigger>
+            <TabsTrigger value="info">
+              <Info className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Info
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         <form onSubmit={handleFormSubmit}>
           <TabsContent value="panel" forceMount>
