@@ -1,7 +1,8 @@
+
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { useFormState, useFormStatus } from 'react-dom';
+import React, { useState, useEffect, useActionState } from 'react';
+import { useFormStatus } from 'react-dom';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,7 +34,8 @@ export default function SettingsPage() {
   const [currentPanelPort, setCurrentPanelPort] = useState("27407");
   const [currentPanelIp, setCurrentPanelIp] = useState("");
 
-  const [formState, formAction] = useFormState(savePanelSettings, initialState);
+  // Updated to use useActionState from 'react'
+  const [formState, formAction] = useActionState(savePanelSettings, initialState);
   const { toast } = useToast();
 
   useEffect(() => {
