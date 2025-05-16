@@ -1,5 +1,12 @@
 {
   "panelPort": "27407",
   "panelIp": "0.0.0.0",
-  "debugMode": true
+  "debugMode": true,
+  "popup": {
+    "notificationDuration": 5,
+    "disableAllNotifications": false,
+    "disableAutoClose": false,
+    "enableCopyError": true,
+    "showConsoleErrorsInNotifications": true
+  }
 }

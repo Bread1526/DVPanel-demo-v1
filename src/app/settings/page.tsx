@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useTransition } from 'react'; // Added useTransition
 import { useActionState } from 'react';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -42,11 +42,12 @@ export default function SettingsPage() {
   const [currentShowConsoleErrors, setCurrentShowConsoleErrors] = useState(defaultPopupSettings.showConsoleErrorsInNotifications);
 
   const { toast } = useToast();
+  const [isTransitionPending, startTransition] = useTransition(); // Added for startTransition
 
   const updateLocalState = (data?: PanelSettingsData) => {
     if (data) {
       setCurrentPanelPort(data.panelPort);
-      setCurrentPanelIp(data.panelIp);
+      setCurrentPanelIp(data.panelIp || ""); // Ensure panelIp is not undefined
       setCurrentDebugMode(data.debugMode);
       setCurrentNotificationDuration(data.popup?.notificationDuration ?? defaultPopupSettings.notificationDuration);
       setCurrentDisableAllNotifications(data.popup?.disableAllNotifications ?? defaultPopupSettings.disableAllNotifications);
@@ -60,25 +61,28 @@ export default function SettingsPage() {
     const fetchSettings = async () => {
       const result = await loadPanelSettings();
       updateLocalState(result.data);
+      const effectiveDuration = result.data?.popup?.notificationDuration ? result.data.popup.notificationDuration * 1000 : 5000;
+      const isDebug = result.data?.debugMode;
+
       if (result.status === 'success') {
         toast({
           title: "Settings Loaded",
-          description: `Panel settings loaded successfully${result.data?.debugMode && result.message ? `. ${result.message}` : result.data?.debugMode ? '.' : ''}`,
-          duration: result.data?.popup?.notificationDuration ? result.data.popup.notificationDuration * 1000 : 5000,
+          description: `Panel settings loaded successfully${isDebug && result.message ? `. ${result.message}` : isDebug ? '.' : ''}`,
+          duration: effectiveDuration,
         });
       } else if (result.status === 'not_found') {
         toast({
           title: "Settings Info",
           description: result.message || "No existing settings found. Using defaults.",
           variant: "default",
-          duration: result.data?.popup?.notificationDuration ? result.data.popup.notificationDuration * 1000 : 5000,
+          duration: effectiveDuration,
         });
       } else if (result.status === 'error') {
         toast({
           title: "Error Loading Settings",
           description: result.message || "Could not load panel settings.",
           variant: "destructive",
-          duration: result.data?.popup?.notificationDuration ? result.data.popup.notificationDuration * 1000 : 5000,
+          duration: effectiveDuration,
         });
       }
     };
@@ -88,16 +92,16 @@ export default function SettingsPage() {
   const [formState, formAction, isPending] = useActionState(savePanelSettings, initialSaveState);
 
   useEffect(() => {
+    const effectiveDuration = formState.data?.popup?.notificationDuration ? formState.data.popup.notificationDuration * 1000 : currentNotificationDuration * 1000;
     if (formState.status === "success" && formState.message) {
       updateLocalState(formState.data);
       toast({
         title: "Settings Update",
         description: formState.message,
-        duration: formState.data?.popup?.notificationDuration ? formState.data.popup.notificationDuration * 1000 : 5000,
+        duration: effectiveDuration,
       });
     } else if (formState.status === "error" && formState.message) {
       let description = formState.message;
-      // Simplified error display, can be expanded if needed
       if (formState.errors?.general) {
         description = formState.errors.general; 
       } else if (formState.errors) {
@@ -107,7 +111,8 @@ export default function SettingsPage() {
         title: "Error Saving Settings",
         description: description,
         variant: "destructive",
-        duration: currentNotificationDuration * 1000, // Use current state for duration on error
+        duration: effectiveDuration, 
+        errorContent: formState.errors?.general || Object.values(formState.errors || {}).flat().join('; ')
       });
     }
   }, [formState, toast, currentNotificationDuration]);
@@ -115,14 +120,16 @@ export default function SettingsPage() {
   const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    // Ensure switch values are correctly represented in FormData if not already
-    if (!formData.has('debug-mode')) formData.set('debug-mode', currentDebugMode ? 'on' : ''); // Off is empty or not present
-    if (!formData.has('popup-disable-all')) formData.set('popup-disable-all', currentDisableAllNotifications ? 'on' : '');
-    if (!formData.has('popup-disable-autoclose')) formData.set('popup-disable-autoclose', currentDisableAutoClose ? 'on' : '');
-    if (!formData.has('popup-enable-copy')) formData.set('popup-enable-copy', currentEnableCopyError ? 'on' : '');
-    if (!formData.has('popup-show-console-errors')) formData.set('popup-show-console-errors', currentShowConsoleErrors ? 'on' : '');
     
-    formAction(formData);
+    formData.set('debug-mode', currentDebugMode ? 'on' : '');
+    formData.set('popup-disable-all', currentDisableAllNotifications ? 'on' : '');
+    formData.set('popup-disable-autoclose', currentDisableAutoClose ? 'on' : '');
+    formData.set('popup-enable-copy', currentEnableCopyError ? 'on' : '');
+    formData.set('popup-show-console-errors', currentShowConsoleErrors ? 'on' : '');
+    
+    startTransition(() => { // Wrap formAction call
+      formAction(formData);
+    });
   };
 
 
@@ -154,13 +161,6 @@ export default function SettingsPage() {
         </TabsList>
 
         <form onSubmit={handleFormSubmit}>
-          {/* Hidden inputs to carry over settings from other tabs if form is unified */}
-          <input type="hidden" name="panel-port" value={currentPanelPort} />
-          <input type="hidden" name="panel-ip" value={currentPanelIp} />
-          {/* General tab's debug mode is submitted by its own switch name */}
-          {/* Popup settings are submitted by their own input names */}
-
-
           <TabsContent value="panel">
             <Card>
               <CardHeader>
@@ -211,8 +211,8 @@ export default function SettingsPage() {
                 </p>
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
-                <Button type="submit" disabled={isPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                  {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                <Button type="submit" disabled={isPending || isTransitionPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                  {isPending || isTransitionPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   Save Panel Settings
                 </Button>
               </CardFooter>
@@ -239,7 +239,7 @@ export default function SettingsPage() {
                 </p>
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
-                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={isPending}>
+                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={isPending || isTransitionPending}>
                   <Save className="mr-2 h-4 w-4"/> Save Daemon Settings
                 </Button>
               </CardFooter>
@@ -286,7 +286,7 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
-                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={isPending}>
+                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={isPending || isTransitionPending}>
                   <Save className="mr-2 h-4 w-4"/> Save Security Settings
                 </Button>
               </CardFooter>
@@ -301,11 +301,11 @@ export default function SettingsPage() {
               </CardHeader>
               <CardContent className="space-y-8">
                 <div className="space-y-2">
-                  <Label htmlFor="popup-duration">Notification Duration (seconds)</Label>
+                  <Label htmlFor="popup-duration-slider">Notification Duration (seconds)</Label>
                   <div className="flex items-center gap-4">
                     <Slider
                       id="popup-duration-slider"
-                      name="popup-duration" // Name for form submission
+                      name="popup-duration" 
                       min={2} max={15} step={1}
                       value={[currentNotificationDuration]}
                       onValueChange={(value) => setCurrentNotificationDuration(value[0])}
@@ -313,7 +313,7 @@ export default function SettingsPage() {
                     />
                     <Input
                       id="popup-duration-input"
-                      name="popup-duration" // Duplicate name is fine, slider value will likely be used
+                      name="popup-duration" 
                       type="number"
                       value={currentNotificationDuration}
                       onChange={(e) => setCurrentNotificationDuration(parseInt(e.target.value, 10))}
@@ -393,8 +393,8 @@ export default function SettingsPage() {
                 )}
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
-                <Button type="submit" disabled={isPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                  {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                <Button type="submit" disabled={isPending || isTransitionPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                  {isPending || isTransitionPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   Save Popup Settings
                 </Button>
               </CardFooter>
@@ -434,8 +434,8 @@ export default function SettingsPage() {
                 )}
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
-                <Button type="submit" disabled={isPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                  {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                <Button type="submit" disabled={isPending || isTransitionPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                  {isPending || isTransitionPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   Save General Settings
                 </Button>
               </CardFooter>
@@ -446,3 +446,4 @@ export default function SettingsPage() {
     </div>
   );
 }
+
