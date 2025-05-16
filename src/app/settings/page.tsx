@@ -10,8 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Save, Loader2 } from "lucide-react";
-import { savePanelSettings, loadPanelSettings, type SavePanelSettingsState, type PanelSettingsData } from './actions';
+import { Save, Loader2, Settings as SettingsIcon, SlidersHorizontal, Shield } from "lucide-react";
+import { savePanelSettings, loadPanelSettings, type SavePanelSettingsState } from './actions';
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -20,26 +20,10 @@ const initialSaveState: SavePanelSettingsState = {
   status: "idle",
 };
 
-function SubmitButton() {
-  const [isPending, setIsPending] = useState(false); // We can't use useFormStatus directly outside a form experimental action.
-                                                   // This local pending state will be managed by the form submission handler.
-
-  // For now, we'll rely on the main form's pending state.
-  // This component can be enhanced if useFormStatus becomes stable for useActionState.
-  // For a real pending state, the form's onsubmit would need to set it.
-  // However, useActionState hook itself provides a pending state.
-  // The `pending` property is the third element returned by `useActionState`.
-
-  // Since we are using useActionState, we don't need a separate SubmitButton component with useFormStatus
-  // The main component can directly access the pending state from useActionState.
-  // This component will be simplified or removed.
-  return null; 
-}
-
-
 export default function SettingsPage() {
   const [currentPanelPort, setCurrentPanelPort] = useState("27407");
   const [currentPanelIp, setCurrentPanelIp] = useState("");
+  const [currentDebugMode, setCurrentDebugMode] = useState(false);
   
   const { toast } = useToast();
 
@@ -50,17 +34,24 @@ export default function SettingsPage() {
       if (result.status === 'success' && result.data) {
         setCurrentPanelPort(result.data.panelPort);
         setCurrentPanelIp(result.data.panelIp);
+        setCurrentDebugMode(result.data.debugMode);
         toast({
           title: "Settings Loaded",
-          description: "Panel settings loaded successfully.",
+          description: `Panel settings loaded successfully${result.data.debugMode && result.message ? `. ${result.message}` : result.data.debugMode ? '.' : ''}`,
         });
       } else if (result.status === 'not_found') {
+        setCurrentPanelPort(result.data?.panelPort || "27407");
+        setCurrentPanelIp(result.data?.panelIp || "");
+        setCurrentDebugMode(result.data?.debugMode || false);
         toast({
           title: "Settings Info",
           description: result.message || "No existing settings found. Using defaults.",
           variant: "default",
         });
       } else if (result.status === 'error') {
+        setCurrentPanelPort(result.data?.panelPort || "27407");
+        setCurrentPanelIp(result.data?.panelIp || "");
+        setCurrentDebugMode(result.data?.debugMode || false);
         toast({
           title: "Error Loading Settings",
           description: result.message || "Could not load panel settings.",
@@ -77,11 +68,12 @@ export default function SettingsPage() {
     if (formState.status === "success" && formState.message) {
       toast({
         title: "Settings Update",
-        description: formState.message,
+        description: formState.message, // Message now includes filename if debug is on
       });
       if (formState.data) {
         setCurrentPanelPort(formState.data.panelPort);
         setCurrentPanelIp(formState.data.panelIp);
+        setCurrentDebugMode(formState.data.debugMode);
       }
     } else if (formState.status === "error" && formState.message) {
       let description = formState.message;
@@ -91,8 +83,11 @@ export default function SettingsPage() {
       if (formState.errors?.panelIp) {
         description += ` IP: ${formState.errors.panelIp.join(', ')}`;
       }
+       if (formState.errors?.debugMode) {
+        description += ` Debug Mode: ${formState.errors.debugMode.join(', ')}`;
+      }
       if (formState.errors?.general) {
-        description = formState.errors.general; // Prioritize general storage error
+        description = formState.errors.general; 
       }
       toast({
         title: "Error Saving Settings",
@@ -107,18 +102,30 @@ export default function SettingsPage() {
     <div>
       <PageHeader 
         title="Settings" 
-        description="Configure panel, daemon, and security settings."
+        description="Configure panel, daemon, security, and general application settings."
       />
 
       <Tabs defaultValue="panel" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 md:w-[500px]">
-          <TabsTrigger value="panel">Panel Settings</TabsTrigger>
-          <TabsTrigger value="daemon">Daemon Settings</TabsTrigger>
-          <TabsTrigger value="security">Security</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 md:w-auto">
+          <TabsTrigger value="panel">
+            <SlidersHorizontal className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Panel Settings
+          </TabsTrigger>
+          <TabsTrigger value="daemon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 h-4 w-4 md:hidden lg:inline-block"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12z"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19 12h2"/><path d="M3 12h2"/><path d="M12 5V3"/><path d="M12 21v-2"/></svg>
+            Daemon Settings
+          </TabsTrigger>
+          <TabsTrigger value="security">
+            <Shield className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Security
+          </TabsTrigger>
+          <TabsTrigger value="general">
+            <SettingsIcon className="mr-2 h-4 w-4 md:hidden lg:inline-block" />General
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="panel">
           <form action={formAction}>
+             {/* Hidden input for debug mode to be included in panel settings form */}
+            <input type="hidden" name="debug-mode" value={currentDebugMode ? "on" : ""} />
             <Card>
               <CardHeader>
                 <CardTitle>Panel Settings</CardTitle>
@@ -249,6 +256,52 @@ export default function SettingsPage() {
               </Button>
             </CardFooter>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="general">
+          <form action={formAction}>
+            {/* Hidden inputs for panel port and IP to be included in general settings form submission if needed, or handle forms separately */}
+            <input type="hidden" name="panel-port" value={currentPanelPort} />
+            <input type="hidden" name="panel-ip" value={currentPanelIp} />
+            <Card>
+              <CardHeader>
+                <CardTitle>General Application Settings</CardTitle>
+                <CardDescription>Configure general behavior and preferences for DVPanel.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="flex items-center justify-between p-4 border rounded-lg">
+                  <div>
+                    <Label htmlFor="debug-mode" className="text-base font-semibold">Debug Mode</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Enable verbose logging and additional debugging information in UI notifications.
+                    </p>
+                  </div>
+                  <Switch 
+                    id="debug-mode" 
+                    name="debug-mode"
+                    checked={currentDebugMode}
+                    onCheckedChange={setCurrentDebugMode}
+                  />
+                </div>
+                 {formState.errors?.debugMode && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{formState.errors.debugMode.join(', ')}</AlertDescription>
+                  </Alert>
+                )}
+                {formState.errors?.general && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{formState.errors.general}</AlertDescription>
+                  </Alert>
+                )}
+              </CardContent>
+              <CardFooter className="border-t px-6 py-4">
+                <Button type="submit" disabled={isPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                  {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Save General Settings
+                </Button>
+              </CardFooter>
+            </Card>
+          </form>
         </TabsContent>
       </Tabs>
     </div>
