@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect, useTransition } from 'react'; // Added useTransition
+import React, { useState, useEffect, useTransition } from 'react';
 import { useActionState } from 'react';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Save, Loader2, Settings as SettingsIcon, SlidersHorizontal, Shield, MessageSquareMore, Info } from "lucide-react";
+import { Save, Loader2, Settings as SettingsIcon, SlidersHorizontal, Shield, MessageSquareMore, Info, AlertTriangle, Bug } from "lucide-react";
 import { savePanelSettings, loadPanelSettings, type SavePanelSettingsState, type PanelSettingsData } from './actions';
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -42,13 +42,13 @@ export default function SettingsPage() {
   const [currentShowConsoleErrors, setCurrentShowConsoleErrors] = useState(defaultPopupSettings.showConsoleErrorsInNotifications);
 
   const { toast } = useToast();
-  const [isTransitionPending, startTransition] = useTransition(); // Added for startTransition
+  const [isTransitionPending, startTransition] = useTransition(); 
 
   const updateLocalState = (data?: PanelSettingsData) => {
     if (data) {
       setCurrentPanelPort(data.panelPort);
-      setCurrentPanelIp(data.panelIp || ""); // Ensure panelIp is not undefined
-      setCurrentDebugMode(data.debugMode);
+      setCurrentPanelIp(data.panelIp || ""); 
+      setCurrentDebugMode(data.debugMode ?? false); // Ensure debugMode has a default
       setCurrentNotificationDuration(data.popup?.notificationDuration ?? defaultPopupSettings.notificationDuration);
       setCurrentDisableAllNotifications(data.popup?.disableAllNotifications ?? defaultPopupSettings.disableAllNotifications);
       setCurrentDisableAutoClose(data.popup?.disableAutoClose ?? defaultPopupSettings.disableAutoClose);
@@ -92,9 +92,12 @@ export default function SettingsPage() {
   const [formState, formAction, isPending] = useActionState(savePanelSettings, initialSaveState);
 
   useEffect(() => {
-    const effectiveDuration = formState.data?.popup?.notificationDuration ? formState.data.popup.notificationDuration * 1000 : currentNotificationDuration * 1000;
+    // Use current state for duration if formState.data is not yet available (e.g. on initial error)
+    const toastDurationSource = formState.data?.popup?.notificationDuration ?? currentNotificationDuration;
+    const effectiveDuration = toastDurationSource * 1000;
+
     if (formState.status === "success" && formState.message) {
-      updateLocalState(formState.data);
+      updateLocalState(formState.data); // Update local state with successfully saved data
       toast({
         title: "Settings Update",
         description: formState.message,
@@ -115,21 +118,46 @@ export default function SettingsPage() {
         errorContent: formState.errors?.general || Object.values(formState.errors || {}).flat().join('; ')
       });
     }
-  }, [formState, toast, currentNotificationDuration]);
+  }, [formState, toast, currentNotificationDuration]); // currentNotificationDuration added as fallback
   
   const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     
+    // Switches might not be present in formData if unchecked, so set them explicitly
     formData.set('debug-mode', currentDebugMode ? 'on' : '');
     formData.set('popup-disable-all', currentDisableAllNotifications ? 'on' : '');
     formData.set('popup-disable-autoclose', currentDisableAutoClose ? 'on' : '');
     formData.set('popup-enable-copy', currentEnableCopyError ? 'on' : '');
     formData.set('popup-show-console-errors', currentShowConsoleErrors ? 'on' : '');
     
-    startTransition(() => { // Wrap formAction call
+    startTransition(() => {
       formAction(formData);
     });
+  };
+
+  const handleTestDefaultPopup = () => {
+    toast({
+      title: "Test Default Popup",
+      description: "This is a test informational notification!",
+      duration: currentNotificationDuration * 1000,
+    });
+  };
+
+  const handleTestErrorPopup = () => {
+    try {
+      throw new Error("This is a simulated console error for testing purposes.");
+    } catch (e: any) {
+      console.error("Simulated Error:", e.message);
+      const errorDetails = currentShowConsoleErrors && currentDebugMode ? `Console: ${e.message}` : "This is a test error notification!";
+      toast({
+        title: "Test Error Popup",
+        description: errorDetails,
+        variant: "destructive",
+        duration: currentNotificationDuration * 1000,
+        errorContent: `Error: ${e.message}\nStack: ${e.stack}`,
+      });
+    }
   };
 
 
@@ -137,11 +165,11 @@ export default function SettingsPage() {
     <div>
       <PageHeader 
         title="Settings" 
-        description="Configure panel, daemon, security, popups, and general application settings."
+        description="Configure panel, daemon, security, popups, debug and general application settings."
       />
 
       <Tabs defaultValue="panel" className="w-full">
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 md:grid-cols-5">
+        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 md:grid-cols-6">
           <TabsTrigger value="panel">
             <SlidersHorizontal className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Panel
           </TabsTrigger>
@@ -155,6 +183,9 @@ export default function SettingsPage() {
           <TabsTrigger value="popups">
             <MessageSquareMore className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Popups
           </TabsTrigger>
+           <TabsTrigger value="debug">
+            <Bug className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Debug
+          </TabsTrigger>
           <TabsTrigger value="general">
             <SettingsIcon className="mr-2 h-4 w-4 md:hidden lg:inline-block" />General
           </TabsTrigger>
@@ -165,7 +196,7 @@ export default function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Panel Settings</CardTitle>
-                <CardDescription>Customize how your DVPanel is accessed and operates.</CardDescription>
+                <CardDescription>Customize how your DVPanel is accessed and operates. Settings are encrypted.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-3 items-center gap-4">
@@ -212,7 +243,7 @@ export default function SettingsPage() {
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
                 <Button type="submit" disabled={isPending || isTransitionPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                  {isPending || isTransitionPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  {(isPending || isTransitionPending) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   Save Panel Settings
                 </Button>
               </CardFooter>
@@ -239,7 +270,7 @@ export default function SettingsPage() {
                 </p>
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
-                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={isPending || isTransitionPending}>
+                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled> {/*  disabled={isPending || isTransitionPending} */}
                   <Save className="mr-2 h-4 w-4"/> Save Daemon Settings
                 </Button>
               </CardFooter>
@@ -286,7 +317,7 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
-                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={isPending || isTransitionPending}>
+                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled> {/* disabled={isPending || isTransitionPending} */}
                   <Save className="mr-2 h-4 w-4"/> Save Security Settings
                 </Button>
               </CardFooter>
@@ -297,7 +328,7 @@ export default function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Popup Notification Settings</CardTitle>
-                <CardDescription>Customize how notifications (toasts) behave.</CardDescription>
+                <CardDescription>Customize how notifications (toasts) behave. Settings are encrypted.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-8">
                 <div className="space-y-2">
@@ -313,7 +344,7 @@ export default function SettingsPage() {
                     />
                     <Input
                       id="popup-duration-input"
-                      name="popup-duration" 
+                      // name="popup-duration" // Name attribute removed from input as Slider now has it
                       type="number"
                       value={currentNotificationDuration}
                       onChange={(e) => setCurrentNotificationDuration(parseInt(e.target.value, 10))}
@@ -331,11 +362,11 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
                     <Label htmlFor="popup-disable-all" className="text-base font-semibold">Disable All Notifications</Label>
-                    <p className="text-sm text-muted-foreground">Completely turn off popup notifications. (Debug mode may override this)</p>
+                    <p className="text-sm text-muted-foreground">Completely turn off popup notifications. (Debug mode may override this for critical errors)</p>
                   </div>
                   <Switch 
                     id="popup-disable-all"
-                    name="popup-disable-all"
+                    name="popup-disable-all" // Name attribute for form submission
                     checked={currentDisableAllNotifications}
                     onCheckedChange={setCurrentDisableAllNotifications}
                   />
@@ -347,11 +378,11 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
                     <Label htmlFor="popup-disable-autoclose" className="text-base font-semibold">Disable Auto-Closing Notifications</Label>
-                    <p className="text-sm text-muted-foreground">Notifications will stay until manually closed. (Debug mode may override this)</p>
+                    <p className="text-sm text-muted-foreground">Notifications will stay until manually closed.</p>
                   </div>
                   <Switch
                     id="popup-disable-autoclose"
-                    name="popup-disable-autoclose"
+                    name="popup-disable-autoclose" // Name attribute
                     checked={currentDisableAutoClose}
                     onCheckedChange={setCurrentDisableAutoClose}
                   />
@@ -367,7 +398,7 @@ export default function SettingsPage() {
                   </div>
                   <Switch
                     id="popup-enable-copy"
-                    name="popup-enable-copy"
+                    name="popup-enable-copy" // Name attribute
                     checked={currentEnableCopyError}
                     onCheckedChange={setCurrentEnableCopyError}
                   />
@@ -378,12 +409,12 @@ export default function SettingsPage() {
                 
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
-                    <Label htmlFor="popup-show-console-errors" className="text-base font-semibold">Show Console Errors in Notifications (Debug Only)</Label>
-                    <p className="text-sm text-muted-foreground">If Debug Mode is active, include console error details in notifications.</p>
+                    <Label htmlFor="popup-show-console-errors" className="text-base font-semibold">Show Console Errors in Notifications</Label>
+                    <p className="text-sm text-muted-foreground">If Debug Mode is also active, include console error details in notifications.</p>
                   </div>
                   <Switch
                     id="popup-show-console-errors"
-                    name="popup-show-console-errors"
+                    name="popup-show-console-errors" // Name attribute
                     checked={currentShowConsoleErrors}
                     onCheckedChange={setCurrentShowConsoleErrors}
                   />
@@ -394,8 +425,61 @@ export default function SettingsPage() {
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
                 <Button type="submit" disabled={isPending || isTransitionPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                  {isPending || isTransitionPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  {(isPending || isTransitionPending) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   Save Popup Settings
+                </Button>
+              </CardFooter>
+            </Card>
+          </TabsContent>
+          
+          <TabsContent value="debug">
+            <Card>
+              <CardHeader>
+                <CardTitle>Debug Settings</CardTitle>
+                <CardDescription>Configure debugging features and test functionalities. Settings are encrypted.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="flex items-center justify-between p-4 border rounded-lg">
+                  <div>
+                    <Label htmlFor="debug-mode-switch" className="text-base font-semibold">Enable Debug Mode</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Enable verbose logging and additional debugging information in UI notifications.
+                    </p>
+                  </div>
+                  <Switch 
+                    id="debug-mode-switch" 
+                    name="debug-mode" // Name attribute for form submission
+                    checked={currentDebugMode}
+                    onCheckedChange={setCurrentDebugMode}
+                  />
+                </div>
+                {formState.errors?.debugMode && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{formState.errors.debugMode.join(', ')}</AlertDescription>
+                  </Alert>
+                )}
+
+                <div className="space-y-2 pt-4 border-t">
+                  <h4 className="text-md font-semibold">Test Notifications</h4>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Button type="button" variant="outline" onClick={handleTestDefaultPopup} className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                      <Info className="mr-2 h-4 w-4" /> Test Default Popup
+                    </Button>
+                    <Button type="button" variant="destructive" onClick={handleTestErrorPopup} className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                      <AlertTriangle className="mr-2 h-4 w-4" /> Test Error Popup
+                    </Button>
+                  </div>
+                </div>
+                 {formState.errors?.general && (
+                  <Alert variant="destructive" className="mt-4">
+                    <AlertDescription>{formState.errors.general}</AlertDescription>
+                  </Alert>
+                )}
+              </CardContent>
+              <CardFooter className="border-t px-6 py-4">
+                <Button type="submit" disabled={isPending || isTransitionPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                  {(isPending || isTransitionPending) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Save Debug Settings
                 </Button>
               </CardFooter>
             </Card>
@@ -405,38 +489,17 @@ export default function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>General Application Settings</CardTitle>
-                <CardDescription>Configure general behavior and preferences for DVPanel.</CardDescription>
+                <CardDescription>Configure general behavior and preferences for DVPanel. (Functionality pending)</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="flex items-center justify-between p-4 border rounded-lg">
-                  <div>
-                    <Label htmlFor="debug-mode" className="text-base font-semibold">Debug Mode</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Enable verbose logging and additional debugging information in UI notifications.
-                    </p>
-                  </div>
-                  <Switch 
-                    id="debug-mode" 
-                    name="debug-mode"
-                    checked={currentDebugMode}
-                    onCheckedChange={setCurrentDebugMode}
-                  />
-                </div>
-                 {formState.errors?.debugMode && (
-                  <Alert variant="destructive">
-                    <AlertDescription>{formState.errors.debugMode.join(', ')}</AlertDescription>
-                  </Alert>
-                )}
-                {formState.errors?.general && (
-                  <Alert variant="destructive">
-                    <AlertDescription>{formState.errors.general}</AlertDescription>
-                  </Alert>
-                )}
+                 <p className="text-muted-foreground">
+                    General settings for panel administration, such as changing the panel owner username and password (encrypted), will be available here in a future update.
+                  </p>
+                   {/* Placeholder for future username/password fields */}
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
-                <Button type="submit" disabled={isPending || isTransitionPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                  {isPending || isTransitionPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                  Save General Settings
+                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled> {/* disabled={isPending || isTransitionPending} */}
+                  <Save className="mr-2 h-4 w-4"/> Save General Settings
                 </Button>
               </CardFooter>
             </Card>
@@ -446,4 +509,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-

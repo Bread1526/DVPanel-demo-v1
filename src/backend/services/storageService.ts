@@ -4,12 +4,27 @@
 
 /**
  * @fileOverview Service for storing and retrieving data from local JSON files.
- * This service will eventually handle encryption/decryption.
+ * Implements AES-256-GCM encryption.
  */
 
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { getInstallationCode, getDataPath } from '@/backend/lib/config';
+
+const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
+const IV_LENGTH = 12; // bytes
+const AUTH_TAG_LENGTH = 16; // bytes
+const KEY_LENGTH = 32; // bytes for AES-256
+
+/**
+ * Derives a consistent 32-byte key from the installation code.
+ * @returns {Buffer} The derived 32-byte key.
+ */
+function getDerivedKey(): Buffer {
+  const installationCode = getInstallationCode();
+  return crypto.createHash('sha256').update(String(installationCode)).digest();
+}
 
 /**
  * Ensures that the data directory, as specified by DVSPANEL_DATA_PATH or default, exists.
@@ -18,7 +33,7 @@ import { getInstallationCode, getDataPath } from '@/backend/lib/config';
  */
 async function ensureDataDirectoryExists(): Promise<void> {
   const dataPath = getDataPath();
-  console.log(`[StorageService] Resolved data path: ${dataPath}`); // Added log
+  // console.log(`[StorageService] Resolved data path: ${dataPath}`); 
   if (!fs.existsSync(dataPath)) {
     try {
       fs.mkdirSync(dataPath, { recursive: true });
@@ -33,28 +48,33 @@ async function ensureDataDirectoryExists(): Promise<void> {
 }
 
 /**
- * Saves data to a JSON file within the configured data directory.
- * Currently, encryption is a placeholder.
- * @param {string} filename - The name of the file (e.g., 'users.json').
+ * Saves data to an encrypted JSON file within the configured data directory.
+ * @param {string} filename - The name of the file (e.g., 'settings.json').
  * @param {object} data - The data to be saved.
- * @throws {Error} If saving fails.
+ * @throws {Error} If saving or encryption fails.
  */
 export async function saveEncryptedData(filename: string, data: object): Promise<void> {
   await ensureDataDirectoryExists();
-  const installationCode = getInstallationCode(); // Ensure it's available, though not used for encryption yet.
+  const derivedKey = getDerivedKey();
   const dataPath = getDataPath();
   const filePath = path.join(dataPath, filename);
 
   try {
-    // Placeholder for actual encryption:
-    // const encryptedData = await encrypt(JSON.stringify(data), installationCode, perInstallSeed);
-    console.log(`[StorageService] Placeholder: Would encrypt data for ${filename} using installation code.`);
-    const jsonData = JSON.stringify(data, null, 2); // Pretty print JSON
+    const iv = crypto.randomBytes(IV_LENGTH);
+    const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, derivedKey, iv);
+    
+    const jsonData = JSON.stringify(data);
+    let encryptedData = cipher.update(jsonData, 'utf8');
+    encryptedData = Buffer.concat([encryptedData, cipher.final()]);
+    const authTag = cipher.getAuthTag();
 
-    fs.writeFileSync(filePath, jsonData, 'utf8');
-    console.log(`[StorageService] Data successfully saved to ${filePath}`);
+    // Store as iv:authTag:encryptedData (all hex encoded)
+    const fileContent = `${iv.toString('hex')}:${authTag.toString('hex')}:${encryptedData.toString('hex')}`;
+    
+    fs.writeFileSync(filePath, fileContent, 'utf8');
+    console.log(`[StorageService] Data successfully encrypted and saved to ${filePath}`);
   } catch (error) {
-    console.error(`[StorageService] Error saving data to ${filePath}:`, error);
+    console.error(`[StorageService] Error saving or encrypting data to ${filePath}:`, error);
     const baseMessage = `Storage Error: Failed to save data to ${filename}.`;
     const detailedMessage = error instanceof Error ? `${baseMessage} Reason: ${error.message}` : baseMessage;
     throw new Error(detailedMessage);
@@ -62,15 +82,14 @@ export async function saveEncryptedData(filename: string, data: object): Promise
 }
 
 /**
- * Loads data from a JSON file within the configured data directory.
- * Currently, decryption is a placeholder.
- * @param {string} filename - The name of the file (e.g., 'users.json').
- * @returns {Promise<object | null>} The loaded data, or null if the file doesn't exist or an error occurs.
- * @throws {Error} If loading fails critically (other than file not found).
+ * Loads and decrypts data from a JSON file within the configured data directory.
+ * @param {string} filename - The name of the file (e.g., 'settings.json').
+ * @returns {Promise<object | null>} The loaded and decrypted data, or null if the file doesn't exist or decryption fails.
+ * @throws {Error} If loading fails critically (other than file not found or decryption failure).
  */
 export async function loadEncryptedData(filename: string): Promise<object | null> {
-  await ensureDataDirectoryExists(); // Ensure directory exists before attempting read
-  const installationCode = getInstallationCode(); // Ensure it's available
+  await ensureDataDirectoryExists(); 
+  const derivedKey = getDerivedKey();
   const dataPath = getDataPath();
   const filePath = path.join(dataPath, filename);
 
@@ -81,27 +100,47 @@ export async function loadEncryptedData(filename: string): Promise<object | null
     }
 
     const fileContent = fs.readFileSync(filePath, 'utf8');
+    const parts = fileContent.split(':');
+    if (parts.length !== 3) {
+      console.error(`[StorageService] Invalid encrypted file format: ${filePath}. Expected 3 parts, got ${parts.length}.`);
+      return null; // Or throw a more specific error
+    }
+
+    const iv = Buffer.from(parts[0], 'hex');
+    const authTag = Buffer.from(parts[1], 'hex');
+    const encryptedData = Buffer.from(parts[2], 'hex');
+
+    if (iv.length !== IV_LENGTH) {
+        console.error(`[StorageService] Invalid IV length in ${filePath}. Expected ${IV_LENGTH}, got ${iv.length}.`);
+        return null;
+    }
+     if (authTag.length !== AUTH_TAG_LENGTH) {
+        console.error(`[StorageService] Invalid authTag length in ${filePath}. Expected ${AUTH_TAG_LENGTH}, got ${authTag.length}.`);
+        return null;
+    }
+
+    const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, derivedKey, iv);
+    decipher.setAuthTag(authTag);
     
-    // Placeholder for actual decryption:
-    // const decryptedJson = await decrypt(fileContent, installationCode, perInstallSeed);
-    console.log(`[StorageService] Placeholder: Would decrypt data from ${filename} using installation code.`);
+    let decryptedJson = decipher.update(encryptedData);
+    decryptedJson = Buffer.concat([decryptedJson, decipher.final()]);
     
-    const data = JSON.parse(fileContent); // Assuming fileContent is the already decrypted JSON string for now
-    console.log(`[StorageService] Data successfully loaded from ${filePath}`);
+    const data = JSON.parse(decryptedJson.toString('utf8'));
+    console.log(`[StorageService] Data successfully loaded and decrypted from ${filePath}`);
     return data;
   } catch (error) {
-    // Differentiate between parse error and other errors
+    console.error(`[StorageService] Error loading or decrypting data from ${filePath}:`, error);
+    // Common errors:
+    // - "Unsupported state or unable to authenticate" (if authTag is wrong / key is wrong / data tampered)
+    // - SyntaxError if JSON.parse fails
     if (error instanceof SyntaxError) {
-        console.error(`[StorageService] Error parsing JSON from ${filePath}:`, error);
-        // Optionally, handle corrupted files, e.g., by backing them up and returning null
-        // For now, re-throw as a more specific error or return null
-        const baseMessage = `Storage Error: Failed to parse JSON from ${filename}.`;
+        const baseMessage = `Storage Error: Failed to parse JSON from decrypted content of ${filename}.`;
         const detailedMessage = `${baseMessage} Reason: ${error.message}`;
-        throw new Error(detailedMessage);
+        // Potentially re-throw or return null depending on how critical this is
+        console.error(detailedMessage); // Keep logging
+        return null; // Or throw new Error(detailedMessage) if you want loadPanelSettings to handle it differently
     }
-    console.error(`[StorageService] Error loading data from ${filePath}:`, error);
-    const baseMessage = `Storage Error: Failed to load data from ${filename}.`;
-    const detailedMessage = error instanceof Error ? `${baseMessage} Reason: ${error.message}` : baseMessage;
-    throw new Error(detailedMessage);
+    // For other errors (like GCM auth failure), returning null is a safe default
+    return null;
   }
 }
