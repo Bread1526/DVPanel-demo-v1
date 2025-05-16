@@ -531,15 +531,15 @@ const sidebarMenuButtonVariants = cva(
 )
 
 interface SidebarMenuButtonProps
-  extends React.AnchorHTMLAttributes<HTMLAnchorElement>, // Changed from ButtonHTMLAttributes
+  extends React.HTMLAttributes<HTMLSpanElement>, // Changed to HTMLSpanElement
     VariantProps<typeof sidebarMenuButtonVariants> {
   isActive?: boolean;
-  // `asChild` prop is explicitly handled and removed before spreading to the DOM element
-  asChild?: boolean;
+  href?: string; // Will be ignored
+  asChild?: boolean; // Will be ignored
 }
 
 const SidebarMenuButton = React.forwardRef<
-  HTMLAnchorElement, // Changed to HTMLAnchorElement
+  HTMLSpanElement, // Changed to HTMLSpanElement
   SidebarMenuButtonProps
 >(
   (
@@ -549,22 +549,26 @@ const SidebarMenuButton = React.forwardRef<
       size,
       isActive,
       children,
-      asChild: _asChild, // Destructure asChild to prevent it from being spread
-      ...otherProps // these props (like href, onClick from Link) will be spread
+      href: _ignoredHref,         // Explicitly capture and ignore href
+      asChild: _ignoredAsChild,   // Explicitly capture and ignore asChild
+      ...otherProps // Spread only valid span attributes + onClick from Link's <a>
     },
     ref
   ) => {
+    // Render a span, styled like a button. The parent <a> from Link handles navigation.
     return (
-      <a // Renders an <a> tag
+      <span // Changed to span
         ref={ref}
         data-sidebar="menu-button"
         data-size={size}
         data-active={String(isActive)}
-        className={cn(sidebarMenuButtonVariants({ variant, size, className }))}
-        {...otherProps} // href, onClick, etc., are passed here
+        className={cn(sidebarMenuButtonVariants({ variant, size, className }), "cursor-pointer")} // Added cursor-pointer
+        role="button" // ARIA role
+        tabIndex={0}  // Make it focusable if it's interactive through parent Link
+        {...otherProps} 
       >
         {children}
-      </a>
+      </span>
     );
   }
 );
@@ -738,3 +742,5 @@ export {
   SidebarTrigger,
   useSidebar,
 }
+
+    
