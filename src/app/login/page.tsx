@@ -23,21 +23,19 @@ export default function LoginPage() {
   const redirectUrl = searchParams.get('redirect');
 
   useEffect(() => {
-    if (formState.status === "success") {
-      // Successful login is handled by server-side redirect in the action
-      // If client-side feedback is needed, it can be added here.
-      // For example, a toast could confirm redirection is happening,
-      // but usually, the redirect itself is sufficient.
-      // toast({ title: "Login Success", description: "Redirecting..." });
-    } else if (formState.status === "error" && formState.message && !formState.errors?.username && !formState.errors?.password && !formState.errors?._form) {
-      // Show general error message if no field-specific or form-level errors
-      toast({
-        title: "Login Failed",
-        description: formState.message || "An unknown error occurred.",
-        variant: "destructive",
-      });
+    // Successful login is handled by server-side redirect in the action.
+    // This useEffect primarily handles displaying error toasts from the action state.
+    if (formState.status === "error" && formState.message) {
+      // Only show a generic toast if there are no specific field errors or form-level errors displayed directly
+      if (!formState.errors?.username && !formState.errors?.password && !formState.errors?._form) {
+        toast({
+          title: "Login Failed",
+          description: formState.message,
+          variant: "destructive",
+        });
+      }
     }
-  }, [formState, toast, router, redirectUrl]);
+  }, [formState, toast]);
 
   return (
     <Card className="w-full max-w-md shadow-2xl rounded-xl">
@@ -95,3 +93,4 @@ export default function LoginPage() {
     </Card>
   );
 }
+
