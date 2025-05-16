@@ -72,6 +72,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               const menuButton = (
                 <SidebarMenuButton
                   isActive={isActive}
+                  variant="default"
+                  size="default" 
+                  // href and onClick will be passed by Link's <a> tag
                 >
                   <item.icon />
                   <span>{item.label}</span>
@@ -82,14 +85,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               );
               
               let navElement;
+              // Link with legacyBehavior renders its own <a>, SidebarMenuButton is a child (span)
+              // TooltipTrigger wraps the <a> rendered by Link.
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
                 navElement = (
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Link href={item.href} legacyBehavior passHref>
-                          {/* Link renders <a>, TooltipTrigger targets this <a>.
-                              SidebarMenuButton (span or button) is a child of Link's <a> */}
+                          {/* Link renders an <a>, menuButton is its child. */}
                           {menuButton}
                         </Link>
                       </TooltipTrigger>
@@ -102,14 +106,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               } else {
                 navElement = (
                   <Link href={item.href} legacyBehavior passHref>
-                    {/* Link renders <a>. SidebarMenuButton (span or button) is a child. */}
+                     {/* Link renders an <a>, menuButton is its child. */}
                     {menuButton}
                   </Link>
                 );
               }
 
               return (
-                <SidebarMenuItem key={item.label} suppressHydrationWarning={true}>
+                <SidebarMenuItem key={item.label}>
                   {navElement}
                 </SidebarMenuItem>
               );
@@ -156,6 +160,5 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </>
   );
 }
-    
 
     

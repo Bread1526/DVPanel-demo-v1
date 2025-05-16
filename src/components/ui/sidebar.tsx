@@ -534,8 +534,8 @@ interface SidebarMenuButtonProps
   extends React.HTMLAttributes<HTMLSpanElement>, // Changed to HTMLSpanElement
     VariantProps<typeof sidebarMenuButtonVariants> {
   isActive?: boolean;
-  href?: string; // Will be ignored
-  asChild?: boolean; // Will be ignored
+  href?: string; // Will be ignored by the span, but Link needs it
+  asChild?: boolean; // Will be ignored by the span
 }
 
 const SidebarMenuButton = React.forwardRef<
@@ -551,7 +551,7 @@ const SidebarMenuButton = React.forwardRef<
       children,
       href: _ignoredHref,         // Explicitly capture and ignore href
       asChild: _ignoredAsChild,   // Explicitly capture and ignore asChild
-      ...otherProps // Spread only valid span attributes + onClick from Link's <a>
+      ...otherProps // Should include onClick from Link's <a>
     },
     ref
   ) => {
@@ -562,7 +562,7 @@ const SidebarMenuButton = React.forwardRef<
         data-sidebar="menu-button"
         data-size={size}
         data-active={String(isActive)}
-        className={cn(sidebarMenuButtonVariants({ variant, size, className }), "cursor-pointer")} // Added cursor-pointer
+        className={cn(sidebarMenuButtonVariants({ variant, size, className }), "cursor-pointer")}
         role="button" // ARIA role
         tabIndex={0}  // Make it focusable if it's interactive through parent Link
         {...otherProps} 
