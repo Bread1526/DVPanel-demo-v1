@@ -1,6 +1,8 @@
+
 "use server";
 
 import { z } from 'zod';
+import { firestoreAdmin } from '@/lib/firebase/admin';
 
 const panelSettingsSchema = z.object({
   panelPort: z.coerce.number().min(1024).max(65535),
@@ -20,6 +22,7 @@ export async function savePanelSettings(
   prevState: SavePanelSettingsState,
   formData: FormData
 ): Promise<SavePanelSettingsState> {
+
   const validatedFields = panelSettingsSchema.safeParse({
     panelPort: formData.get('panel-port'),
     panelIp: formData.get('panel-ip'),
@@ -27,31 +30,64 @@ export async function savePanelSettings(
 
   if (!validatedFields.success) {
     return {
-      message: "Validation failed.",
+      message: "Validation failed. Please check the input fields.",
       status: "error",
       errors: validatedFields.error.flatten().fieldErrors,
     };
   }
 
+  if (!firestoreAdmin) {
+    console.error("Firestore Admin is not initialized. Cannot save panel settings.");
+    return {
+      message: "Panel settings cannot be saved: Server configuration error (Firebase Admin).",
+      status: "error",
+    };
+  }
+
   const { panelPort, panelIp } = validatedFields.data;
+  const configurationsCollection = firestoreAdmin.collection('dvPanelConfigurations');
+  let panelIdToSave = 0;
+  const MAX_PANEL_ID_CHECK = 100; // Limit to prevent infinite loops
 
-  console.log("Attempting to save Panel Settings:");
-  console.log("Panel Port:", panelPort);
-  console.log("Panel IP/Domain:", panelIp);
+  try {
+    for (let i = 1; i <= MAX_PANEL_ID_CHECK; i++) {
+      const docRef = configurationsCollection.doc(String(i));
+      const docSnap = await docRef.get();
+      if (!docSnap.exists) {
+        panelIdToSave = i;
+        break;
+      }
+    }
 
-  // In a real application, you would persist these settings here.
-  // For example, to a database or a configuration management system.
-  // For now, we are just logging them.
-  // Note: Modifying runtime environment variables or Next.js server config
-  // directly from an API like this is complex and generally not recommended
-  // without a proper infrastructure setup (e.g., a system that can restart
-  // the Next.js server with new env vars, or a reverse proxy that reads this config).
+    if (panelIdToSave === 0) {
+      // All IDs from 1 to MAX_PANEL_ID_CHECK are taken
+      console.error(`All panel configuration slots up to ${MAX_PANEL_ID_CHECK} are taken.`);
+      return {
+        message: `Failed to save settings: All configuration slots are currently in use. Please contact support.`,
+        status: "error",
+      };
+    }
 
-  // Simulate a save operation
-  await new Promise(resolve => setTimeout(resolve, 1000));
+    const timestamp = new Date().toISOString();
 
-  return {
-    message: `Panel settings (Port: ${panelPort}, IP: ${panelIp}) 'saved' (logged). Actual application of these settings requires infrastructure changes.`,
-    status: "success",
-  };
+    await configurationsCollection.doc(String(panelIdToSave)).set({
+      panelPort,
+      panelIp,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+
+    console.log(`Panel Settings saved to Firestore with ID ${panelIdToSave}: Port ${panelPort}, IP ${panelIp}`);
+    return {
+      message: `Panel settings (Port: ${panelPort}, IP: ${panelIp}) saved to Firebase with Panel ID ${panelIdToSave}.`,
+      status: "success",
+    };
+
+  } catch (error) {
+    console.error("Error saving panel settings to Firestore:", error);
+    return {
+      message: "Failed to save settings to database due to a server error. Please try again.",
+      status: "error",
+    };
+  }
 }
