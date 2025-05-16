@@ -31,6 +31,7 @@ import {
   KeyRound,
   BookUser
 } from "lucide-react";
+import { cn } from "@/lib/utils"; // Added import for cn
 
 const sitemapContent = (
   <div className="space-y-6 text-sm">
@@ -337,4 +338,3 @@ export default function InfoPage() {
     </div>
   );
 }
-
