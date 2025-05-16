@@ -2,7 +2,7 @@
 "use server";
 
 import { z } from "zod";
-import { saveEncryptedData, loadEncryptedData } from "@/services/storageService";
+import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storageService"; // Updated import path
 
 const panelSettingsSchema = z.object({
   panelPort: z
@@ -16,10 +16,10 @@ const panelSettingsSchema = z.object({
   panelIp: z
     .string()
     .optional()
+    .transform(e => e === "" ? undefined : e) // Transform empty string to undefined for optional validation
     .refine(
       (val) =>
-        val === "" ||
-        val === undefined ||
+        val === undefined || // Allow undefined (empty input)
         /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(
           val
         ) ||
@@ -33,7 +33,7 @@ const panelSettingsSchema = z.object({
 
 export interface PanelSettingsData {
   panelPort: string;
-  panelIp: string;
+  panelIp: string; // Stored as empty string if user leaves it blank
 }
 
 export interface SavePanelSettingsState {
@@ -82,17 +82,17 @@ export async function savePanelSettings(
   try {
     await saveEncryptedData(SETTINGS_FILENAME, dataToSave);
     return {
-      message: "Panel settings saved successfully!",
+      message: "Panel settings saved successfully to local file!",
       status: "success",
       data: dataToSave,
     };
   } catch (error) {
     console.error("Error saving panel settings:", error);
+    const errorMessage = error instanceof Error ? error.message : "An unknown error occurred while saving settings.";
     return {
-      message:
-        error instanceof Error ? error.message : "An unknown error occurred while saving settings.",
+      message: `Failed to save settings: ${errorMessage}`,
       status: "error",
-      errors: { general: "Failed to save settings to local file." },
+      errors: { general: `Storage Error: ${errorMessage}` },
     };
   }
 }
@@ -108,14 +108,14 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
           status: "success",
           data: {
             panelPort: (loadedData as PanelSettingsData).panelPort,
-            panelIp: (loadedData as PanelSettingsData).panelIp || "",
+            panelIp: (loadedData as PanelSettingsData).panelIp || "", // Ensure empty string if undefined/null
           },
         };
       } else {
         console.warn("Loaded settings file has incorrect format:", loadedData);
         return {
           status: "error",
-          message: "Settings file has an invalid format.",
+          message: "Settings file has an invalid format. Please save valid settings.",
         };
       }
     } else {
@@ -126,10 +126,10 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
     }
   } catch (error) {
     console.error("Error loading panel settings:", error);
+    const errorMessage = error instanceof Error ? error.message : "An unknown error occurred while loading settings.";
     return {
       status: "error",
-      message:
-        error instanceof Error ? error.message : "An unknown error occurred while loading settings.",
+      message: `Failed to load settings: ${errorMessage}`,
     };
   }
 }
