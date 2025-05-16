@@ -5,8 +5,8 @@ import './globals.css';
 import { cn } from '@/lib/utils';
 import { Toaster } from '@/components/ui/toaster';
 import { ThemeProvider } from '@/components/theme-provider';
-// AppShell and SidebarProvider are no longer managed here directly for all routes.
-// They are handled by src/app/(app)/layout.tsx for authenticated routes.
+import AppShell from '@/components/layout/app-shell'; // Import AppShell
+import { SidebarProvider } from '@/components/ui/sidebar'; // Import SidebarProvider
 
 const inter = Inter({
   subsets: ['latin'],
@@ -23,6 +23,7 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // AppShell is now rendered globally for all routes.
   return (
     <html lang="en" suppressHydrationWarning>
       <body
@@ -37,7 +38,9 @@ export default function RootLayout({
           enableSystem={false}
           disableTransitionOnChange
         >
-          {children} {/* Children will be either LoginLayout or the output of (app)/layout.tsx */}
+          <SidebarProvider defaultOpen>
+            <AppShell>{children}</AppShell>
+          </SidebarProvider>
           <Toaster />
         </ThemeProvider>
       </body>
