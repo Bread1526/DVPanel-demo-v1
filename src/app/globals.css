@@ -1,3 +1,4 @@
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -43,6 +44,8 @@ body {
     --sidebar-accent-foreground: 0 0% 100%;
     --sidebar-border: 220 13% 88%;
     --sidebar-ring: 217 91% 55%;
+
+    --toast-duration: 5s; /* Variable for toast duration */
   }
 
   .dark {
@@ -60,7 +63,7 @@ body {
     --muted-foreground: 220 10% 55%; /* Muted text for dark */
     --accent: 262 83% 58%; /* #7c3aed violet */
     --accent-foreground: 260 80% 95%; /* Light text on accent */
-    --destructive: 0 84.2% 60.2%; /* #EF4444 red error - UPDATED */
+    --destructive: 0 84.2% 60.2%; /* #EF4444 red error - This matches the vision doc */
     --destructive-foreground: 0 0% 98%;
     --border: 222 47% 22%; /* Dark border */
     --input: 222 47% 22%; /* Dark input */
@@ -89,5 +92,27 @@ body {
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Toast Timer Bar Styles */
+@layer components {
+  .toast-timer-bar {
+    @apply absolute bottom-0 left-0 h-1 rounded-bl-md rounded-br-md bg-primary;
+    animation: shrink-width var(--toast-duration) linear forwards;
+  }
+  
+  /* Specific timer bar color for destructive toasts */
+  .destructive .toast-timer-bar {
+     @apply bg-destructive-foreground; /* Or another contrasting color for destructive toasts */
+  }
+}
+
+@keyframes shrink-width {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
   }
 }

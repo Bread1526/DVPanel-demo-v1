@@ -3,6 +3,9 @@
 
 import { z } from "zod";
 import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storageService";
+import { getDataPath } from "@/backend/lib/config";
+import path from "path";
+
 
 const panelSettingsSchema = z.object({
   panelPort: z
@@ -56,7 +59,7 @@ export interface LoadPanelSettingsState {
   data?: PanelSettingsData;
 }
 
-const SETTINGS_FILENAME = ".settings.json"; // Changed to start with a dot for convention
+const SETTINGS_FILENAME = "settings.json"; // Kept it simple without the dot
 
 export async function savePanelSettings(
   prevState: SavePanelSettingsState,
@@ -65,7 +68,7 @@ export async function savePanelSettings(
   const rawFormData = {
     panelPort: formData.get("panel-port") as string,
     panelIp: formData.get("panel-ip") as string,
-    debugMode: formData.get("debug-mode") === "on", // Switch value is 'on' or null
+    debugMode: formData.get("debug-mode") === "on",
   };
 
   const validatedFields = panelSettingsSchema.safeParse(rawFormData);
@@ -80,14 +83,19 @@ export async function savePanelSettings(
 
   const dataToSave: PanelSettingsData = {
     panelPort: validatedFields.data.panelPort,
-    panelIp: validatedFields.data.panelIp || "", // Ensure empty string if undefined
+    panelIp: validatedFields.data.panelIp || "", 
     debugMode: validatedFields.data.debugMode,
   };
 
   try {
     await saveEncryptedData(SETTINGS_FILENAME, dataToSave);
+    const dataPath = getDataPath();
+    const fullPath = path.join(dataPath, SETTINGS_FILENAME);
+    
     return {
-      message: `Panel settings saved successfully${dataToSave.debugMode ? ` to ${SETTINGS_FILENAME}` : ''}!`,
+      message: dataToSave.debugMode 
+                 ? `Panel settings saved successfully to ${fullPath}!` 
+                 : 'Panel settings saved successfully!',
       status: "success",
       data: dataToSave,
     };
@@ -106,7 +114,6 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
   try {
     const loadedData = await loadEncryptedData(SETTINGS_FILENAME);
     if (loadedData) {
-      // Basic validation of loaded data structure
       const parsedData = panelSettingsSchema.safeParse(loadedData);
       if (parsedData.success) {
         return {
@@ -119,14 +126,13 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
         };
       } else {
          console.warn("Loaded settings file has incorrect format or missing fields, applying defaults:", parsedData.error.flatten().fieldErrors);
-        // Attempt to load with defaults for missing fields
         return {
-          status: "success", // Still success, but inform user or use defaults
+          status: "success", 
           message: "Settings file has an invalid format or missing fields. Defaults applied for some settings.",
           data: {
             panelPort: (loadedData as any).panelPort || "27407",
             panelIp: (loadedData as any).panelIp || "",
-            debugMode: (loadedData as any).debugMode === true, // Ensure boolean
+            debugMode: (loadedData as any).debugMode === true, 
           },
         };
       }
@@ -134,7 +140,6 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
       return {
         status: "not_found",
         message: "No existing settings file found. Defaults will be used.",
-        // Provide default data structure for a new setup
         data: { panelPort: "27407", panelIp: "", debugMode: false },
       };
     }
@@ -144,7 +149,7 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
     return {
       status: "error",
       message: `Failed to load settings: ${errorMessage}`,
-       data: { panelPort: "27407", panelIp: "", debugMode: false }, // Provide defaults on error too
+       data: { panelPort: "27407", panelIp: "", debugMode: false }, 
     };
   }
 }
