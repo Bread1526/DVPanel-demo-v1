@@ -7,7 +7,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { X, Copy } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { Button } from "./button" // For the copy button
+import { Button } from "./button" 
 
 const ToastProvider = ToastPrimitives.Provider
 
@@ -47,15 +47,28 @@ const Toast = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof ToastPrimitives.Root> &
     VariantProps<typeof toastVariants> & {
       errorContent?: string
-      // enableCopyError prop to be sourced from settings, passed by Toaster
-      // disableAutoClose prop to be sourced from settings, passed by Toaster
     }
 >(({ className, variant, children, errorContent, duration, ...props }, ref) => {
-  const [showTimerBar, setShowTimerBar] = React.useState(duration !== Infinity && duration !== undefined);
+  
+  // console.log('[Toast.tsx] Received duration for Radix Root:', duration, 'ErrorContent:', errorContent);
 
-  React.useEffect(() => {
-    setShowTimerBar(duration !== Infinity && duration !== undefined);
-  }, [duration]);
+  let timerBarVisible = false;
+  let cssAnimationDuration = '0s';
+  const PROVIDER_DEFAULT_DURATION_MS = 5000; // Default duration set in ToastProvider
+
+  if (duration === Infinity) {
+    timerBarVisible = false; // No timer bar if auto-close is disabled
+  } else if (typeof duration === 'number') {
+    timerBarVisible = true;
+    cssAnimationDuration = `${duration / 1000}s`;
+  } else { 
+    // Duration is undefined, Radix will use ToastProvider's default for closing.
+    // So, timer bar animation should match that.
+    timerBarVisible = true;
+    cssAnimationDuration = `${PROVIDER_DEFAULT_DURATION_MS / 1000}s`;
+  }
+  
+  const enableCopyErrorFromSettings = props["data-enable-copy-error"] === "true";
 
   const handleCopy = () => {
     if (errorContent) {
@@ -67,32 +80,27 @@ const Toast = React.forwardRef<
       });
     }
   };
-  
-  // Placeholder: These would ideally come from settings context or props
-  const enableCopyErrorFromSettings = props["data-enable-copy-error"] === "true"; 
-  const actualDuration = typeof duration === 'number' && duration !== Infinity ? `${duration / 1000}s` : '0s';
-
 
   return (
     <ToastPrimitives.Root
       ref={ref}
       className={cn(toastVariants({ variant }), className)}
-      duration={duration} 
+      duration={duration} // This prop tells Radix UI when to auto-close
       {...props}
-      style={{ '--toast-actual-duration': actualDuration } as React.CSSProperties}
+      style={{ '--toast-actual-duration': cssAnimationDuration } as React.CSSProperties}
     >
       <div className="flex-grow">{children}</div>
       {enableCopyErrorFromSettings && errorContent && variant === "destructive" && (
         <Button
           variant="ghost"
           size="sm"
-          className="absolute right-8 top-1/2 -translate-y-1/2 group-[.destructive]:text-destructive-foreground group-[.destructive]:hover:bg-destructive/80"
+          className="absolute right-10 top-1/2 -translate-y-1/2 group-[.destructive]:text-destructive-foreground group-[.destructive]:hover:bg-destructive/80 p-1 h-auto"
           onClick={handleCopy}
         >
-          <Copy className="mr-1 h-4 w-4" /> Copy
+          <Copy className="mr-1 h-3 w-3" /> Copy
         </Button>
       )}
-      {showTimerBar && <div className="toast-timer-bar" />}
+      {timerBarVisible && <div className="toast-timer-bar" />}
     </ToastPrimitives.Root>
   )
 })
@@ -157,8 +165,6 @@ ToastDescription.displayName = ToastPrimitives.Description.displayName
 
 type ToastProps = React.ComponentPropsWithoutRef<typeof Toast> & {
   errorContent?: string;
-  // enableCopyError?: boolean; // Passed via data attribute for now
-  // disableAutoClose?: boolean; // Handled by duration=Infinity
 };
 
 type ToastActionElement = React.ReactElement<typeof ToastAction>
