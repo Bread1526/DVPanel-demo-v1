@@ -6,11 +6,11 @@ import { getIronSession } from 'iron-session';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { sessionOptions, type SessionData } from '@/lib/session';
-import { loadUsers, verifyPassword, hashPassword, type UserData } from '@/app/(app)/roles/actions'; // Adjusted path
-import { saveEncryptedData } from "@/backend/services/storageService";
+import { loadUsers, verifyPassword, hashPassword, type UserData } from '@/app/(app)/roles/actions';
 import { getDataPath } from "@/backend/lib/config";
+import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storageService";
+import fs from 'fs';
 import path from 'path';
-import fs from 'fs'; // For checking owner file existence, can be fs.promises too
 
 const LoginSchema = z.object({
   username: z.string().min(1, "Username is required."),
@@ -24,14 +24,35 @@ export interface LoginState {
   errors?: Partial<Record<keyof z.infer<typeof LoginSchema> | "_form", string[]>>;
 }
 
-async function ensureOwnerFile(ownerUsername: string, ownerPasswordEnv: string) {
+async function ensureOwnerFileOnLogin(ownerUsername: string, ownerPasswordEnv: string) {
+  console.log(`[LoginAction - ensureOwnerFileOnLogin] Starting for owner: ${ownerUsername}`);
   try {
     const dataPath = getDataPath();
     const ownerFilename = `${ownerUsername}-Owner.json`;
     const ownerFilePath = path.join(dataPath, ownerFilename);
+    console.log(`[LoginAction - ensureOwnerFileOnLogin] Target owner file path: ${ownerFilePath}`);
 
     const { hash, salt } = await hashPassword(ownerPasswordEnv);
+    console.log(`[LoginAction - ensureOwnerFileOnLogin] Password hashed for owner.`);
     const now = new Date().toISOString();
+
+    let createdAt = now;
+    if (fs.existsSync(ownerFilePath)) {
+      console.log(`[LoginAction - ensureOwnerFileOnLogin] Owner file ${ownerFilename} exists. Attempting to load to preserve createdAt.`);
+      try {
+        const existingOwnerData = await loadEncryptedData(ownerFilename);
+        if (existingOwnerData && typeof (existingOwnerData as UserData).createdAt === 'string') {
+          createdAt = (existingOwnerData as UserData).createdAt;
+          console.log(`[LoginAction - ensureOwnerFileOnLogin] Preserving createdAt: ${createdAt}`);
+        } else {
+          console.warn(`[LoginAction - ensureOwnerFileOnLogin] Could not find valid createdAt in existing owner file or file empty/corrupt.`);
+        }
+      } catch (loadErr) {
+        console.warn(`[LoginAction - ensureOwnerFileOnLogin] Error loading existing owner file ${ownerFilename} to preserve createdAt:`, loadErr);
+      }
+    } else {
+      console.log(`[LoginAction - ensureOwnerFileOnLogin] Owner file ${ownerFilename} does not exist. Will create new.`);
+    }
 
     const ownerUserData: UserData = {
       id: 'owner_root',
@@ -39,20 +60,29 @@ async function ensureOwnerFile(ownerUsername: string, ownerPasswordEnv: string) 
       hashedPassword: hash,
       salt: salt,
       role: 'Owner',
-      projects: [], // Owner has implicit full access, this is for schema compliance
-      assignedPages: [], // Owner has implicit full access
-      allowedSettingsPages: [], // Owner has implicit full access
+      projects: [],
+      assignedPages: [],
+      allowedSettingsPages: [],
       lastLogin: now,
       status: "Active",
-      createdAt: fs.existsSync(ownerFilePath) ? (await loadUsers({ status: "success", users: [] })).users?.find(u => u.id === 'owner_root')?.createdAt || now : now,
+      createdAt: createdAt,
       updatedAt: now,
     };
+    
+    console.log(`[LoginAction - ensureOwnerFileOnLogin] Owner user data prepared:`, { username: ownerUserData.username, role: ownerUserData.role, id: ownerUserData.id });
     await saveEncryptedData(ownerFilename, ownerUserData);
-    console.log(`[LoginAction] Ensured/Updated owner file: ${ownerFilename}`);
+    console.log(`[LoginAction - ensureOwnerFileOnLogin] Successfully called saveEncryptedData for ${ownerFilename}.`);
+    
+    // Verify file existence immediately after save attempt
+    if (fs.existsSync(ownerFilePath)) {
+        console.log(`[LoginAction - ensureOwnerFileOnLogin] VERIFIED: Owner file ${ownerFilename} exists at ${ownerFilePath} after save.`);
+    } else {
+        console.error(`[LoginAction - ensureOwnerFileOnLogin] CRITICAL VERIFICATION FAILURE: Owner file ${ownerFilename} DOES NOT EXIST at ${ownerFilePath} even after saveEncryptedData call. Check storageService or permissions.`);
+    }
+
   } catch (e) {
-    console.error("[LoginAction] CRITICAL: Failed to create/update owner user file:", e);
-    // Depending on policy, you might want to prevent login or just log this.
-    // For now, it will log and continue, relying on .env for auth.
+    console.error("[LoginAction - ensureOwnerFileOnLogin] CRITICAL: Failed to create/update owner user file:", e);
+    throw e; // Propagate error to be caught by the main login try-catch
   }
 }
 
@@ -63,10 +93,12 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     password: formData.get("password") as string,
     redirectUrl: formData.get("redirectUrl") as string | undefined,
   };
+  console.log("[LoginAction] Received form data:", rawFormData);
 
   const validatedFields = LoginSchema.safeParse(rawFormData);
 
   if (!validatedFields.success) {
+    console.error("[LoginAction] Validation failed:", validatedFields.error.flatten().fieldErrors);
     return {
       message: "Validation failed.",
       status: "error",
@@ -84,10 +116,19 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
 
     if (ownerUsernameEnv && ownerPasswordEnv) {
       if (username === ownerUsernameEnv && password === ownerPasswordEnv) {
-        console.log("[LoginAction] Owner login successful for:", ownerUsernameEnv);
+        console.log("[LoginAction] Owner .env credentials match for:", ownerUsernameEnv);
         
-        // Ensure owner file exists and is up-to-date with .env password (hashed)
-        await ensureOwnerFile(ownerUsernameEnv, ownerPasswordEnv);
+        try {
+          await ensureOwnerFileOnLogin(ownerUsernameEnv, ownerPasswordEnv);
+          console.log("[LoginAction] Owner file ensured/updated successfully by ensureOwnerFileOnLogin.");
+        } catch (ownerFileError) {
+            // Log the error but still proceed with login if .env credentials are valid.
+            // This makes the system resilient if file operations fail but owner access is critical.
+            console.error("[LoginAction] Error during owner file creation/update, but proceeding with owner login as .env credentials matched:", ownerFileError);
+            // Depending on policy, you might want to return an error state if owner file creation is absolutely mandatory
+            // For example:
+            // return { message: "Owner account setup failed due to file system error. Please check server logs.", status: "error" };
+        }
 
         session.user = {
           id: 'owner_root',
@@ -96,27 +137,28 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
         };
         session.isLoggedIn = true;
         await session.save();
+        console.log("[LoginAction] Owner session saved.");
         
         const destination = redirectUrl || '/';
-        redirect(destination);
+        console.log(`[LoginAction] Redirecting owner to: ${destination}`);
+        redirect(destination); // This will throw a NEXT_REDIRECT error, caught below
       }
     } else {
-      console.warn("[LoginAction] OWNER_USERNAME or OWNER_PASSWORD is not set in .env.local. The .env owner login path is disabled if no owner file exists.");
+      console.warn("[LoginAction] OWNER_USERNAME or OWNER_PASSWORD is not set in .env.local. The .env owner login path is disabled if no owner file exists yet through normal user creation (which is not the case for .env owner).");
     }
 
-    // If not .env owner or .env owner login failed, check other users
     console.log("[LoginAction] Attempting login for regular user:", username);
-    const usersResult = await loadUsers(); // This now loads from individual files
+    const usersResult = await loadUsers();
 
     if (usersResult.status !== 'success' || !usersResult.users) {
-      console.error("[LoginAction] Error loading user data:", usersResult.error);
+      console.error("[LoginAction] Error loading user data for regular users:", usersResult.error);
       return { message: "System error: Could not load user data. Please try again later or contact support.", status: "error" };
     }
     
-    const user = usersResult.users.find(u => u.username === username && u.id !== 'owner_root'); // Exclude owner_root if found by file scan
+    const user = usersResult.users.find(u => u.username === username && u.id !== 'owner_root');
 
     if (!user) {
-      console.log("[LoginAction] User not found or is owner (handled above):", username);
+      console.log("[LoginAction] Regular user not found or is owner (handled above):", username);
       return { message: "Invalid username or password.", status: "error" };
     }
     
@@ -127,10 +169,11 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
 
     const isPasswordValid = await verifyPassword(password, user.hashedPassword, user.salt);
     if (!isPasswordValid) {
-      console.log("[LoginAction] Invalid password for user:", username);
+      console.log("[LoginAction] Invalid password for regular user:", username);
       return { message: "Invalid username or password.", status: "error" };
     }
 
+    console.log(`[LoginAction] Regular user login successful for: ${username}`);
     session.user = {
       id: user.id,
       username: user.username,
@@ -138,15 +181,18 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     };
     session.isLoggedIn = true;
     await session.save();
+    console.log("[LoginAction] Regular user session saved.");
     
     const destination = redirectUrl || '/';
+    console.log(`[LoginAction] Redirecting regular user to: ${destination}`);
     redirect(destination);
 
   } catch (error: any) {
     if (error.digest?.startsWith('NEXT_REDIRECT')) {
+      // This is an expected error when redirect() is called, so re-throw it.
       throw error;
     }
     console.error("[LoginAction] Unexpected login error:", error);
-    return { message: "An unexpected error occurred during login. Please try again.", status: "error" };
+    return { message: `An unexpected error occurred during login: ${error.message || 'Unknown error'}. Please try again.`, status: "error" };
   }
 }

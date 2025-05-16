@@ -58,23 +58,24 @@ export async function saveEncryptedData(filename: string, data: object): Promise
   const derivedKey = getDerivedKey();
   const dataPath = getDataPath();
   const filePath = path.join(dataPath, filename);
+  console.log(`[StorageService - saveEncryptedData] Attempting to save to: ${filePath}`);
 
   try {
     const iv = crypto.randomBytes(IV_LENGTH);
     const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, derivedKey, iv);
     
     const jsonData = JSON.stringify(data);
-    let encryptedData = cipher.update(jsonData, 'utf8');
-    encryptedData = Buffer.concat([encryptedData, cipher.final()]);
+    let encryptedDataBuffer = cipher.update(jsonData, 'utf8');
+    encryptedDataBuffer = Buffer.concat([encryptedDataBuffer, cipher.final()]);
     const authTag = cipher.getAuthTag();
 
     // Store as iv:authTag:encryptedData (all hex encoded)
-    const fileContent = `${iv.toString('hex')}:${authTag.toString('hex')}:${encryptedData.toString('hex')}`;
+    const fileContent = `${iv.toString('hex')}:${authTag.toString('hex')}:${encryptedDataBuffer.toString('hex')}`;
     
     fs.writeFileSync(filePath, fileContent, 'utf8');
-    console.log(`[StorageService] Data successfully encrypted and saved to ${filePath}`);
+    console.log(`[StorageService - saveEncryptedData] Data successfully encrypted and saved to ${filePath}`);
   } catch (error) {
-    console.error(`[StorageService] Error saving or encrypting data to ${filePath}:`, error);
+    console.error(`[StorageService - saveEncryptedData] Error saving or encrypting data to ${filePath}:`, error);
     const baseMessage = `Storage Error: Failed to save data to ${filename}.`;
     const detailedMessage = error instanceof Error ? `${baseMessage} Reason: ${error.message}` : baseMessage;
     throw new Error(detailedMessage);
@@ -92,18 +93,20 @@ export async function loadEncryptedData(filename: string): Promise<object | null
   const derivedKey = getDerivedKey();
   const dataPath = getDataPath();
   const filePath = path.join(dataPath, filename);
+  console.log(`[StorageService - loadEncryptedData] Attempting to load from: ${filePath}`);
+
 
   try {
     if (!fs.existsSync(filePath)) {
-      console.log(`[StorageService] File not found: ${filePath}. Returning null.`);
+      console.log(`[StorageService - loadEncryptedData] File not found: ${filePath}. Returning null.`);
       return null;
     }
 
     const fileContent = fs.readFileSync(filePath, 'utf8');
     const parts = fileContent.split(':');
     if (parts.length !== 3) {
-      console.error(`[StorageService] Invalid encrypted file format: ${filePath}. Expected 3 parts, got ${parts.length}.`);
-      return null; // Or throw a more specific error
+      console.error(`[StorageService - loadEncryptedData] Invalid encrypted file format: ${filePath}. Expected 3 parts, got ${parts.length}.`);
+      return null; 
     }
 
     const iv = Buffer.from(parts[0], 'hex');
@@ -111,36 +114,32 @@ export async function loadEncryptedData(filename: string): Promise<object | null
     const encryptedData = Buffer.from(parts[2], 'hex');
 
     if (iv.length !== IV_LENGTH) {
-        console.error(`[StorageService] Invalid IV length in ${filePath}. Expected ${IV_LENGTH}, got ${iv.length}.`);
+        console.error(`[StorageService - loadEncryptedData] Invalid IV length in ${filePath}. Expected ${IV_LENGTH}, got ${iv.length}.`);
         return null;
     }
      if (authTag.length !== AUTH_TAG_LENGTH) {
-        console.error(`[StorageService] Invalid authTag length in ${filePath}. Expected ${AUTH_TAG_LENGTH}, got ${authTag.length}.`);
+        console.error(`[StorageService - loadEncryptedData] Invalid authTag length in ${filePath}. Expected ${AUTH_TAG_LENGTH}, got ${authTag.length}.`);
         return null;
     }
 
     const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, derivedKey, iv);
     decipher.setAuthTag(authTag);
     
-    let decryptedJson = decipher.update(encryptedData);
-    decryptedJson = Buffer.concat([decryptedJson, decipher.final()]);
+    let decryptedJsonBuffer = decipher.update(encryptedData);
+    decryptedJsonBuffer = Buffer.concat([decryptedJsonBuffer, decipher.final()]);
     
-    const data = JSON.parse(decryptedJson.toString('utf8'));
-    console.log(`[StorageService] Data successfully loaded and decrypted from ${filePath}`);
+    const data = JSON.parse(decryptedJsonBuffer.toString('utf8'));
+    console.log(`[StorageService - loadEncryptedData] Data successfully loaded and decrypted from ${filePath}`);
     return data;
   } catch (error) {
-    console.error(`[StorageService] Error loading or decrypting data from ${filePath}:`, error);
-    // Common errors:
-    // - "Unsupported state or unable to authenticate" (if authTag is wrong / key is wrong / data tampered)
-    // - SyntaxError if JSON.parse fails
+    console.error(`[StorageService - loadEncryptedData] Error loading or decrypting data from ${filePath}:`, error);
     if (error instanceof SyntaxError) {
         const baseMessage = `Storage Error: Failed to parse JSON from decrypted content of ${filename}.`;
         const detailedMessage = `${baseMessage} Reason: ${error.message}`;
-        // Potentially re-throw or return null depending on how critical this is
-        console.error(detailedMessage); // Keep logging
-        return null; // Or throw new Error(detailedMessage) if you want loadPanelSettings to handle it differently
+        console.error(detailedMessage); 
+        return null; 
     }
-    // For other errors (like GCM auth failure), returning null is a safe default
     return null;
   }
 }
+
