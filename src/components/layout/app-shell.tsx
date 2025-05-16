@@ -39,7 +39,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'; // TooltipProvider is in SidebarProvider
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -69,10 +69,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {navItems.map((item) => {
               const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
               
-              const menuButton = (
+              // sidebarButtonElement is the <SidebarMenuButton> which now renders a <button>
+              const sidebarButtonElement = (
                 <SidebarMenuButton
-                  // href={item.href} // href is passed by Link
                   isActive={isActive}
+                  variant="default"
+                  size="default"
+                  // href and asChild are ignored by SidebarMenuButton but might be passed by Link or TooltipTrigger
                 >
                   <item.icon />
                   <span>{item.label}</span>
@@ -87,8 +90,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 navElement = (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Link href={item.href} asChild>
-                        {menuButton}
+                      {/* Link with legacyBehavior renders an <a>. TooltipTrigger asChild wraps this <a>. */}
+                      <Link href={item.href} legacyBehavior passHref>
+                        {/* SidebarMenuButton (as a <button>) is a child of Link's <a> */}
+                        {sidebarButtonElement}
                       </Link>
                     </TooltipTrigger>
                     <TooltipContent side="right" align="center">
@@ -98,8 +103,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 );
               } else {
                 navElement = (
-                  <Link href={item.href} asChild>
-                     {menuButton}
+                   // Link with legacyBehavior renders an <a>.
+                  <Link href={item.href} legacyBehavior passHref>
+                     {/* SidebarMenuButton (as a <button>) is a child of Link's <a> */}
+                    {sidebarButtonElement}
                   </Link>
                 );
               }
