@@ -18,6 +18,7 @@ import { getInstallationCode, getDataPath } from '@/backend/lib/config';
  */
 async function ensureDataDirectoryExists(): Promise<void> {
   const dataPath = getDataPath();
+  console.log(`[StorageService] Resolved data path: ${dataPath}`); // Added log
   if (!fs.existsSync(dataPath)) {
     try {
       fs.mkdirSync(dataPath, { recursive: true });
