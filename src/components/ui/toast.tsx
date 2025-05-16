@@ -69,7 +69,7 @@ const Toast = React.forwardRef<
   };
   
   // Placeholder: These would ideally come from settings context or props
-  const enableCopyErrorFromSettings = props["data-enable-copy-error"] === "true"; // Example of how it might be passed
+  const enableCopyErrorFromSettings = props["data-enable-copy-error"] === "true"; 
   const actualDuration = typeof duration === 'number' && duration !== Infinity ? `${duration / 1000}s` : '0s';
 
 
@@ -77,7 +77,7 @@ const Toast = React.forwardRef<
     <ToastPrimitives.Root
       ref={ref}
       className={cn(toastVariants({ variant }), className)}
-      duration={duration} // Pass duration to Radix
+      duration={duration} 
       {...props}
       style={{ '--toast-actual-duration': actualDuration } as React.CSSProperties}
     >
@@ -89,7 +89,7 @@ const Toast = React.forwardRef<
           className="absolute right-8 top-1/2 -translate-y-1/2 group-[.destructive]:text-destructive-foreground group-[.destructive]:hover:bg-destructive/80"
           onClick={handleCopy}
         >
-          <Copy className="h-4 w-4 mr-1" /> Copy
+          <Copy className="mr-1 h-4 w-4" /> Copy
         </Button>
       )}
       {showTimerBar && <div className="toast-timer-bar" />}
