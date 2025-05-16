@@ -277,12 +277,92 @@ const licenseAgreementContent = (
   </div>
 );
 
+const privacyPolicyContent = (
+  <div className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground">
+    <h2 className="text-xl font-semibold text-foreground">Privacy Policy</h2>
+    <p className="text-xs">Effective Date: [Insert Date]</p>
+    <p>Maintained by: DVPanel Team</p>
+    <p>Contact: admin@dvpanel.com</p>
+    <p>Website: https://dvpanel.com</p>
+    <p>GitHub: https://github.com/DVPanel</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">1. Overview</h3>
+    <p>DVPanel is a self-hosted control panel designed for secure, private server management. This Privacy Policy explains what data DVPanel collects, how it is used, and your rights regarding that data.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">2. What We Collect</h3>
+    <p>By design, DVPanel minimizes data collection. Here&apos;s what we do and do not collect:</p>
+    <h4 className="text-md font-semibold text-foreground mt-3">We DO NOT Collect:</h4>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>Personal data (e.g., names, emails, passwords) from DVPanel instances.</li>
+      <li>IP addresses, location data, or usage analytics.</li>
+      <li>File contents, terminal history, or logs from your servers.</li>
+    </ul>
+    <h4 className="text-md font-semibold text-foreground mt-3">We DO Collect (only if using Pro version):</h4>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>A non-identifying installation code (randomly generated).</li>
+      <li>Encrypted license verification requests (containing no sensitive or personal information).</li>
+      <li>Timestamps for license checks to prevent abuse or misuse.</li>
+    </ul>
+    <p>This data is stored securely and is never shared or sold.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">3. Local Metadata</h3>
+    <p>Each DVPanel instance creates and maintains local metadata files (JSON) which may include:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>Last start/stop/update timestamps</li>
+      <li>Number of projects created</li>
+      <li>Encrypted seed key (for Pro version)</li>
+      <li>Role and access logs (stored locally only)</li>
+    </ul>
+    <p>This information is stored entirely on your own server. DVPanel has no access to it.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">4. Cookies and Browser Storage</h3>
+    <p>DVPanel uses local storage (not cookies) to store:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>Last visited panel pages</li>
+      <li>Theme preferences (dark/light mode)</li>
+      <li>Local logs for session and owner activity</li>
+    </ul>
+    <p>This information is never transmitted externally and is only stored in your browser.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">5. Third-Party Services</h3>
+    <p>DVPanel does not integrate with third-party analytics, tracking, or advertising platforms. The only external connection is made optionally to DVPanel’s secure backend for Pro license verification.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">6. Security</h3>
+    <p>We implement the following privacy-focused security features:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>Encrypted webhook-based Pro validation system</li>
+      <li>Rate-limiting and anti-abuse protections</li>
+      <li>Optional IP and port whitelisting</li>
+      <li>No backend logging of sensitive user data</li>
+    </ul>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">7. Your Rights</h3>
+    <p>Since DVPanel is self-hosted:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>You own and control all your data.</li>
+      <li>You can modify, export, or delete any local data at any time.</li>
+      <li>DVPanel never stores any identifiable data that you need to request access to.</li>
+    </ul>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">8. Updates to This Policy</h3>
+    <p>We may update this Privacy Policy as needed. Any changes will be posted at dvpanel.com. Continued use of DVPanel implies acceptance of the current policy.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">9. Contact</h3>
+    <p>If you have questions about this policy, please contact us:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>Email: admin@dvpanel.com</li>
+      <li>Website: https://dvpanel.com</li>
+      <li>GitHub: https://github.com/DVPanel</li>
+    </ul>
+  </div>
+);
+
 
 const infoPageDialogs = [
   { label: "Sitemap", icon: ListTree, content: sitemapContent, title: "Application Sitemap" },
   { label: "Terms of Service", icon: FileDigit, content: termsOfServiceContent, title: "Terms of Service" },
   { label: "License", icon: KeyRound, content: licenseAgreementContent, title: "DVPanel License" },
-  { label: "Privacy Policy", icon: BookUser, content: "Privacy Policy details will be available here. DVPanel may collect anonymous usage data if telemetry is enabled (feature pending). No personal data is collected by default.", title: "Privacy Policy" },
+  { label: "Privacy Policy", icon: BookUser, content: privacyPolicyContent, title: "Privacy Policy" },
 ];
 
 export default function InfoPage() {
@@ -339,13 +419,13 @@ export default function InfoPage() {
                       {item.label}
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className={cn("rounded-2xl backdrop-blur-sm", item.label === "Sitemap" ? 'sm:max-w-2xl md:max-w-3xl lg:max-w-4xl' : 'sm:max-w-lg')}>
+                  <DialogContent className={cn("rounded-2xl backdrop-blur-sm", item.label === "Sitemap" ? 'sm:max-w-2xl md:max-w-3xl lg:max-w-4xl' : 'sm:max-w-lg md:max-w-2xl')}>
                     <DialogHeader>
                       <DialogTitle>{item.title || item.label}</DialogTitle>
                     </DialogHeader>
                     <div className="py-4 max-h-[70vh] overflow-y-auto">
                        {typeof item.content === 'string' 
-                        ? <p className="text-sm text-muted-foreground">{item.content}</p> 
+                        ? <div className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground"><p>{item.content}</p></div>
                         : item.content }
                     </div>
                     <DialogFooter>
@@ -425,3 +505,5 @@ export default function InfoPage() {
     </div>
   );
 }
+
+    
