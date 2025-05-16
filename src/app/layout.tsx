@@ -1,3 +1,4 @@
+
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
@@ -5,7 +6,8 @@ import { cn } from '@/lib/utils';
 import { Toaster } from '@/components/ui/toaster';
 import { ThemeProvider } from '@/components/theme-provider';
 import AppShell from '@/components/layout/app-shell';
-import { SidebarProvider } from '@/components/ui/sidebar'; // Import SidebarProvider
+import { SidebarProvider } from '@/components/ui/sidebar';
+import { headers } from 'next/headers'; // Import headers
 
 const inter = Inter({
   subsets: ['latin'],
@@ -22,6 +24,14 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const headersList = headers();
+  // next-url is a header automatically provided by Next.js in Server Components
+  const urlString = headersList.get('next-url') ?? '/'; 
+  // Provide a base URL for robustness in case urlString is just a pathname
+  const currentPath = new URL(urlString, 'http://localhost').pathname; 
+
+  const isLoginPage = currentPath === '/login';
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body
@@ -33,12 +43,16 @@ export default function RootLayout({
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"
-          enableSystem={false} 
+          enableSystem={false}
           disableTransitionOnChange
         >
-          <SidebarProvider defaultOpen> {/* Wrap AppShell with SidebarProvider */}
-            <AppShell>{children}</AppShell>
-          </SidebarProvider>
+          {isLoginPage ? (
+            children // For /login, render children directly without AppShell
+          ) : (
+            <SidebarProvider defaultOpen>
+              <AppShell>{children}</AppShell>
+            </SidebarProvider>
+          )}
           <Toaster />
         </ThemeProvider>
       </body>
