@@ -48,7 +48,7 @@ export async function saveEncryptedData(filename: string, data: object): Promise
     // Placeholder for actual encryption:
     // const encryptedData = await encrypt(JSON.stringify(data), installationCode, perInstallSeed);
     console.log(`[StorageService] Placeholder: Would encrypt data for ${filename} using installation code.`);
-    constjsonData = JSON.stringify(data, null, 2); // Pretty print JSON
+    const jsonData = JSON.stringify(data, null, 2); // Pretty print JSON
 
     fs.writeFileSync(filePath, jsonData, 'utf8');
     console.log(`[StorageService] Data successfully saved to ${filePath}`);
