@@ -37,9 +37,9 @@ export async function savePanelSettings(
   }
 
   if (!firestoreAdmin) {
-    console.error("Firestore Admin is not initialized. Cannot save panel settings.");
+    console.error("Firestore Admin is not initialized in src/lib/firebase/admin.ts. Cannot save panel settings.");
     return {
-      message: "Panel settings cannot be saved: Server configuration error (Firebase Admin).",
+      message: "Panel settings cannot be saved: Firebase Admin SDK is not initialized. Please check server logs for errors in 'src/lib/firebase/admin.ts' and ensure your FIREBASE_ADMIN_SERVICE_ACCOUNT in .env.local is correctly configured.",
       status: "error",
     };
   }
@@ -50,13 +50,17 @@ export async function savePanelSettings(
   const MAX_PANEL_ID_CHECK = 100; // Limit to prevent infinite loops
 
   try {
-    for (let i = 1; i <= MAX_PANEL_ID_CHECK; i++) {
-      const docRef = configurationsCollection.doc(String(i));
+    // Find the next available panel ID
+    // This is a simple approach; for high concurrency, a more robust solution might be needed (e.g., Firestore transaction or a dedicated counter document)
+    let currentId = 1;
+    while (currentId <= MAX_PANEL_ID_CHECK) {
+      const docRef = configurationsCollection.doc(String(currentId));
       const docSnap = await docRef.get();
       if (!docSnap.exists) {
-        panelIdToSave = i;
+        panelIdToSave = currentId;
         break;
       }
+      currentId++;
     }
 
     if (panelIdToSave === 0) {
