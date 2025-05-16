@@ -5,7 +5,7 @@ import React, { useState, useEffect } from 'react';
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import Image from 'next/image';
 import { 
   Info as InfoIcon, 
@@ -69,7 +69,7 @@ const sitemapContent = (
         </div>
         <div className="ml-4 pl-4 border-l-2 border-primary/30 space-y-2 py-2">
           {[
-            { name: 'Panel', path: '/settings', icon: SlidersHorizontal },
+            { name: 'Panel', path: '/settings', icon: SlidersHorizontal }, // Default settings route
             { name: 'Daemon', path: '/settings/daemon', icon: HardDrive },
             { name: 'Security', path: '/settings/security', icon: Shield },
             { name: 'Popups', path: '/settings/popups', icon: MessageSquareMore },
@@ -125,7 +125,7 @@ export default function InfoPage() {
     let intervalId: NodeJS.Timeout;
 
     const pingServer = async () => {
-      if (!isPinging) setIsPinging(true);
+      if (!isPinging && latency === null) setIsPinging(true); // Only set isPinging if not already pinging and latency is null
       const startTime = Date.now();
       try {
         const response = await fetch('/api/ping');
@@ -138,17 +138,20 @@ export default function InfoPage() {
       } catch (error) {
         setLatency(null);
       } finally {
-        if(isPinging && intervalId) setIsPinging(false); // Set to false after first successful or failed ping if interval is running
+        // Only set isPinging to false if it was true and there's an intervalId
+        // This prevents premature 'Unavailable' if the first ping fails quickly
+        if (isPinging && latency !== null && intervalId) setIsPinging(false);
       }
     };
 
-    pingServer(); // Initial ping
-    intervalId = setInterval(pingServer, 500); // Update every 0.5 seconds
+    pingServer(); 
+    intervalId = setInterval(pingServer, 500); 
 
     return () => {
       clearInterval(intervalId);
     };
-  }, []); // Removed isPinging from dependency array
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount
 
   return (
     <div>
@@ -170,13 +173,15 @@ export default function InfoPage() {
                       {item.label}
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="sm:max-w-lg rounded-2xl">
+                  <DialogContent className={`rounded-2xl backdrop-blur-sm ${item.label === "Sitemap" ? 'sm:max-w-2xl md:max-w-3xl lg:max-w-4xl' : 'sm:max-w-lg'}`}>
                     <DialogHeader>
                       <DialogTitle>{item.title || item.label}</DialogTitle>
                     </DialogHeader>
-                    <DialogDescription className="py-4 max-h-[70vh] overflow-y-auto">
-                      {typeof item.content === 'string' ? <p>{item.content}</p> : item.content}
-                    </DialogDescription>
+                    <div className="py-4 max-h-[70vh] overflow-y-auto">
+                      {typeof item.content === 'string' 
+                        ? <p className="text-sm text-muted-foreground">{item.content}</p> 
+                        : item.content /* This is the sitemap JSX */}
+                    </div>
                     <DialogFooter>
                       <DialogClose asChild>
                         <Button type="button" variant="secondary">Close</Button>
@@ -254,3 +259,4 @@ export default function InfoPage() {
     </div>
   );
 }
+
