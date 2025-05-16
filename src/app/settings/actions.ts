@@ -107,9 +107,12 @@ export async function savePanelSettings(
     }
   };
 
+  console.log("[SavePanelSettingsAction] Raw form data being validated:", rawFormData); // Added for diagnostics
+
   const validatedFields = panelSettingsSchema.safeParse(rawFormData);
 
   if (!validatedFields.success) {
+    console.error("[SavePanelSettingsAction] Validation failed:", validatedFields.error.flatten().fieldErrors);
     return {
       message: "Validation failed. Please check your input.",
       status: "error",
@@ -121,7 +124,7 @@ export async function savePanelSettings(
 
   try {
     await saveEncryptedData(SETTINGS_FILENAME, dataToSave);
-    const dataPath = getDataPath(); // Correctly call the function
+    const dataPath = getDataPath(); 
     const fullPath = path.join(dataPath, SETTINGS_FILENAME);
     
     return {
@@ -132,7 +135,7 @@ export async function savePanelSettings(
       data: dataToSave,
     };
   } catch (error) {
-    console.error("Error saving panel settings:", error);
+    console.error("[SavePanelSettingsAction] Error saving panel settings:", error);
     const errorMessage = error instanceof Error ? error.message : "An unknown error occurred while saving settings.";
     return {
       message: `Failed to save settings: ${errorMessage}`,
@@ -151,7 +154,6 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
         const dataWithEnsuredStringIp = {
           ...parsedData.data,
           panelIp: parsedData.data.panelIp || "",
-          // Ensure popup exists with defaults if somehow missing from loaded valid data
           popup: parsedData.data.popup || explicitDefaultPanelSettings.popup,
         };
         return {
@@ -159,28 +161,28 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
           data: dataWithEnsuredStringIp,
         };
       } else {
-        console.warn("Loaded settings file has incorrect format or missing fields. Applying full defaults:", parsedData.error.flatten().fieldErrors);
-        // If parsing fails, fall back to complete defaults by parsing our explicit default object
+        console.warn("[LoadPanelSettingsAction] Loaded settings file has incorrect format or missing fields. Applying full defaults:", parsedData.error.flatten().fieldErrors);
         const defaults = panelSettingsSchema.parse(explicitDefaultPanelSettings);
         return {
-          status: "success",
+          status: "success", // Still "success" as we are providing valid defaults
           message: "Settings file has an invalid format or missing fields. Full defaults applied.",
           data: defaults,
         };
       }
     } else {
       // If no file found, use complete defaults by parsing our explicit default object
+      console.log("[LoadPanelSettingsAction] No existing settings file found. Applying full defaults.");
       const defaults = panelSettingsSchema.parse(explicitDefaultPanelSettings);
       return {
-        status: "not_found",
+        status: "not_found", // Or "success" if we consider providing defaults a success
         message: "No existing settings file found. Defaults will be used.",
         data: defaults, 
       };
     }
   } catch (error) {
-    console.error("Error loading panel settings:", error);
+    console.error("[LoadPanelSettingsAction] Error loading panel settings:", error);
     const errorMessage = error instanceof Error ? error.message : "An unknown error occurred while loading settings.";
-    // If any other error occurs during load, use complete defaults by parsing our explicit default object
+    // If any other error occurs during load, use complete defaults
     const defaults = panelSettingsSchema.parse(explicitDefaultPanelSettings);
     return {
       status: "error",
@@ -189,3 +191,4 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
     };
   }
 }
+
