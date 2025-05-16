@@ -71,6 +71,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               
               const menuButton = (
                 <SidebarMenuButton
+                  // href={item.href} // href is passed by Link
                   isActive={isActive}
                 >
                   <item.icon />
@@ -81,24 +82,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 </SidebarMenuButton>
               );
 
-              let navElement = (
-                <Link href={item.href} legacyBehavior passHref>
-                  {menuButton}
-                </Link>
-              );
-              
+              let navElement;
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
-                return (
-                  <SidebarMenuItem key={item.label}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        {navElement}
-                      </TooltipTrigger>
-                      <TooltipContent side="right" align="center">
-                        {item.label}
-                      </TooltipContent>
-                    </Tooltip>
-                  </SidebarMenuItem>
+                navElement = (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Link href={item.href} asChild>
+                        {menuButton}
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" align="center">
+                      {item.label}
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              } else {
+                navElement = (
+                  <Link href={item.href} asChild>
+                     {menuButton}
+                  </Link>
                 );
               }
 
