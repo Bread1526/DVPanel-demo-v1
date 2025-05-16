@@ -41,9 +41,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'; 
 import { cn } from '@/lib/utils';
-import { useIsMobile } from '@/hooks/use-mobile';
 import { useEffect, useState } from 'react';
-import { logout } from '@/app/(app)/logout/actions'; // Adjusted import path for logout
+import { logout } from '@/app/(app)/logout/actions';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -109,18 +108,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <SidebarContent>
           <SidebarMenu>
             {navItems.map((item) => {
-              const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+              const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
               
               const menuButton = (
                 <SidebarMenuButton
                   isActive={isActive}
                   variant="default"
                   size="default"
-                  // href={item.href} // Removed as Link handles href
                 >
                   <item.icon />
                   <span className={cn(
-                    {"invisible group-data-[[data-state=collapsed]]:visible": sidebarState === 'collapsed' && !isMobile },
+                    {"invisible group-data-[[data-state=collapsed]]:visible": sidebarState === 'collapsed' && !isMobile }, // For tooltip to work on collapsed
                     {"group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile }
                   )}>
                     {item.label}
@@ -137,13 +135,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
               let linkWrappedButton = (
                 <Link href={item.href} legacyBehavior passHref>
-                  {/* SidebarMenuButton now renders a button/span, so Link legacyBehavior makes it navigable */}
                   {menuButton}
                 </Link>
               );
               
               let finalElement = linkWrappedButton;
 
+              // Only show tooltip if sidebar is collapsed AND it's not a mobile view
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
                  finalElement = (
                   <TooltipProvider>
