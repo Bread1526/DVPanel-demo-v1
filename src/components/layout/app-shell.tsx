@@ -69,23 +69,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {navItems.map((item) => {
               const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
               
-              const menuButton = (
-                <SidebarMenuButton
-                  isActive={isActive}
-                  variant="default"
-                  size="default" 
-                  // href and onClick will be passed by Link's <a> tag
-                >
+              const menuButtonContent = (
+                <>
                   <item.icon />
                   <span>{item.label}</span>
                   {item.count && (
                     <SidebarMenuBadge>{item.count}</SidebarMenuBadge>
                   )}
-                </SidebarMenuButton>
+                </>
               );
-              
+
               let navElement;
-              // Link with legacyBehavior renders its own <a>, SidebarMenuButton is a child (span)
+
+              // Link with legacyBehavior renders its own <a>.
+              // SidebarMenuButton (as a span) is a child of that <a>.
               // TooltipTrigger wraps the <a> rendered by Link.
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
                 navElement = (
@@ -93,8 +90,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Link href={item.href} legacyBehavior passHref>
-                          {/* Link renders an <a>, menuButton is its child. */}
-                          {menuButton}
+                          {/* Link renders an <a>, SidebarMenuButton is its child. */}
+                          <SidebarMenuButton isActive={isActive} variant="default" size="default">
+                            {menuButtonContent}
+                          </SidebarMenuButton>
                         </Link>
                       </TooltipTrigger>
                       <TooltipContent side="right" align="center">
@@ -106,8 +105,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               } else {
                 navElement = (
                   <Link href={item.href} legacyBehavior passHref>
-                     {/* Link renders an <a>, menuButton is its child. */}
-                    {menuButton}
+                     {/* Link renders an <a>, SidebarMenuButton is its child. */}
+                    <SidebarMenuButton isActive={isActive} variant="default" size="default">
+                      {menuButtonContent}
+                    </SidebarMenuButton>
                   </Link>
                 );
               }

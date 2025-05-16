@@ -531,15 +531,15 @@ const sidebarMenuButtonVariants = cva(
 )
 
 interface SidebarMenuButtonProps
-  extends React.HTMLAttributes<HTMLSpanElement>, // Changed to HTMLSpanElement
+  extends React.HTMLAttributes<HTMLSpanElement>, // Use HTMLSpanElement for a span
     VariantProps<typeof sidebarMenuButtonVariants> {
   isActive?: boolean;
-  href?: string; // Will be ignored by the span, but Link needs it
-  asChild?: boolean; // Will be ignored by the span
+  href?: string; // Keep for type consistency if Link passes it, but we'll ignore it
+  asChild?: boolean; // Keep for type consistency, but we'll ignore it
 }
 
 const SidebarMenuButton = React.forwardRef<
-  HTMLSpanElement, // Changed to HTMLSpanElement
+  HTMLSpanElement, // Ref type is HTMLSpanElement
   SidebarMenuButtonProps
 >(
   (
@@ -549,22 +549,22 @@ const SidebarMenuButton = React.forwardRef<
       size,
       isActive,
       children,
-      href: _ignoredHref,         // Explicitly capture and ignore href
-      asChild: _ignoredAsChild,   // Explicitly capture and ignore asChild
-      ...otherProps // Should include onClick from Link's <a>
+      href: _ignoredHref, // Explicitly destructure and ignore href
+      asChild: _ignoredAsChild, // Explicitly destructure and ignore asChild
+      ...otherProps 
     },
     ref
   ) => {
     // Render a span, styled like a button. The parent <a> from Link handles navigation.
     return (
-      <span // Changed to span
+      <span 
         ref={ref}
         data-sidebar="menu-button"
         data-size={size}
         data-active={String(isActive)}
         className={cn(sidebarMenuButtonVariants({ variant, size, className }), "cursor-pointer")}
-        role="button" // ARIA role
-        tabIndex={0}  // Make it focusable if it's interactive through parent Link
+        role="button" 
+        tabIndex={0} 
         {...otherProps} 
       >
         {children}
