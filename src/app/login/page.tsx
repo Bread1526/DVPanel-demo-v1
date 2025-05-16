@@ -9,11 +9,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Replace, AlertCircle, Loader2 } from 'lucide-react'; 
+import { Replace, AlertCircle, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { useSearchParams, useRouter } from 'next/navigation'; // Added useSearchParams here
+import { useSearchParams, useRouter } from 'next/navigation';
 
-const initialLoginState: LoginState = { message: "", status: "idle" };
+const initialLoginState: LoginState = { message: "", status: "idle", errors: {} };
 
 export default function LoginPage() {
   const [formState, formAction, isPending] = useActionState(login, initialLoginState);
@@ -24,11 +24,13 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (formState.status === "success") {
-      toast({ title: "Login Success", description: formState.message });
-      // Redirection is now handled by the server action itself using `redirect()`.
-      // If client-side redirect were needed as a fallback, it would be:
-      // router.push(redirectUrl || '/'); 
-    } else if (formState.status === "error" && formState.message) {
+      // Successful login is handled by server-side redirect in the action
+      // If client-side feedback is needed, it can be added here.
+      // For example, a toast could confirm redirection is happening,
+      // but usually, the redirect itself is sufficient.
+      // toast({ title: "Login Success", description: "Redirecting..." });
+    } else if (formState.status === "error" && formState.message && !formState.errors?.username && !formState.errors?.password && !formState.errors?._form) {
+      // Show general error message if no field-specific or form-level errors
       toast({
         title: "Login Failed",
         description: formState.message || "An unknown error occurred.",
@@ -56,26 +58,31 @@ export default function LoginPage() {
           )}
           <div className="space-y-2">
             <Label htmlFor="username">Username</Label>
-            <Input 
-              id="username" 
-              name="username" 
-              type="text" 
-              placeholder="m@example.com" 
-              required 
+            <Input
+              id="username"
+              name="username"
+              type="text"
+              placeholder="Enter your username"
+              required
               className="text-base md:text-sm"
+              aria-describedby={formState.errors?.username ? "username-error" : undefined}
+              aria-invalid={!!formState.errors?.username}
             />
-            {formState.errors?.username && <p className="text-xs text-destructive pt-1">{formState.errors.username.join(', ')}</p>}
+            {formState.errors?.username && <p id="username-error" className="text-xs text-destructive pt-1">{formState.errors.username.join(', ')}</p>}
           </div>
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>
-            <Input 
-              id="password" 
-              name="password" 
-              type="password" 
-              required 
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              placeholder="Enter your password"
+              required
               className="text-base md:text-sm"
+              aria-describedby={formState.errors?.password ? "password-error" : undefined}
+              aria-invalid={!!formState.errors?.password}
             />
-            {formState.errors?.password && <p className="text-xs text-destructive pt-1">{formState.errors.password.join(', ')}</p>}
+            {formState.errors?.password && <p id="password-error" className="text-xs text-destructive pt-1">{formState.errors.password.join(', ')}</p>}
           </div>
           {redirectUrl && <input type="hidden" name="redirectUrl" value={redirectUrl} />}
         </CardContent>
@@ -88,4 +95,3 @@ export default function LoginPage() {
     </Card>
   );
 }
-
