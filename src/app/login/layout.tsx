@@ -1,6 +1,6 @@
 // src/app/login/layout.tsx
 import type { Metadata } from 'next';
-import '../globals.css'; // Ensure global styles are available if not already through root
+import '../globals.css'; // Import global styles
 
 export const metadata: Metadata = {
   title: 'Login - DVPanel',
@@ -12,11 +12,11 @@ export default function LoginLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // This div will be rendered inside AppShell's main content area.
-  // It provides specific styling for the login form container.
+  // This <main> tag provides the specific styling for the login page.
+  // It will be a direct child of <body> from the RootLayout when on the /login route.
   return (
-    <div className="flex flex-grow flex-col items-center justify-center p-4 w-full h-full bg-gradient-to-br from-slate-900 via-background to-slate-800 text-foreground">
+    <main className="flex min-h-screen w-full flex-col items-center justify-center p-4 bg-gradient-to-br from-slate-900 via-background to-slate-800 text-foreground">
       {children}
-    </div>
+    </main>
   );
 }
