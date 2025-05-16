@@ -23,7 +23,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { UserPlus, Check, Loader2 } from "lucide-react";
 import React, { useState, useEffect, useTransition } from "react";
-import { useFormState } from "react-dom";
+import { useActionState } from "react"; // Changed from react-dom
 import { type UserData, type UserInput, addUser, updateUser, type UserActionState } from "../actions";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -62,7 +62,7 @@ export default function AddUserRoleDialog({
   const [status, setStatus] = useState<UserData["status"]>("Active");
 
   const actionToCall = isEditing ? updateUser : addUser;
-  const [formState, formAction] = useFormState(actionToCall, initialFormState);
+  const [formState, formAction] = useActionState(actionToCall, initialFormState);
   const [isTransitionPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -89,10 +89,13 @@ export default function AddUserRoleDialog({
       if (formState.status !== 'idle') {
         // This is a bit of a hack to reset formState if it's not idle.
         // A better approach might involve a dedicated reset action or keying the form.
-        actionToCall(initialFormState, {} as UserInput); 
+        // Directly calling the action to reset its internal state if it holds any.
+        // Note: formAction itself does not clear its previous state.
+        // The `key` prop on the form or dialog might be a cleaner way for full reset.
+        // For now, we rely on `formState` being reset by `useActionState` on re-render or new action.
       }
     }
-  }, [open, isEditing, userData, formState.status, actionToCall]);
+  }, [open, isEditing, userData, formState.status]);
 
 
   useEffect(() => {
@@ -288,9 +291,9 @@ export default function AddUserRoleDialog({
 
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={isTransitionPending}>Cancel</Button>
-          <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" onClick={handleSubmit} disabled={isTransitionPending}>
-            {isTransitionPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={isTransitionPending || formState.status === 'validating'}>Cancel</Button>
+          <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" onClick={handleSubmit} disabled={isTransitionPending || formState.status === 'validating'}>
+            {(isTransitionPending || formState.status === 'validating') ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
             {isEditing ? "Save Changes" : "Add User"}
           </Button>
         </DialogFooter>
@@ -298,3 +301,4 @@ export default function AddUserRoleDialog({
     </Dialog>
   );
 }
+
