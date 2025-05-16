@@ -53,7 +53,7 @@ export interface LoadPanelSettingsState {
   data?: PanelSettingsData;
 }
 
-const SETTINGS_FILENAME = ".settings.json";
+const SETTINGS_FILENAME = "settings.json";
 
 export async function savePanelSettings(
   prevState: SavePanelSettingsState,

@@ -1,3 +1,4 @@
+
 // src/backend/services/storageService.ts
 'use server';
 
@@ -20,10 +21,12 @@ async function ensureDataDirectoryExists(): Promise<void> {
   if (!fs.existsSync(dataPath)) {
     try {
       fs.mkdirSync(dataPath, { recursive: true });
-      console.log(`Data directory created: ${dataPath}`);
+      console.log(`[StorageService] Data directory created: ${dataPath}`);
     } catch (error) {
-      console.error(`Failed to create data directory at ${dataPath}:`, error);
-      throw new Error(`Storage Error: Could not create data directory at ${dataPath}.`);
+      console.error(`[StorageService] Failed to create data directory at ${dataPath}:`, error);
+      const baseMessage = `Storage Error: Could not create data directory at ${dataPath}.`;
+      const detailedMessage = error instanceof Error ? `${baseMessage} Reason: ${error.message}` : baseMessage;
+      throw new Error(detailedMessage);
     }
   }
 }
@@ -51,7 +54,9 @@ export async function saveEncryptedData(filename: string, data: object): Promise
     console.log(`[StorageService] Data successfully saved to ${filePath}`);
   } catch (error) {
     console.error(`[StorageService] Error saving data to ${filePath}:`, error);
-    throw new Error(`Storage Error: Failed to save data to ${filename}.`);
+    const baseMessage = `Storage Error: Failed to save data to ${filename}.`;
+    const detailedMessage = error instanceof Error ? `${baseMessage} Reason: ${error.message}` : baseMessage;
+    throw new Error(detailedMessage);
   }
 }
 
@@ -89,11 +94,13 @@ export async function loadEncryptedData(filename: string): Promise<object | null
         console.error(`[StorageService] Error parsing JSON from ${filePath}:`, error);
         // Optionally, handle corrupted files, e.g., by backing them up and returning null
         // For now, re-throw as a more specific error or return null
-        return null; 
+        const baseMessage = `Storage Error: Failed to parse JSON from ${filename}.`;
+        const detailedMessage = `${baseMessage} Reason: ${error.message}`;
+        throw new Error(detailedMessage);
     }
     console.error(`[StorageService] Error loading data from ${filePath}:`, error);
-    // For other errors, we might want to throw to indicate a more severe issue.
-    // Depending on desired behavior, could also return null.
-    throw new Error(`Storage Error: Failed to load data from ${filename}.`);
+    const baseMessage = `Storage Error: Failed to load data from ${filename}.`;
+    const detailedMessage = error instanceof Error ? `${baseMessage} Reason: ${error.message}` : baseMessage;
+    throw new Error(detailedMessage);
   }
 }
