@@ -24,14 +24,11 @@ import {
   Users,
   Settings,
   ShieldCheck,
-  Moon,
-  Sun,
   UserCircle,
   LogOut,
   Replace,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useTheme } from 'next-themes';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   DropdownMenu,
@@ -55,7 +52,6 @@ const navItems = [
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { theme, setTheme } = useTheme();
 
   return (
     <SidebarProvider defaultOpen>
@@ -116,17 +112,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button
-            variant="ghost"
-            className="w-full justify-start gap-2 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-          >
-            {theme === 'dark' ? <Sun /> : <Moon />}
-            <span className="group-data-[collapsible=icon]:hidden">
-              {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
-            </span>
-          </Button>
+          {/* Theme toggle button removed */}
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
