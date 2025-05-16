@@ -39,7 +39,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'; // TooltipProvider is in SidebarProvider
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'; 
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -69,13 +69,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {navItems.map((item) => {
               const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
               
-              // sidebarButtonElement is the <SidebarMenuButton> which now renders a <button>
-              const sidebarButtonElement = (
+              const menuButton = (
                 <SidebarMenuButton
                   isActive={isActive}
                   variant="default"
                   size="default"
-                  // href and asChild are ignored by SidebarMenuButton but might be passed by Link or TooltipTrigger
                 >
                   <item.icon />
                   <span>{item.label}</span>
@@ -85,16 +83,22 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 </SidebarMenuButton>
               );
 
-              let navElement;
+              // Temporarily simplify by removing Tooltip to isolate Link/Button interaction
+              const navElement = (
+                <Link href={item.href} legacyBehavior passHref>
+                  {/* SidebarMenuButton renders a <button> and should ignore href */}
+                  {menuButton}
+                </Link>
+              );
+              
+              let navItemContent;
+              // Re-introduce Tooltip logic later if the Link > Button works
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
-                navElement = (
+                navItemContent = (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      {/* Link with legacyBehavior renders an <a>. TooltipTrigger asChild wraps this <a>. */}
-                      <Link href={item.href} legacyBehavior passHref>
-                        {/* SidebarMenuButton (as a <button>) is a child of Link's <a> */}
-                        {sidebarButtonElement}
-                      </Link>
+                       {/* TooltipTrigger wraps the Link (which renders an <a>) */}
+                      {navElement}
                     </TooltipTrigger>
                     <TooltipContent side="right" align="center">
                       {item.label}
@@ -102,18 +106,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   </Tooltip>
                 );
               } else {
-                navElement = (
-                   // Link with legacyBehavior renders an <a>.
-                  <Link href={item.href} legacyBehavior passHref>
-                     {/* SidebarMenuButton (as a <button>) is a child of Link's <a> */}
-                    {sidebarButtonElement}
-                  </Link>
-                );
+                navItemContent = navElement;
               }
 
               return (
                 <SidebarMenuItem key={item.label}>
-                  {navElement}
+                  {navItemContent}
                 </SidebarMenuItem>
               );
             })}
