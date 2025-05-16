@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { Toaster } from '@/components/ui/toaster';
 import { ThemeProvider } from '@/components/theme-provider';
 import AppShell from '@/components/layout/app-shell';
+import { SidebarProvider } from '@/components/ui/sidebar'; // Import SidebarProvider
 
 const inter = Inter({
   subsets: ['latin'],
@@ -35,7 +36,9 @@ export default function RootLayout({
           enableSystem={false} 
           disableTransitionOnChange
         >
-          <AppShell>{children}</AppShell>
+          <SidebarProvider defaultOpen> {/* Wrap AppShell with SidebarProvider */}
+            <AppShell>{children}</AppShell>
+          </SidebarProvider>
           <Toaster />
         </ThemeProvider>
       </body>

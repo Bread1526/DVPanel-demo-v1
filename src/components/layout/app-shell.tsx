@@ -1,8 +1,8 @@
+
 "use client";
 
 import type React from 'react';
 import {
-  SidebarProvider,
   Sidebar,
   SidebarHeader,
   SidebarContent,
@@ -13,6 +13,7 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarMenuBadge,
+  useSidebar, // Keep useSidebar call
 } from '@/components/ui/sidebar';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -38,6 +39,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -52,35 +54,60 @@ const navItems = [
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { state: sidebarState, isMobile } = useSidebar(); // useSidebar is called here
 
   return (
-    <SidebarProvider defaultOpen>
+    <> {/* SidebarProvider removed from here */}
       <Sidebar>
         <SidebarHeader className="p-4">
           <Link href="/" className="flex items-center gap-2">
-            {/* Replace with a proper logo if available */}
             <Replace size={28} className="text-primary" />
             <h1 className="text-xl font-semibold text-foreground">DVPanel</h1>
           </Link>
         </SidebarHeader>
         <SidebarContent>
           <SidebarMenu>
-            {navItems.map((item) => (
-              <SidebarMenuItem key={item.label}>
-                <Link href={item.href} legacyBehavior passHref>
-                  <SidebarMenuButton
-                    isActive={pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))}
-                    tooltip={item.label}
-                  >
-                    <item.icon />
-                    <span>{item.label}</span>
-                    {item.count && (
-                      <SidebarMenuBadge>{item.count}</SidebarMenuBadge>
-                    )}
-                  </SidebarMenuButton>
+            {navItems.map((item) => {
+              const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+              
+              const menuButton = (
+                <SidebarMenuButton
+                  isActive={isActive}
+                  // Tooltip prop removed from SidebarMenuButton if it was there
+                >
+                  <item.icon />
+                  <span>{item.label}</span>
+                  {item.count && (
+                    <SidebarMenuBadge>{item.count}</SidebarMenuBadge>
+                  )}
+                </SidebarMenuButton>
+              );
+
+              const linkWrappedButton = (
+                <Link href={item.href} asChild>
+                  {menuButton}
                 </Link>
-              </SidebarMenuItem>
-            ))}
+              );
+
+              if (sidebarState === 'collapsed' && !isMobile && item.label) {
+                return (
+                  <SidebarMenuItem key={item.label}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>{linkWrappedButton}</TooltipTrigger>
+                      <TooltipContent side="right" align="center">
+                        {item.label}
+                      </TooltipContent>
+                    </Tooltip>
+                  </SidebarMenuItem>
+                );
+              }
+
+              return (
+                <SidebarMenuItem key={item.label}>
+                  {linkWrappedButton}
+                </SidebarMenuItem>
+              );
+            })}
           </SidebarMenu>
         </SidebarContent>
         <SidebarFooter className="p-4 flex flex-col gap-2">
@@ -88,7 +115,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="w-full justify-start gap-2 px-2">
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src="https://placehold.co/100x100.png" alt="User" data-ai-hint="user avatar" />
+                  <AvatarImage src="https://placehold.co/100x100.png" alt="User" data-ai-hint="user avatar"/>
                   <AvatarFallback>U</AvatarFallback>
                 </Avatar>
                 <span className="group-data-[collapsible=icon]:hidden">Admin User</span>
@@ -112,16 +139,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          {/* Theme toggle button removed */}
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
         <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/80 px-4 backdrop-blur-sm sm:h-16 sm:px-6 md:px-8">
           <SidebarTrigger className="md:hidden" />
-          {/* Optional: Breadcrumbs or page title here */}
         </header>
         <main className="flex-1 p-4 sm:p-6 md:p-8">{children}</main>
       </SidebarInset>
-    </SidebarProvider>
+    </>
   );
 }
