@@ -74,7 +74,14 @@ export default function SettingsPage() {
       updateLocalState(result.data);
       
       if (result.data?.popup) {
-        localStorage.setItem('dvpanel-popup-settings', JSON.stringify(result.data.popup));
+        try {
+          localStorage.setItem('dvpanel-popup-settings', JSON.stringify(result.data.popup));
+          console.log("[SettingsPage] useEffect: dvpanel-popup-settings saved to localStorage:", result.data.popup);
+        } catch (e) {
+          console.warn("[SettingsPage] useEffect: Failed to save popup settings to localStorage", e);
+        }
+      } else {
+        console.log("[SettingsPage] useEffect: No popup data in result, not updating localStorage.");
       }
 
       const effectiveDuration = result.data?.popup?.notificationDuration ? result.data.popup.notificationDuration * 1000 : 5000;
@@ -114,7 +121,12 @@ export default function SettingsPage() {
     if (formState.status === "success" && formState.message) {
       updateLocalState(formState.data); 
        if (formState.data?.popup) {
-        localStorage.setItem('dvpanel-popup-settings', JSON.stringify(formState.data.popup));
+         try {
+          localStorage.setItem('dvpanel-popup-settings', JSON.stringify(formState.data.popup));
+          console.log("[SettingsPage] formState useEffect: dvpanel-popup-settings updated in localStorage:", formState.data.popup);
+         } catch (e) {
+            console.warn("[SettingsPage] formState useEffect: Failed to save popup settings to localStorage", e);
+         }
       }
       toast({
         title: "Settings Update",
@@ -208,7 +220,7 @@ export default function SettingsPage() {
     }
   };
 
-  const isPending = isActionStatePending || isTransitionPendingForAction;
+  const isPending = formState.isPending || isTransitionPendingForAction;
 
   return (
     <div>
@@ -218,8 +230,8 @@ export default function SettingsPage() {
       />
 
       <Tabs defaultValue="panel" className="w-full">
-        <div className="overflow-x-auto py-1 border-b border-border mb-2 whitespace-nowrap">
-          <TabsList className="inline-flex h-10 items-center justify-start rounded-none border-none bg-transparent p-0 gap-1">
+         <div className="overflow-x-auto py-1 border-b border-border mb-2 whitespace-nowrap">
+            <TabsList className="inline-flex h-10 items-center justify-start rounded-none border-none bg-transparent p-0 gap-1">
             <TabsTrigger value="panel">
               <SlidersHorizontal className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Panel
             </TabsTrigger>
