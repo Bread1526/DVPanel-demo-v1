@@ -11,13 +11,11 @@ export default function LoginLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // This layout should NOT render <html> or <body> tags.
+  // The root layout (src/app/layout.tsx) handles those.
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className="bg-background text-foreground">
-        <main className="flex min-h-screen flex-col items-center justify-center p-4 bg-gradient-to-br from-slate-900 via-background to-slate-800">
-          {children}
-        </main>
-      </body>
-    </html>
+    <main className="flex min-h-screen flex-col items-center justify-center p-4 bg-gradient-to-br from-slate-900 via-background to-slate-800 text-foreground">
+      {children}
+    </main>
   );
 }
