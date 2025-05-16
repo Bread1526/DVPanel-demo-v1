@@ -1,97 +1,18 @@
+# === Firebase Admin SDK (Backend Only) ===
+# This variable is no longer used by default for panel settings storage.
+# If you re-introduce Firebase Admin for other backend features, you'll need this.
+# FIREBASE_ADMIN_SERVICE_ACCOUNT='{"type": "service_account", ...}'
 
-"use server";
+# === Firebase Frontend (Next.js Exposed) ===
+# These are for client-side Firebase SDK (e.g., auth, firestore access from client)
+# Ensure these are prefixed with NEXT_PUBLIC_ to be exposed to the browser.
+NEXT_PUBLIC_FIREBASE_API_KEY="YOUR_API_KEY"
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="YOUR_AUTH_DOMAIN"
+NEXT_PUBLIC_FIREBASE_DATABASE_URL="YOUR_DATABASE_URL"
+NEXT_PUBLIC_FIREBASE_PROJECT_ID="YOUR_PROJECT_ID"
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET="YOUR_STORAGE_BUCKET"
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID="YOUR_MESSAGING_SENDER_ID"
+NEXT_PUBLIC_FIREBASE_APP_ID="YOUR_APP_ID"
+NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID="YOUR_MEASUREMENT_ID"
 
-import { z } from 'zod';
-import { firestoreAdmin } from '@/lib/firebase/admin';
-
-const panelSettingsSchema = z.object({
-  panelPort: z.coerce.number().min(1024).max(65535),
-  panelIp: z.string().min(1, { message: "Panel IP/Domain cannot be empty" }), // Basic validation, can be improved for IP/domain format
-});
-
-export interface SavePanelSettingsState {
-  message: string;
-  status: "success" | "error" | "idle";
-  errors?: {
-    panelPort?: string[];
-    panelIp?: string[];
-  }
-}
-
-export async function savePanelSettings(
-  prevState: SavePanelSettingsState,
-  formData: FormData
-): Promise<SavePanelSettingsState> {
-
-  const validatedFields = panelSettingsSchema.safeParse({
-    panelPort: formData.get('panel-port'),
-    panelIp: formData.get('panel-ip'),
-  });
-
-  if (!validatedFields.success) {
-    return {
-      message: "Validation failed. Please check the input fields.",
-      status: "error",
-      errors: validatedFields.error.flatten().fieldErrors,
-    };
-  }
-
-  if (!firestoreAdmin) {
-    console.error("Firestore Admin is not initialized in src/lib/firebase/admin.ts. Cannot save panel settings.");
-    return {
-      message: "Panel settings cannot be saved: Firebase Admin SDK is not initialized. Please check server logs for errors in 'src/lib/firebase/admin.ts' and ensure your FIREBASE_ADMIN_SERVICE_ACCOUNT in .env.local is correctly configured.",
-      status: "error",
-    };
-  }
-
-  const { panelPort, panelIp } = validatedFields.data;
-  const configurationsCollection = firestoreAdmin.collection('dvPanelConfigurations');
-  let panelIdToSave = 0;
-  const MAX_PANEL_ID_CHECK = 100; // Limit to prevent infinite loops
-
-  try {
-    // Find the next available panel ID
-    // This is a simple approach; for high concurrency, a more robust solution might be needed (e.g., Firestore transaction or a dedicated counter document)
-    let currentId = 1;
-    while (currentId <= MAX_PANEL_ID_CHECK) {
-      const docRef = configurationsCollection.doc(String(currentId));
-      const docSnap = await docRef.get();
-      if (!docSnap.exists) {
-        panelIdToSave = currentId;
-        break;
-      }
-      currentId++;
-    }
-
-    if (panelIdToSave === 0) {
-      // All IDs from 1 to MAX_PANEL_ID_CHECK are taken
-      console.error(`All panel configuration slots up to ${MAX_PANEL_ID_CHECK} are taken.`);
-      return {
-        message: `Failed to save settings: All configuration slots are currently in use. Please contact support.`,
-        status: "error",
-      };
-    }
-
-    const timestamp = new Date().toISOString();
-
-    await configurationsCollection.doc(String(panelIdToSave)).set({
-      panelPort,
-      panelIp,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    });
-
-    console.log(`Panel Settings saved to Firestore with ID ${panelIdToSave}: Port ${panelPort}, IP ${panelIp}`);
-    return {
-      message: `Panel settings (Port: ${panelPort}, IP: ${panelIp}) saved to Firebase with Panel ID ${panelIdToSave}.`,
-      status: "success",
-    };
-
-  } catch (error) {
-    console.error("Error saving panel settings to Firestore:", error);
-    return {
-      message: "Failed to save settings to database due to a server error. Please try again.",
-      status: "error",
-    };
-  }
-}
+# Other environment variables for your Next.js application can go here.

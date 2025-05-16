@@ -1,43 +1,18 @@
-// src/app/api/data/route.ts
-import { NextResponse, type NextRequest } from 'next/server';
-import { firestoreAdmin } from '@/lib/firebase/admin';
+# === Firebase Admin SDK (Backend Only) ===
+# This variable is no longer used by default for panel settings storage.
+# If you re-introduce Firebase Admin for other backend features, you'll need this.
+# FIREBASE_ADMIN_SERVICE_ACCOUNT='{"type": "service_account", ...}'
 
-export async function GET(request: NextRequest) {
-  if (!firestoreAdmin) {
-    return NextResponse.json({ error: 'Firebase Admin SDK not initialized.' }, { status: 503 });
-  }
-  try {
-    // Example: Fetch data from an 'items' collection
-    const snapshot = await firestoreAdmin.collection('items').limit(10).get();
-    if (snapshot.empty) {
-      return NextResponse.json({ message: 'No items found' }, { status: 200 });
-    }
+# === Firebase Frontend (Next.js Exposed) ===
+# These are for client-side Firebase SDK (e.g., auth, firestore access from client)
+# Ensure these are prefixed with NEXT_PUBLIC_ to be exposed to the browser.
+NEXT_PUBLIC_FIREBASE_API_KEY="YOUR_API_KEY"
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="YOUR_AUTH_DOMAIN"
+NEXT_PUBLIC_FIREBASE_DATABASE_URL="YOUR_DATABASE_URL"
+NEXT_PUBLIC_FIREBASE_PROJECT_ID="YOUR_PROJECT_ID"
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET="YOUR_STORAGE_BUCKET"
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID="YOUR_MESSAGING_SENDER_ID"
+NEXT_PUBLIC_FIREBASE_APP_ID="YOUR_APP_ID"
+NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID="YOUR_MEASUREMENT_ID"
 
-    const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    return NextResponse.json({ items }, { status: 200 });
-  } catch (error) {
-    console.error('Error fetching data from Firestore:', error);
-    return NextResponse.json({ error: 'Failed to fetch data' }, { status: 500 });
-  }
-}
-
-export async function POST(request: NextRequest) {
-  if (!firestoreAdmin) {
-    return NextResponse.json({ error: 'Firebase Admin SDK not initialized.' }, { status: 503 });
-  }
-  try {
-    const body = await request.json();
-    const { name, value } = body;
-
-    if (name === undefined || value === undefined) {
-      return NextResponse.json({ error: 'Missing name or value in request body' }, { status: 400 });
-    }
-
-    // Example: Add a new document to 'items' collection
-    const docRef = await firestoreAdmin.collection('items').add({ name, value, createdAt: new Date().toISOString() });
-    return NextResponse.json({ message: 'Item added successfully', id: docRef.id }, { status: 201 });
-  } catch (error) {
-    console.error('Error adding data to Firestore:', error);
-    return NextResponse.json({ error: 'Failed to add data' }, { status: 500 });
-  }
-}
+# Other environment variables for your Next.js application can go here.
