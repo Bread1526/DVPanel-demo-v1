@@ -1,18 +1,135 @@
-# === Firebase Admin SDK (Backend Only) ===
-# This variable is no longer used by default for panel settings storage.
-# If you re-introduce Firebase Admin for other backend features, you'll need this.
-# FIREBASE_ADMIN_SERVICE_ACCOUNT='{"type": "service_account", ...}'
 
-# === Firebase Frontend (Next.js Exposed) ===
-# These are for client-side Firebase SDK (e.g., auth, firestore access from client)
-# Ensure these are prefixed with NEXT_PUBLIC_ to be exposed to the browser.
-NEXT_PUBLIC_FIREBASE_API_KEY="YOUR_API_KEY"
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="YOUR_AUTH_DOMAIN"
-NEXT_PUBLIC_FIREBASE_DATABASE_URL="YOUR_DATABASE_URL"
-NEXT_PUBLIC_FIREBASE_PROJECT_ID="YOUR_PROJECT_ID"
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET="YOUR_STORAGE_BUCKET"
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID="YOUR_MESSAGING_SENDER_ID"
-NEXT_PUBLIC_FIREBASE_APP_ID="YOUR_APP_ID"
-NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID="YOUR_MEASUREMENT_ID"
+"use server";
 
-# Other environment variables for your Next.js application can go here.
+import { z } from "zod";
+import { saveEncryptedData, loadEncryptedData } from "@/services/storageService";
+
+const panelSettingsSchema = z.object({
+  panelPort: z
+    .string()
+    .min(1, "Panel Port is required.")
+    .regex(/^\d+$/, "Panel Port must be a number.")
+    .refine((val) => {
+      const portNum = parseInt(val, 10);
+      return portNum >= 1 && portNum <= 65535;
+    }, "Panel Port must be between 1 and 65535."),
+  panelIp: z
+    .string()
+    .optional()
+    .refine(
+      (val) =>
+        val === "" ||
+        val === undefined ||
+        /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(
+          val
+        ) ||
+        /^[a-zA-Z0-9.-]+$/.test(val), // Basic domain check
+      {
+        message:
+          "Must be a valid IPv4 address, domain name, or empty (for 0.0.0.0).",
+      }
+    ),
+});
+
+export interface PanelSettingsData {
+  panelPort: string;
+  panelIp: string;
+}
+
+export interface SavePanelSettingsState {
+  message: string;
+  status: "idle" | "success" | "error" | "validating";
+  errors?: {
+    panelPort?: string[];
+    panelIp?: string[];
+    general?: string;
+  };
+  data?: PanelSettingsData;
+}
+
+export interface LoadPanelSettingsState {
+  message?: string;
+  status: "success" | "error" | "not_found";
+  data?: PanelSettingsData;
+}
+
+const SETTINGS_FILENAME = ".settings.json";
+
+export async function savePanelSettings(
+  prevState: SavePanelSettingsState,
+  formData: FormData
+): Promise<SavePanelSettingsState> {
+  const rawFormData = {
+    panelPort: formData.get("panel-port") as string,
+    panelIp: formData.get("panel-ip") as string,
+  };
+
+  const validatedFields = panelSettingsSchema.safeParse(rawFormData);
+
+  if (!validatedFields.success) {
+    return {
+      message: "Validation failed. Please check your input.",
+      status: "error",
+      errors: validatedFields.error.flatten().fieldErrors,
+    };
+  }
+
+  const dataToSave: PanelSettingsData = {
+    panelPort: validatedFields.data.panelPort,
+    panelIp: validatedFields.data.panelIp || "", // Ensure empty string if undefined
+  };
+
+  try {
+    await saveEncryptedData(SETTINGS_FILENAME, dataToSave);
+    return {
+      message: "Panel settings saved successfully!",
+      status: "success",
+      data: dataToSave,
+    };
+  } catch (error) {
+    console.error("Error saving panel settings:", error);
+    return {
+      message:
+        error instanceof Error ? error.message : "An unknown error occurred while saving settings.",
+      status: "error",
+      errors: { general: "Failed to save settings to local file." },
+    };
+  }
+}
+
+export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
+  try {
+    const loadedData = await loadEncryptedData(SETTINGS_FILENAME);
+    if (loadedData) {
+      // Basic validation of loaded data structure
+      if (typeof (loadedData as any).panelPort === 'string' && 
+          (typeof (loadedData as any).panelIp === 'string' || (loadedData as any).panelIp === undefined || (loadedData as any).panelIp === null)) {
+        return {
+          status: "success",
+          data: {
+            panelPort: (loadedData as PanelSettingsData).panelPort,
+            panelIp: (loadedData as PanelSettingsData).panelIp || "",
+          },
+        };
+      } else {
+        console.warn("Loaded settings file has incorrect format:", loadedData);
+        return {
+          status: "error",
+          message: "Settings file has an invalid format.",
+        };
+      }
+    } else {
+      return {
+        status: "not_found",
+        message: "No existing settings file found. Defaults will be used.",
+      };
+    }
+  } catch (error) {
+    console.error("Error loading panel settings:", error);
+    return {
+      status: "error",
+      message:
+        error instanceof Error ? error.message : "An unknown error occurred while loading settings.",
+    };
+  }
+}
