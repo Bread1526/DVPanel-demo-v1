@@ -26,7 +26,10 @@ import {
   FileText,
   Network,
   Users,
-  ShieldCheck
+  ShieldCheck,
+  FileDigit,
+  KeyRound,
+  BookUser
 } from "lucide-react";
 
 const sitemapContent = (
@@ -69,7 +72,7 @@ const sitemapContent = (
         </div>
         <div className="ml-4 pl-4 border-l-2 border-primary/30 space-y-2 py-2">
           {[
-            { name: 'Panel', path: '/settings', icon: SlidersHorizontal }, // Default settings route
+            { name: 'Panel', path: '/settings', icon: SlidersHorizontal }, 
             { name: 'Daemon', path: '/settings/daemon', icon: HardDrive },
             { name: 'Security', path: '/settings/security', icon: Shield },
             { name: 'Popups', path: '/settings/popups', icon: MessageSquareMore },
@@ -110,11 +113,88 @@ const sitemapContent = (
   </div>
 );
 
+const termsOfServiceContent = (
+  <div className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground">
+    <h2 className="text-xl font-semibold text-foreground">Terms of Service</h2>
+    <p className="text-xs">Effective Date: 5/16/2025</p>
+    <p>Welcome to DVPanel. By using the DVPanel control panel (&quot;Service&quot;, &quot;Software&quot;), you agree to the following Terms of Service (&quot;Terms&quot;). If you do not agree with any of these Terms, you must not install, use, or access DVPanel.</p>
+    
+    <h3 className="text-lg font-semibold text-foreground mt-4">1. License and Usage</h3>
+    <p>DVPanel is a self-hosted server control panel developed and maintained by the DVPanel team. By installing or using DVPanel, you are granted a non-exclusive, non-transferable, revocable license to use the software for personal or organizational purposes.</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>You may modify the source code for internal use.</li>
+      <li>Commercial usage is allowed only under the conditions defined by the license included in the repository.</li>
+      <li>Unauthorized reselling, sublicensing, or redistribution of DVPanel (especially Pro features) is prohibited.</li>
+    </ul>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">2. User Responsibilities</h3>
+    <p>You agree to:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>Use DVPanel in compliance with applicable laws and regulations.</li>
+      <li>Maintain the security of your installation and systems.</li>
+      <li>Not engage in malicious activities including unauthorized access, data scraping, or tampering with DVPanel&apos;s core or backend systems.</li>
+    </ul>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">3. Security & Data</h3>
+    <p>DVPanel is designed with strong security principles:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>No centralized tracking or analytics.</li>
+      <li>All installations use unique encryption keys for sensitive metadata.</li>
+      <li>Communication between the panel and backend services (such as license verification) is encrypted and anonymized.</li>
+      <li>Your server data remains on your infrastructure. DVPanel does not collect or store personal or server-related data externally.</li>
+    </ul>
+    
+    <h3 className="text-lg font-semibold text-foreground mt-4">4. Webhook & License Verification</h3>
+    <p>For installations using Pro features, DVPanel communicates with a secured backend via webhook:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>License keys are verified during setup using secure, seed-based encryption.</li>
+      <li>A unique installation code is generated and stored locally.</li>
+      <li>If tampering is detected or the code changes, access to encrypted data may be restricted.</li>
+    </ul>
+    <p>This system is designed to ensure authenticity and prevent unauthorized duplication of the software.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">5. No Warranty</h3>
+    <p>DVPanel is provided &quot;as is&quot;, without warranty of any kind. The DVPanel team does not guarantee:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>That the software will be error-free or uninterrupted.</li>
+      <li>That any bugs or issues will be resolved.</li>
+    </ul>
+    <p>Users install and run DVPanel at their own risk.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">6. Limitation of Liability</h3>
+    <p>To the maximum extent permitted by applicable law, DVPanel and its contributors shall not be liable for any damages resulting from:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>Installation or use of the panel,</li>
+      <li>Loss of data or service interruptions,</li>
+      <li>Unauthorized access to or alteration of your installations.</li>
+    </ul>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">7. Termination</h3>
+    <p>DVPanel reserves the right to terminate support or deny access to updates or backend systems for:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>Users found violating these Terms,</li>
+      <li>Installations found tampering with the license system or backend services.</li>
+    </ul>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">8. Updates and Modifications</h3>
+    <p>These Terms may be updated at any time. Major changes will be posted on dvpanel.com.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">9. Contact</h3>
+    <p>For questions, bug reports, or legal concerns:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>Email: admin@dvpanel.com</li>
+      <li>Website: https://dvpanel.com</li>
+      <li>GitHub: https://github.com/DVPanel</li>
+    </ul>
+  </div>
+);
+
+
 const infoPageDialogs = [
   { label: "Sitemap", icon: ListTree, content: sitemapContent, title: "Application Sitemap" },
-  { label: "Terms of Service", content: "Terms of Service details will be available here. DVPanel is provided 'as-is' without any warranties. Use at your own risk. We are not liable for any data loss or damages resulting from its use." },
-  { label: "License", content: "License details (e.g., MIT, Apache 2.0) will be here. Currently, DVPanel source code is proprietary unless otherwise stated." },
-  { label: "Privacy Policy", content: "Privacy Policy details will be available here. DVPanel may collect anonymous usage data if telemetry is enabled (feature pending). No personal data is collected by default." },
+  { label: "Terms of Service", icon: FileDigit, content: termsOfServiceContent, title: "Terms of Service" },
+  { label: "License", icon: KeyRound, content: "License details (e.g., MIT, Apache 2.0) will be here. Currently, DVPanel source code is proprietary unless otherwise stated.", title: "DVPanel License" },
+  { label: "Privacy Policy", icon: BookUser, content: "Privacy Policy details will be available here. DVPanel may collect anonymous usage data if telemetry is enabled (feature pending). No personal data is collected by default.", title: "Privacy Policy" },
 ];
 
 export default function InfoPage() {
@@ -125,7 +205,7 @@ export default function InfoPage() {
     let intervalId: NodeJS.Timeout;
 
     const pingServer = async () => {
-      if (!isPinging && latency === null) setIsPinging(true); // Only set isPinging if not already pinging and latency is null
+      if (!isPinging && latency === null) setIsPinging(true); 
       const startTime = Date.now();
       try {
         const response = await fetch('/api/ping');
@@ -138,8 +218,6 @@ export default function InfoPage() {
       } catch (error) {
         setLatency(null);
       } finally {
-        // Only set isPinging to false if it was true and there's an intervalId
-        // This prevents premature 'Unavailable' if the first ping fails quickly
         if (isPinging && latency !== null && intervalId) setIsPinging(false);
       }
     };
@@ -151,7 +229,7 @@ export default function InfoPage() {
       clearInterval(intervalId);
     };
      // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run once on mount
+  }, []); 
 
   return (
     <div>
@@ -173,14 +251,14 @@ export default function InfoPage() {
                       {item.label}
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className={`rounded-2xl backdrop-blur-sm ${item.label === "Sitemap" ? 'sm:max-w-2xl md:max-w-3xl lg:max-w-4xl' : 'sm:max-w-lg'}`}>
+                  <DialogContent className={cn("rounded-2xl backdrop-blur-sm", item.label === "Sitemap" ? 'sm:max-w-2xl md:max-w-3xl lg:max-w-4xl' : 'sm:max-w-lg')}>
                     <DialogHeader>
                       <DialogTitle>{item.title || item.label}</DialogTitle>
                     </DialogHeader>
                     <div className="py-4 max-h-[70vh] overflow-y-auto">
-                      {typeof item.content === 'string' 
+                       {typeof item.content === 'string' 
                         ? <p className="text-sm text-muted-foreground">{item.content}</p> 
-                        : item.content /* This is the sitemap JSX */}
+                        : item.content }
                     </div>
                     <DialogFooter>
                       <DialogClose asChild>
