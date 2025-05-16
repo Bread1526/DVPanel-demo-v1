@@ -531,13 +531,13 @@ const sidebarMenuButtonVariants = cva(
 )
 
 const SidebarMenuButton = React.forwardRef<
-  HTMLButtonElement, 
-  React.ComponentPropsWithoutRef<'button'> & { 
+  HTMLButtonElement, // Changed to HTMLButtonElement
+  React.ComponentPropsWithoutRef<'button'> & { // Changed to props for <button>
     isActive?: boolean;
     variant?: VariantProps<typeof sidebarMenuButtonVariants>['variant'];
     size?: VariantProps<typeof sidebarMenuButtonVariants>['size'];
-    href?: string; 
-    asChild?: boolean; 
+    href?: string; // To be ignored
+    asChild?: boolean; // To be ignored
   }
 >(
   (
@@ -547,20 +547,20 @@ const SidebarMenuButton = React.forwardRef<
       size = 'default',
       className,
       children,
-      href: _hrefIgnored, 
-      asChild: _asChildIgnored, 
-      ...otherProps 
+      href: _ignoredHref,         // Explicitly destructure and ignore href
+      asChild: _ignoredAsChild,   // Explicitly destructure and ignore asChild
+      ...otherProps               // Spread remaining props (like onClick from Link)
     },
     ref
   ) => {
     return (
-      <button 
+      <button // Renders a button
         ref={ref}
         data-sidebar="menu-button"
         data-size={size}
         data-active={String(isActive)}
         className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
-        {...otherProps} 
+        {...otherProps} // otherProps should not contain href or asChild
       >
         {children}
       </button>
@@ -737,3 +737,5 @@ export {
   SidebarTrigger,
   useSidebar,
 }
+
+    
