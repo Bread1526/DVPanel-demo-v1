@@ -31,7 +31,7 @@ import {
   KeyRound,
   BookUser
 } from "lucide-react";
-import { cn } from "@/lib/utils"; // Added import for cn
+import { cn } from "@/lib/utils";
 
 const sitemapContent = (
   <div className="space-y-6 text-sm">
@@ -190,11 +190,98 @@ const termsOfServiceContent = (
   </div>
 );
 
+const licenseAgreementContent = (
+  <div className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground">
+    <h2 className="text-xl font-semibold text-foreground">DVPanel Software License Agreement</h2>
+    <p className="text-xs">Effective Date: [Insert date]</p>
+    <p>Author: DVPanel Team</p>
+    <p>Contact: admin@dvpanel.com</p>
+    <p>Website: https://dvpanel.com</p>
+    <p>GitHub: https://github.com/DVPanel</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">1. Overview</h3>
+    <p>This License Agreement (“License”) governs the use of the DVPanel software (&quot;Software&quot;) developed and maintained by the DVPanel Team. By downloading, installing, or using the Software, you agree to the terms of this License.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">2. License Grant</h3>
+    <h4 className="text-md font-semibold text-foreground mt-3">Free Version</h4>
+    <p>You are granted a non-exclusive, non-transferable, revocable license to:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>Use DVPanel on any number of servers for non-commercial or personal use.</li>
+      <li>Modify the Software source code for personal or internal deployment purposes.</li>
+      <li>Share links to the GitHub repository with proper credit.</li>
+    </ul>
+    <p className="font-medium mt-2">Restrictions:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>You may not remove or alter copyright notices.</li>
+      <li>You may not rebrand and redistribute the Software under a different name.</li>
+      <li>You may not attempt to bypass any built-in security or activation mechanisms.</li>
+    </ul>
+
+    <h4 className="text-md font-semibold text-foreground mt-3">Pro Version</h4>
+    <p>Access to the DVPanel Pro version is granted only to licensed users. A unique license key and installation code must be issued and verified through DVPanel’s secure backend.</p>
+    <p>Pro users are permitted to:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>Use all advanced features and modules enabled via Pro verification.</li>
+      <li>Run DVPanel Pro in commercial environments.</li>
+      <li>Request priority support, where applicable.</li>
+    </ul>
+    <p className="font-medium mt-2">Restrictions:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>You may not share, resell, or redistribute license keys.</li>
+      <li>You may not copy or clone the licensed installation or reuse the installation code on unlicensed systems.</li>
+      <li>DVPanel reserves the right to revoke Pro access if misuse or tampering is detected.</li>
+    </ul>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">3. Ownership</h3>
+    <p>DVPanel is the intellectual property of the DVPanel Team. All rights not explicitly granted under this License are reserved.</p>
+    <p>You own your server, your data, and your files — but not the DVPanel Software itself.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">4. Redistribution</h3>
+    <p>You may not:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>Package DVPanel with other software and distribute it as a bundle.</li>
+      <li>Sell DVPanel as part of a service offering without written permission.</li>
+      <li>Modify the panel to remove backend verification, security, or licensing logic.</li>
+    </ul>
+    <p>Forking the Free version for open-source contributions is permitted only on GitHub with a link back to the original project.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">5. Termination</h3>
+    <p>This License is effective until terminated. DVPanel may terminate your rights under this License if:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>You breach any of the terms herein.</li>
+      <li>You tamper with or reverse-engineer the licensing or encryption mechanisms.</li>
+    </ul>
+    <p>Upon termination, you must delete all copies of the Software, including configuration files and license codes.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">6. No Warranty</h3>
+    <p>DVPanel is provided “as is,” without warranty of any kind — express or implied. The team is not liable for any damages, data loss, or system issues resulting from its use.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">7. Security Compliance</h3>
+    <p>You agree not to exploit, disable, or bypass:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>DVPanel&apos;s license verification system,</li>
+      <li>Backend webhook encryption methods,</li>
+      <li>Any system intended to enforce security or access control.</li>
+    </ul>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">8. Commercial Use</h3>
+    <p>You may not use the Free version of DVPanel for commercial gain or client services. If you plan to integrate DVPanel into a business model, you must upgrade to the Pro version and abide by all commercial terms.</p>
+
+    <h3 className="text-lg font-semibold text-foreground mt-4">9. Contact</h3>
+    <p>For licensing questions or permissions beyond the scope of this agreement:</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>Email: admin@dvpanel.com</li>
+      <li>Website: https://dvpanel.com</li>
+      <li>GitHub: https://github.com/DVPanel</li>
+    </ul>
+  </div>
+);
+
 
 const infoPageDialogs = [
   { label: "Sitemap", icon: ListTree, content: sitemapContent, title: "Application Sitemap" },
   { label: "Terms of Service", icon: FileDigit, content: termsOfServiceContent, title: "Terms of Service" },
-  { label: "License", icon: KeyRound, content: "License details (e.g., MIT, Apache 2.0) will be here. Currently, DVPanel source code is proprietary unless otherwise stated.", title: "DVPanel License" },
+  { label: "License", icon: KeyRound, content: licenseAgreementContent, title: "DVPanel License" },
   { label: "Privacy Policy", icon: BookUser, content: "Privacy Policy details will be available here. DVPanel may collect anonymous usage data if telemetry is enabled (feature pending). No personal data is collected by default.", title: "Privacy Policy" },
 ];
 
