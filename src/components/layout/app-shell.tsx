@@ -16,7 +16,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation'; // Added useRouter
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   Layers,
@@ -42,8 +42,8 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'; 
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { useEffect, useState } from 'react'; // Added useState, useEffect
-import { logout } from '@/app/logout/actions'; // Import the logout action
+import { useEffect, useState } from 'react';
+import { logout } from '@/app/(app)/logout/actions'; // Adjusted import path for logout
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -62,8 +62,7 @@ interface CurrentUser {
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { state: sidebarState } = useSidebar(); 
-  const isMobile = useIsMobile(); 
+  const { state: sidebarState, isMobile } = useSidebar(); 
   const router = useRouter();
 
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
@@ -92,11 +91,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       }
     }
     fetchUser();
-  }, [pathname]); // Re-fetch user if path changes, might be useful for some auth flows
+  }, [pathname]); 
 
   const handleLogout = async () => {
     await logout();
-    // The redirect is handled within the logout server action
   };
 
   return (
@@ -118,6 +116,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   isActive={isActive}
                   variant="default"
                   size="default"
+                  // href={item.href} // Removed as Link handles href
                 >
                   <item.icon />
                   <span className={cn(
@@ -136,20 +135,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 </SidebarMenuButton>
               );
 
-              let linkElement = (
+              let linkWrappedButton = (
                 <Link href={item.href} legacyBehavior passHref>
+                  {/* SidebarMenuButton now renders a button/span, so Link legacyBehavior makes it navigable */}
                   {menuButton}
                 </Link>
               );
               
-              let finalElement = linkElement;
+              let finalElement = linkWrappedButton;
 
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
                  finalElement = (
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        {linkElement}
+                        {linkWrappedButton}
                       </TooltipTrigger>
                       <TooltipContent side="right" align="center">
                         <p>{item.label}</p>
