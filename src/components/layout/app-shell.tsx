@@ -69,11 +69,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {navItems.map((item) => {
               const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
               
-              const menuButton = (
+              const menuButtonElement = (
                 <SidebarMenuButton
                   isActive={isActive}
-                  variant="default"
-                  size="default"
+                  // href is passed by Link asChild
                 >
                   <item.icon />
                   <span>{item.label}</span>
@@ -82,23 +81,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   )}
                 </SidebarMenuButton>
               );
-
-              // Temporarily simplify by removing Tooltip to isolate Link/Button interaction
-              const navElement = (
-                <Link href={item.href} legacyBehavior passHref>
-                  {/* SidebarMenuButton renders a <button> and should ignore href */}
-                  {menuButton}
-                </Link>
-              );
               
-              let navItemContent;
-              // Re-introduce Tooltip logic later if the Link > Button works
+              let navElement;
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
-                navItemContent = (
+                navElement = (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                       {/* TooltipTrigger wraps the Link (which renders an <a>) */}
-                      {navElement}
+                      <Link href={item.href} asChild>
+                        {menuButtonElement}
+                      </Link>
                     </TooltipTrigger>
                     <TooltipContent side="right" align="center">
                       {item.label}
@@ -106,12 +97,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   </Tooltip>
                 );
               } else {
-                navItemContent = navElement;
+                navElement = (
+                  <Link href={item.href} asChild>
+                    {menuButtonElement}
+                  </Link>
+                );
               }
 
               return (
                 <SidebarMenuItem key={item.label}>
-                  {navItemContent}
+                  {navElement}
                 </SidebarMenuItem>
               );
             })}
