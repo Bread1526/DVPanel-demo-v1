@@ -10,7 +10,7 @@ import type {
 } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 5000 // Changed from 1000000 to 5000ms (5 seconds)
+const TOAST_REMOVE_DELAY = 1000 // Changed from 5000ms to 1000ms (1 second)
 
 type ToasterToast = ToastProps & {
   id: string
@@ -61,7 +61,9 @@ const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
 
 const addToRemoveQueue = (toastId: string) => {
   if (toastTimeouts.has(toastId)) {
-    return
+    // Clear existing timeout if we're re-queueing (e.g., manual dismiss after auto-dismiss started)
+    clearTimeout(toastTimeouts.get(toastId))
+    toastTimeouts.delete(toastId)
   }
 
   const timeout = setTimeout(() => {
@@ -94,8 +96,6 @@ export const reducer = (state: State, action: Action): State => {
     case "DISMISS_TOAST": {
       const { toastId } = action
 
-      // ! Side effects ! - This could be extracted into a dismissToast() action,
-      // but I'll keep it here for simplicity
       if (toastId) {
         addToRemoveQueue(toastId)
       } else {
