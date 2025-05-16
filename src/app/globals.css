@@ -45,7 +45,8 @@ body {
     --sidebar-border: 220 13% 88%;
     --sidebar-ring: 217 91% 55%;
 
-    --toast-duration: 5s; /* Variable for toast duration */
+    --toast-duration: 5s; /* Default toast duration for CSS animation fallback */
+    --toast-actual-duration: var(--toast-duration); /* Actual duration set by JS */
   }
 
   .dark {
@@ -99,7 +100,7 @@ body {
 @layer components {
   .toast-timer-bar {
     @apply absolute bottom-0 left-0 h-1 rounded-bl-md rounded-br-md bg-primary;
-    animation: shrink-width var(--toast-duration) linear forwards;
+    animation: shrink-width var(--toast-actual-duration) linear forwards;
   }
   
   /* Specific timer bar color for destructive toasts */

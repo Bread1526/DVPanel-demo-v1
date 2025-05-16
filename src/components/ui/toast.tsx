@@ -4,9 +4,10 @@
 import * as React from "react"
 import * as ToastPrimitives from "@radix-ui/react-toast"
 import { cva, type VariantProps } from "class-variance-authority"
-import { X } from "lucide-react"
+import { X, Copy } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { Button } from "./button" // For the copy button
 
 const ToastProvider = ToastPrimitives.Provider
 
@@ -44,16 +45,54 @@ const toastVariants = cva(
 const Toast = React.forwardRef<
   React.ElementRef<typeof ToastPrimitives.Root>,
   React.ComponentPropsWithoutRef<typeof ToastPrimitives.Root> &
-    VariantProps<typeof toastVariants>
->(({ className, variant, ...props }, ref) => {
+    VariantProps<typeof toastVariants> & {
+      errorContent?: string
+      // enableCopyError prop to be sourced from settings, passed by Toaster
+      // disableAutoClose prop to be sourced from settings, passed by Toaster
+    }
+>(({ className, variant, children, errorContent, duration, ...props }, ref) => {
+  const [showTimerBar, setShowTimerBar] = React.useState(duration !== Infinity && duration !== undefined);
+
+  React.useEffect(() => {
+    setShowTimerBar(duration !== Infinity && duration !== undefined);
+  }, [duration]);
+
+  const handleCopy = () => {
+    if (errorContent) {
+      navigator.clipboard.writeText(errorContent).then(() => {
+        // Optional: Show a "Copied!" temporary message or change button icon
+        console.log("Error content copied to clipboard");
+      }).catch(err => {
+        console.error("Failed to copy error content:", err);
+      });
+    }
+  };
+  
+  // Placeholder: These would ideally come from settings context or props
+  const enableCopyErrorFromSettings = props["data-enable-copy-error"] === "true"; // Example of how it might be passed
+  const actualDuration = typeof duration === 'number' && duration !== Infinity ? `${duration / 1000}s` : '0s';
+
+
   return (
     <ToastPrimitives.Root
       ref={ref}
       className={cn(toastVariants({ variant }), className)}
+      duration={duration} // Pass duration to Radix
       {...props}
+      style={{ '--toast-actual-duration': actualDuration } as React.CSSProperties}
     >
-      {props.children}
-      <div className="toast-timer-bar" />
+      <div className="flex-grow">{children}</div>
+      {enableCopyErrorFromSettings && errorContent && variant === "destructive" && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="absolute right-8 top-1/2 -translate-y-1/2 group-[.destructive]:text-destructive-foreground group-[.destructive]:hover:bg-destructive/80"
+          onClick={handleCopy}
+        >
+          <Copy className="h-4 w-4 mr-1" /> Copy
+        </Button>
+      )}
+      {showTimerBar && <div className="toast-timer-bar" />}
     </ToastPrimitives.Root>
   )
 })
@@ -116,7 +155,11 @@ const ToastDescription = React.forwardRef<
 ))
 ToastDescription.displayName = ToastPrimitives.Description.displayName
 
-type ToastProps = React.ComponentPropsWithoutRef<typeof Toast>
+type ToastProps = React.ComponentPropsWithoutRef<typeof Toast> & {
+  errorContent?: string;
+  // enableCopyError?: boolean; // Passed via data attribute for now
+  // disableAutoClose?: boolean; // Handled by duration=Infinity
+};
 
 type ToastActionElement = React.ReactElement<typeof ToastAction>
 

@@ -10,13 +10,15 @@ import type {
 } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 1000 // Changed from 5000ms to 1000ms (1 second)
+const TOAST_REMOVE_DELAY = 1000 // Delay for internal cleanup *after* visual dismissal
 
 type ToasterToast = ToastProps & {
   id: string
   title?: React.ReactNode
   description?: React.ReactNode
   action?: ToastActionElement
+  duration?: number // Added duration for Radix Toast
+  errorContent?: string // For copy error button
 }
 
 const actionTypes = {
@@ -61,7 +63,6 @@ const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
 
 const addToRemoveQueue = (toastId: string) => {
   if (toastTimeouts.has(toastId)) {
-    // Clear existing timeout if we're re-queueing (e.g., manual dismiss after auto-dismiss started)
     clearTimeout(toastTimeouts.get(toastId))
     toastTimeouts.delete(toastId)
   }
@@ -143,6 +144,10 @@ function dispatch(action: Action) {
 
 type Toast = Omit<ToasterToast, "id">
 
+// TODO: Integrate settings for default duration, disableAll, disableAutoClose, enableCopyError etc.
+// For now, `duration` prop can be passed to override Radix default (5000ms)
+// `debugMode` will also need to be accessible here to override certain behaviors.
+
 function toast({ ...props }: Toast) {
   const id = genId()
 
@@ -153,12 +158,16 @@ function toast({ ...props }: Toast) {
     })
   const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
 
+  // Default duration can be set here or come from settings
+  const duration = props.duration ?? 5000 // Default to 5 seconds if not provided
+
   dispatch({
     type: "ADD_TOAST",
     toast: {
       ...props,
       id,
       open: true,
+      duration: duration, // Pass duration to Radix Toast
       onOpenChange: (open) => {
         if (!open) dismiss()
       },

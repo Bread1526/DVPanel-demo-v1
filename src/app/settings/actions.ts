@@ -6,6 +6,13 @@ import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storage
 import { getDataPath } from "@/backend/lib/config";
 import path from "path";
 
+const popupSettingsSchema = z.object({
+  notificationDuration: z.coerce.number().min(2).max(15).default(5),
+  disableAllNotifications: z.boolean().default(false),
+  disableAutoClose: z.boolean().default(false),
+  enableCopyError: z.boolean().default(false),
+  showConsoleErrorsInNotifications: z.boolean().default(false),
+});
 
 const panelSettingsSchema = z.object({
   panelPort: z
@@ -19,27 +26,30 @@ const panelSettingsSchema = z.object({
   panelIp: z
     .string()
     .optional()
-    .transform(e => e === "" ? undefined : e) // Transform empty string to undefined for optional validation
+    .transform(e => e === "" ? undefined : e)
     .refine(
       (val) =>
-        val === undefined || // Allow undefined (empty input)
+        val === undefined ||
         /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(
           val
         ) ||
-        /^[a-zA-Z0-9.-]+$/.test(val), // Basic domain check
+        /^[a-zA-Z0-9.-]+$/.test(val),
       {
         message:
           "Must be a valid IPv4 address, domain name, or empty (for 0.0.0.0).",
       }
     ),
   debugMode: z.boolean().optional().default(false),
+  popup: popupSettingsSchema.default({
+    notificationDuration: 5,
+    disableAllNotifications: false,
+    disableAutoClose: false,
+    enableCopyError: false,
+    showConsoleErrorsInNotifications: false,
+  }),
 });
 
-export interface PanelSettingsData {
-  panelPort: string;
-  panelIp: string; // Stored as empty string if user leaves it blank
-  debugMode: boolean;
-}
+export type PanelSettingsData = z.infer<typeof panelSettingsSchema>;
 
 export interface SavePanelSettingsState {
   message: string;
@@ -48,6 +58,13 @@ export interface SavePanelSettingsState {
     panelPort?: string[];
     panelIp?: string[];
     debugMode?: string[];
+    popup?: {
+      notificationDuration?: string[];
+      disableAllNotifications?: string[];
+      disableAutoClose?: string[];
+      enableCopyError?: string[];
+      showConsoleErrorsInNotifications?: string[];
+    };
     general?: string;
   };
   data?: PanelSettingsData;
@@ -59,7 +76,7 @@ export interface LoadPanelSettingsState {
   data?: PanelSettingsData;
 }
 
-const SETTINGS_FILENAME = "settings.json"; // Kept it simple without the dot
+const SETTINGS_FILENAME = "settings.json";
 
 export async function savePanelSettings(
   prevState: SavePanelSettingsState,
@@ -69,6 +86,13 @@ export async function savePanelSettings(
     panelPort: formData.get("panel-port") as string,
     panelIp: formData.get("panel-ip") as string,
     debugMode: formData.get("debug-mode") === "on",
+    popup: {
+      notificationDuration: parseInt(formData.get("popup-duration") as string || "5", 10),
+      disableAllNotifications: formData.get("popup-disable-all") === "on",
+      disableAutoClose: formData.get("popup-disable-autoclose") === "on",
+      enableCopyError: formData.get("popup-enable-copy") === "on",
+      showConsoleErrorsInNotifications: formData.get("popup-show-console-errors") === "on",
+    }
   };
 
   const validatedFields = panelSettingsSchema.safeParse(rawFormData);
@@ -77,14 +101,13 @@ export async function savePanelSettings(
     return {
       message: "Validation failed. Please check your input.",
       status: "error",
-      errors: validatedFields.error.flatten().fieldErrors,
+      errors: validatedFields.error.flatten().fieldErrors as SavePanelSettingsState['errors'],
     };
   }
 
   const dataToSave: PanelSettingsData = {
-    panelPort: validatedFields.data.panelPort,
+    ...validatedFields.data,
     panelIp: validatedFields.data.panelIp || "", 
-    debugMode: validatedFields.data.debugMode,
   };
 
   try {
@@ -114,42 +137,54 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
   try {
     const loadedData = await loadEncryptedData(SETTINGS_FILENAME);
     if (loadedData) {
+      // Ensure defaults are applied if parts of the data are missing
       const parsedData = panelSettingsSchema.safeParse(loadedData);
       if (parsedData.success) {
         return {
           status: "success",
           data: {
-            panelPort: parsedData.data.panelPort,
+            ...parsedData.data,
             panelIp: parsedData.data.panelIp || "",
-            debugMode: parsedData.data.debugMode,
           },
         };
       } else {
-         console.warn("Loaded settings file has incorrect format or missing fields, applying defaults:", parsedData.error.flatten().fieldErrors);
+        console.warn("Loaded settings file has incorrect format or missing fields, applying defaults:", parsedData.error.flatten().fieldErrors);
+        // Construct a default structure if parsing fails but some data might be salvageable or defaults are needed
+        const defaultData: PanelSettingsData = {
+          panelPort: (loadedData as any).panelPort || "27407",
+          panelIp: (loadedData as any).panelIp || "",
+          debugMode: (loadedData as any).debugMode === true,
+          popup: { // Apply defaults for popup specifically
+            notificationDuration: (loadedData as any).popup?.notificationDuration ?? 5,
+            disableAllNotifications: (loadedData as any).popup?.disableAllNotifications ?? false,
+            disableAutoClose: (loadedData as any).popup?.disableAutoClose ?? false,
+            enableCopyError: (loadedData as any).popup?.enableCopyError ?? false,
+            showConsoleErrorsInNotifications: (loadedData as any).popup?.showConsoleErrorsInNotifications ?? false,
+          }
+        };
         return {
           status: "success", 
           message: "Settings file has an invalid format or missing fields. Defaults applied for some settings.",
-          data: {
-            panelPort: (loadedData as any).panelPort || "27407",
-            panelIp: (loadedData as any).panelIp || "",
-            debugMode: (loadedData as any).debugMode === true, 
-          },
+          data: defaultData,
         };
       }
     } else {
+      // Return full default structure if no file found
+      const defaults = panelSettingsSchema.parse({});
       return {
         status: "not_found",
         message: "No existing settings file found. Defaults will be used.",
-        data: { panelPort: "27407", panelIp: "", debugMode: false },
+        data: { ...defaults, panelIp: "" }, // ensure panelIp default is consistent
       };
     }
   } catch (error) {
     console.error("Error loading panel settings:", error);
     const errorMessage = error instanceof Error ? error.message : "An unknown error occurred while loading settings.";
+    const defaults = panelSettingsSchema.parse({});
     return {
       status: "error",
       message: `Failed to load settings: ${errorMessage}`,
-       data: { panelPort: "27407", panelIp: "", debugMode: false }, 
+      data: { ...defaults, panelIp: "" },
     };
   }
 }
