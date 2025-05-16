@@ -71,7 +71,15 @@ const SidebarProvider = React.forwardRef<
     const isMobile = useIsMobile()
     const [openMobile, setOpenMobile] = React.useState(false)
 
-    const [_open, _setOpen] = React.useState(defaultOpen)
+    const [_open, _setOpen] = React.useState(() => {
+      if (typeof window === "undefined") return defaultOpen;
+      const cookieValue = document.cookie
+        .split("; ")
+        .find((row) => row.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
+        ?.split("=")[1];
+      return cookieValue ? cookieValue === "true" : defaultOpen;
+    });
+
     const open = openProp ?? _open
     const setOpen = React.useCallback(
       (value: boolean | ((value: boolean) => boolean)) => {
@@ -526,10 +534,8 @@ const sidebarMenuButtonVariants = cva(
 
 const SidebarMenuButton = React.forwardRef<
   HTMLAnchorElement,
-  React.ComponentPropsWithoutRef<"a"> & { // Base props for an anchor element
+  React.ComponentPropsWithoutRef<"a"> & {
     isActive?: boolean;
-    // `asChild` prop, if passed by a parent like `Link asChild`, will be captured here
-    asChild?: boolean; 
   } & VariantProps<typeof sidebarMenuButtonVariants>
 >(
   (
@@ -539,13 +545,12 @@ const SidebarMenuButton = React.forwardRef<
       size = "default",
       className,
       children,
-      asChild: _asChild, // Capture the asChild prop
-      ...props // All other props, including href, onClick from Link
+      // Explicitly destructure asChild and do not spread it
+      asChild: _asChildIgnored, 
+      ...otherProps
     },
     ref
   ) => {
-    // _asChild is captured and not spread to the <a> tag
-    // props will contain href, onClick from Link, and any other valid anchor attributes
     return (
       <a
         ref={ref}
@@ -553,7 +558,7 @@ const SidebarMenuButton = React.forwardRef<
         data-size={size}
         data-active={isActive}
         className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
-        {...props} // Spread the remaining props (href, onClick, etc.)
+        {...otherProps}
       >
         {children}
       </a>
@@ -730,5 +735,3 @@ export {
   SidebarTrigger,
   useSidebar,
 }
-
-    
