@@ -1,9 +1,10 @@
+
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { MoreHorizontal, Ban, XCircle, Sparkles, FileWarning, PlusCircle, ShieldAlert } from "lucide-react";
+import { MoreHorizontal, Ban, XCircle, Sparkles, FileWarning, PlusCircle, ShieldAlert, Trash2 } from "lucide-react"; // Added Trash2
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
