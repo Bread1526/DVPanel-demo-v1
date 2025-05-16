@@ -25,6 +25,8 @@ export default function RootLayout({
 }>) {
   // This RootLayout no longer checks the path or conditionally renders AppShell.
   // It provides the global HTML structure, theme, and toaster.
+  // The decision to show AppShell or not is handled by nested layouts
+  // (e.g., src/app/(app)/layout.tsx vs src/app/login/layout.tsx).
   return (
     <html lang="en" suppressHydrationWarning>
       <body
