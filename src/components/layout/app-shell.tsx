@@ -71,7 +71,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               
               const menuButton = (
                 <SidebarMenuButton
-                  // href={item.href} // href is passed by Link
                   isActive={isActive}
                 >
                   <item.icon />
@@ -82,8 +81,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 </SidebarMenuButton>
               );
 
-              let linkWrappedButton = (
-                <Link href={item.href} asChild>
+              let navElement = (
+                <Link href={item.href} legacyBehavior passHref>
                   {menuButton}
                 </Link>
               );
@@ -93,8 +92,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <SidebarMenuItem key={item.label}>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        {/* TooltipTrigger wraps the Link which passes its props to SidebarMenuButton */}
-                        {linkWrappedButton}
+                        {navElement}
                       </TooltipTrigger>
                       <TooltipContent side="right" align="center">
                         {item.label}
@@ -106,7 +104,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
               return (
                 <SidebarMenuItem key={item.label}>
-                  {linkWrappedButton}
+                  {navElement}
                 </SidebarMenuItem>
               );
             })}
@@ -152,5 +150,3 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </>
   );
 }
-
-    
