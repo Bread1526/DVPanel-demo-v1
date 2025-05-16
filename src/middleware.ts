@@ -1,8 +1,7 @@
-
 // src/middleware.ts
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getIronSession } from 'iron-session'; // Changed this line
+import { getIronSession } from 'iron-session';
 import { sessionOptions, type SessionData } from '@/lib/session';
 
 export async function middleware(request: NextRequest) {
@@ -10,10 +9,20 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Define public paths (accessible without login)
-  const publicPaths = ['/login', '/api/auth/user']; // Add any other public API routes if needed
+  // /api/auth/user is used by AppShell to check login status for UI rendering.
+  const publicPaths = ['/login', '/api/auth/user']; 
 
-  // If trying to access a public path, allow it
-  if (publicPaths.some(path => pathname.startsWith(path)) || pathname.endsWith('.ico') || pathname.endsWith('.png') || pathname.startsWith('/_next/')) {
+  // Allow access to static assets, Next.js internals, and specific public API routes
+  if (pathname.startsWith('/_next/') || 
+      pathname.endsWith('.ico') || 
+      pathname.endsWith('.png') || // General image extension
+      pathname.startsWith('/images/') || // If you have a public/images folder
+      pathname.startsWith('/api/ping')) { // Example public API
+    return NextResponse.next();
+  }
+
+  // If trying to access an explicitly defined public path
+  if (publicPaths.some(path => pathname.startsWith(path))) {
     // If user is logged in and tries to access /login, redirect to dashboard
     if (session.isLoggedIn && pathname.startsWith('/login')) {
       return NextResponse.redirect(new URL('/', request.url));
@@ -21,11 +30,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // If user is not logged in and trying to access a protected path, redirect to login
+  // For all other paths, if user is not logged in, redirect to login
   if (!session.isLoggedIn) {
-    // Preserve the originally requested path in a query parameter for redirection after login
     const loginUrl = new URL('/login', request.url);
-    if (pathname !== '/') { // Don't add redirect for the root path itself if it was the target
+    // Preserve the originally requested path for redirection after login,
+    // unless it was the root path itself.
+    if (pathname !== '/') {
         loginUrl.searchParams.set('redirect', pathname + request.nextUrl.search);
     }
     return NextResponse.redirect(loginUrl);
@@ -35,7 +45,7 @@ export async function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
-// See "Matching Paths" below to learn more
+// Updated matcher to be more explicit about what to exclude.
 export const config = {
   matcher: [
     /*
@@ -43,9 +53,12 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - files under /public (like images, etc.)
-     * Match all paths that don't look like API routes or static assets
+     * - /images/ (public images) - adjust if your public image folder is different
+     * - /api/ping (example public API)
+     * Also, explicitly exclude /api/auth/user and /login from being unnecessarily processed by the main protection logic,
+     * as they have their own handling within the middleware.
+     * The goal is to protect application pages and sensitive APIs.
      */
-    '/((?!api/ping|_next/static|_next/image|favicon.ico|images/).*)',
+    '/((?!_next/static|_next/image|favicon.ico|images/|api/ping|api/auth/user|login).*)',
   ],
 };
