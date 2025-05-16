@@ -6,7 +6,7 @@ import { getIronSession } from 'iron-session';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { sessionOptions, type SessionData } from '@/lib/session';
-import { loadUsers, verifyPassword } from '@/app/roles/actions'; 
+import { loadUsers, verifyPassword } from '@/app/(app)/roles/actions'; 
 
 const LoginSchema = z.object({
   username: z.string().min(1, "Username is required."),
@@ -47,11 +47,11 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     const ownerPassword = process.env.OWNER_PASSWORD;
 
     if (!ownerUsername || !ownerPassword) {
-      console.warn("OWNER_USERNAME or OWNER_PASSWORD is not set in .env.local. Fallback owner login is disabled.");
+      console.warn("[LoginAction] OWNER_USERNAME or OWNER_PASSWORD is not set in .env.local. Fallback owner login is disabled.");
     } else if (username === ownerUsername && password === ownerPassword) {
-      console.log("Owner login successful");
+      console.log("[LoginAction] Owner login successful for:", ownerUsername);
       session.user = {
-        id: 'owner_root', // Special ID for owner
+        id: 'owner_root', 
         username: ownerUsername,
         role: 'Owner',
       };
@@ -59,28 +59,38 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
       await session.save();
       
       const destination = redirectUrl || '/';
-      redirect(destination); // This will throw a NEXT_REDIRECT error, caught by Next.js
-      // return { message: "Login successful! Redirecting...", status: "success" }; // Won't be reached if redirect works
+      console.log(`[LoginAction] Owner login redirecting to: ${destination}`);
+      redirect(destination); 
     }
 
     // 2. If not owner, check users from users.json
+    console.log("[LoginAction] Attempting login for regular user:", username);
     const usersResult = await loadUsers();
     if (usersResult.status !== 'success' || !usersResult.users) {
+      console.error("[LoginAction] Error loading user data from users.json:", usersResult.error);
       return { message: "Error loading user data. Owner login (if configured) might still work.", status: "error" };
     }
     
     const user = usersResult.users.find(u => u.username === username);
 
     if (!user) {
+      console.log("[LoginAction] User not found:", username);
       return { message: "Invalid username or password.", status: "error" };
+    }
+    
+    if (user.status === 'Inactive') {
+        console.log(`[LoginAction] User ${username} is inactive.`);
+        return { message: "This account is inactive. Please contact an administrator.", status: "error" };
     }
 
     const isPasswordValid = await verifyPassword(password, user.hashedPassword, user.salt);
     if (!isPasswordValid) {
+      console.log("[LoginAction] Invalid password for user:", username);
       return { message: "Invalid username or password.", status: "error" };
     }
 
     // Password is valid, create session for regular user
+    console.log("[LoginAction] Regular user login successful for:", username);
     session.user = {
       id: user.id,
       username: user.username,
@@ -90,15 +100,14 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     await session.save();
     
     const destination = redirectUrl || '/';
-    redirect(destination); // This will throw a NEXT_REDIRECT error
-    // return { message: "Login successful! Redirecting...", status: "success" }; // Won't be reached
+    console.log(`[LoginAction] Regular user login redirecting to: ${destination}`);
+    redirect(destination); 
 
   } catch (error: any) {
-    // If error is NEXT_REDIRECT, Next.js handles it. Re-throw to ensure it's handled.
     if (error.digest?.startsWith('NEXT_REDIRECT')) {
       throw error;
     }
-    console.error("Login error:", error);
+    console.error("[LoginAction] Login error:", error);
     return { message: "An unexpected error occurred during login.", status: "error" };
   }
 }
