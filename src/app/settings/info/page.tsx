@@ -7,40 +7,106 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import Image from 'next/image';
-import { Info as InfoIcon, Link as LinkIcon, ExternalLink, Wifi, ListTree } from "lucide-react";
+import { 
+  Info as InfoIcon, 
+  Link as LinkIcon, 
+  ExternalLink, 
+  Wifi, 
+  ListTree,
+  LayoutDashboard,
+  Settings,
+  SlidersHorizontal,
+  HardDrive,
+  Shield,
+  MessageSquareMore,
+  Bug,
+  Settings2, // For General settings item
+  Terminal,
+  Layers,
+  FileText,
+  Network,
+  Users,
+  ShieldCheck
+} from "lucide-react";
 
 const sitemapContent = (
-  <div className="space-y-3 text-sm">
-    <p className="font-semibold text-base">DVPanel Application Sitemap:</p>
-    <ul className="list-disc list-inside space-y-1 pl-2">
-      <li><strong className="font-medium">Main Sections:</strong>
-        <ul className="list-circle list-inside pl-4 space-y-0.5">
-          <li>Dashboard (<code>/</code>)</li>
-          <li>Projects (<code>/projects</code>)</li>
-          <li>File Manager (<code>/files</code>)</li>
-          <li>Port Manager (<code>/ports</code>)</li>
-          <li>User Roles (<code>/roles</code>)</li>
-          <li>License (<code>/license</code>)</li>
-          <li>Settings (<code>/settings</code>)
-            <ul className="list-disc list-inside pl-6 space-y-0.5">
-              <li>Panel (<code>/settings</code> or <code>/settings/panel</code>)</li>
-              <li>Daemon (<code>/settings/daemon</code>)</li>
-              <li>Security (<code>/settings/security</code>)</li>
-              <li>Popups (<code>/settings/popups</code>)</li>
-              <li>Debug (<code>/settings/debug</code>)</li>
-              <li>General (<code>/settings/general</code>)</li>
-              <li>Info (<code>/settings/info</code>)</li>
-            </ul>
-          </li>
-        </ul>
-      </li>
-      <li><strong className="font-medium">API Endpoints:</strong>
-        <ul className="list-circle list-inside pl-4 space-y-0.5">
-            <li>Ping (<code>/api/ping</code>) - Used for latency check.</li>
-        </ul>
-      </li>
-    </ul>
-    <p className="mt-2 text-xs text-muted-foreground">This sitemap provides an overview of the primary navigable routes within the DVPanel application.</p>
+  <div className="space-y-6 text-sm">
+    <div className="p-4 border rounded-lg bg-card shadow-sm">
+      <h3 className="text-lg font-semibold mb-3 text-primary flex items-center">
+        <LayoutDashboard className="mr-2 h-5 w-5" /> Main Application
+      </h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {[
+          { name: 'Dashboard', path: '/', icon: LayoutDashboard },
+          { name: 'Projects', path: '/projects', icon: Layers },
+          { name: 'File Manager', path: '/files', icon: FileText },
+          { name: 'Port Manager', path: '/ports', icon: Network },
+          { name: 'User Roles', path: '/roles', icon: Users },
+          { name: 'License', path: '/license', icon: ShieldCheck },
+        ].map(page => (
+          <div key={page.name} className="p-3 border rounded-md bg-background hover:shadow-lg hover:scale-[1.02] transition-all duration-150 ease-in-out">
+            <div className="flex items-center mb-1">
+              <page.icon className="mr-2 h-4 w-4 text-muted-foreground" />
+              <p className="font-medium text-foreground">{page.name}</p>
+            </div>
+            <p className="text-xs text-muted-foreground ml-6">{page.path}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <div className="p-4 border rounded-lg bg-card shadow-sm">
+      <h3 className="text-lg font-semibold mb-3 text-primary flex items-center">
+        <Settings className="mr-2 h-5 w-5" /> Settings Pages
+      </h3>
+      <div className="space-y-3">
+        <div className="p-3 border rounded-md bg-background hover:shadow-lg hover:scale-[1.02] transition-all duration-150 ease-in-out">
+          <div className="flex items-center mb-1">
+            <Settings className="mr-2 h-4 w-4 text-muted-foreground" />
+            <p className="font-medium text-foreground">Settings Entry</p>
+          </div>
+          <p className="text-xs text-muted-foreground ml-6">/settings (Defaults to Panel)</p>
+        </div>
+        <div className="ml-4 pl-4 border-l-2 border-primary/30 space-y-2 py-2">
+          {[
+            { name: 'Panel', path: '/settings', icon: SlidersHorizontal },
+            { name: 'Daemon', path: '/settings/daemon', icon: HardDrive },
+            { name: 'Security', path: '/settings/security', icon: Shield },
+            { name: 'Popups', path: '/settings/popups', icon: MessageSquareMore },
+            { name: 'Debug', path: '/settings/debug', icon: Bug },
+            { name: 'General', path: '/settings/general', icon: Settings2 },
+            { name: 'Info', path: '/settings/info', icon: InfoIcon },
+          ].map(page => (
+            <div key={page.name} className="p-3 border rounded-md bg-background hover:shadow-lg hover:scale-[1.02] transition-all duration-150 ease-in-out flex items-start">
+              <page.icon className="mr-2 h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium text-foreground">{page.name}</p>
+                <p className="text-xs text-muted-foreground">{page.path}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+    
+    <div className="p-4 border rounded-lg bg-card shadow-sm">
+      <h3 className="text-lg font-semibold mb-3 text-primary flex items-center">
+        <Terminal className="mr-2 h-5 w-5" /> API Endpoints
+      </h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+         <div className="p-3 border rounded-md bg-background hover:shadow-lg hover:scale-[1.02] transition-all duration-150 ease-in-out">
+            <div className="flex items-center mb-1">
+              <LinkIcon className="mr-2 h-4 w-4 text-muted-foreground" />
+              <p className="font-medium text-foreground">Ping</p>
+            </div>
+            <p className="text-xs text-muted-foreground ml-6">/api/ping - Used for latency check.</p>
+          </div>
+      </div>
+    </div>
+
+    <p className="mt-4 text-xs text-center text-muted-foreground">
+      This visual sitemap provides an overview of the DVPanel application structure.
+    </p>
   </div>
 );
 
@@ -56,8 +122,10 @@ export default function InfoPage() {
   const [isPinging, setIsPinging] = useState(false);
 
   useEffect(() => {
-    setIsPinging(true);
-    const intervalId = setInterval(async () => {
+    let intervalId: NodeJS.Timeout;
+
+    const pingServer = async () => {
+      if (!isPinging) setIsPinging(true);
       const startTime = Date.now();
       try {
         const response = await fetch('/api/ping');
@@ -69,31 +137,18 @@ export default function InfoPage() {
         }
       } catch (error) {
         setLatency(null);
+      } finally {
+        if(isPinging && intervalId) setIsPinging(false); // Set to false after first successful or failed ping if interval is running
       }
-    }, 500); // Update every 0.5 seconds
+    };
 
-    // Initial ping
-    (async () => {
-        const startTime = Date.now();
-        try {
-            const response = await fetch('/api/ping');
-            if (response.ok) {
-            const endTime = Date.now();
-            setLatency(endTime - startTime);
-            } else {
-            setLatency(null);
-            }
-        } catch (error) {
-            setLatency(null);
-        }
-        setIsPinging(false); // Set to false after initial ping, interval will keep it updated
-    })();
-
+    pingServer(); // Initial ping
+    intervalId = setInterval(pingServer, 500); // Update every 0.5 seconds
 
     return () => {
       clearInterval(intervalId);
     };
-  }, []);
+  }, []); // Removed isPinging from dependency array
 
   return (
     <div>
@@ -119,7 +174,7 @@ export default function InfoPage() {
                     <DialogHeader>
                       <DialogTitle>{item.title || item.label}</DialogTitle>
                     </DialogHeader>
-                    <DialogDescription className="py-4 max-h-[60vh] overflow-y-auto">
+                    <DialogDescription className="py-4 max-h-[70vh] overflow-y-auto">
                       {typeof item.content === 'string' ? <p>{item.content}</p> : item.content}
                     </DialogDescription>
                     <DialogFooter>
