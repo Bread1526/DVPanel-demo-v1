@@ -12,7 +12,7 @@ import { MoreHorizontal, UserPlus, Edit, Trash2, ShieldQuestion, AlertCircle, Lo
 import AddUserRoleDialog from "./components/add-user-role-dialog";
 import { loadUsers, deleteUser, type UserData, type UserActionState } from "./actions";
 import { useToast } from "@/hooks/use-toast";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 
 const rolesDefinitions = [
@@ -22,7 +22,7 @@ const rolesDefinitions = [
   { name: "Custom", description: "Granular permissions assigned per module or page." },
 ];
 
-const OWNER_USERNAME = "root_owner"; // Define the owner username to filter out
+const OWNER_USERNAME = "root_owner"; 
 
 export default function RolesPage() {
   const [users, setUsers] = useState<UserData[]>([]);
@@ -39,7 +39,6 @@ export default function RolesPage() {
     try {
       const result = await loadUsers();
       if (result.status === "success" && result.users) {
-        // Filter out the owner account from the display list
         setUsers(result.users.filter(u => u.username !== OWNER_USERNAME));
       } else {
         setError(result.error || "Failed to load users.");
@@ -65,11 +64,11 @@ export default function RolesPage() {
       const result: UserActionState = await deleteUser(userToDelete.id);
       if (result.status === "success") {
         toast({ title: "User Deleted", description: result.message, duration: 5000 });
-        fetchUsers(); // Refresh the list
+        fetchUsers(); 
       } else {
         toast({ title: "Error Deleting User", description: result.message, variant: "destructive", duration: 5000 });
       }
-      setUserToDelete(null); // Close dialog
+      setUserToDelete(null); 
     });
   };
 
@@ -107,7 +106,7 @@ export default function RolesPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Username</TableHead>
-                    <TableHead>Email</TableHead>
+                    {/* Email column removed as per previous request */}
                     <TableHead>Role</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -117,7 +116,7 @@ export default function RolesPage() {
                   {users.map((user) => (
                     <TableRow key={user.id}>
                       <TableCell className="font-medium">{user.username}</TableCell>
-                      <TableCell className="text-muted-foreground">{user.email}</TableCell>
+                      {/* Email cell removed */}
                       <TableCell>
                         <Badge variant={user.role === 'Administrator' ? 'secondary' : 'outline'}>
                           {user.role}
@@ -151,15 +150,16 @@ export default function RolesPage() {
                             />
                             <DropdownMenuItem><ShieldQuestion className="mr-2 h-4 w-4" /> View Permissions</DropdownMenuItem>
                             
-                            <AlertDialogTrigger asChild>
-                                <DropdownMenuItem 
-                                  className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground"
-                                  onSelect={(e) => { e.preventDefault(); setUserToDelete(user); }}
-                                >
-                                  <Trash2 className="mr-2 h-4 w-4" /> Delete User
-                                </DropdownMenuItem>
-                            </AlertDialogTrigger>
-
+                            {/* Removed AlertDialogTrigger wrapper */}
+                            <DropdownMenuItem 
+                              className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground"
+                              onSelect={(e) => { 
+                                e.preventDefault(); 
+                                setUserToDelete(user); 
+                              }}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" /> Delete User
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -183,34 +183,37 @@ export default function RolesPage() {
                 <p className="text-sm text-muted-foreground">{role.description}</p>
               </div>
             ))}
-            {/* <Button variant="outline" className="w-full shadow-md hover:scale-105 transform transition-transform duration-150" disabled>
-              <PlusCircle className="mr-2 h-4 w-4" /> Create Custom Role (Soon)
-            </Button> */}
           </CardContent>
         </Card>
       </div>
       
-      {userToDelete && (
-        <AlertDialog open={!!userToDelete} onOpenChange={(open) => !open && setUserToDelete(null)}>
-            <AlertDialogContent>
-            <AlertDialogHeader>
+      <AlertDialog 
+        open={!!userToDelete} 
+        onOpenChange={(isOpen) => { 
+          if (!isOpen) setUserToDelete(null); 
+        }}
+      >
+        <AlertDialogContent>
+          {userToDelete && ( // Conditionally render content based on userToDelete being non-null
+            <>
+              <AlertDialogHeader>
                 <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
                 <AlertDialogDescription>
-                This action cannot be undone. This will permanently delete the user account for 
-                <span className="font-semibold"> {userToDelete.username}</span>.
+                  This action cannot be undone. This will permanently delete the user account for 
+                  <span className="font-semibold"> {userToDelete.username}</span>.
                 </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
                 <AlertDialogCancel onClick={() => setUserToDelete(null)} disabled={isPendingDelete}>Cancel</AlertDialogCancel>
                 <AlertDialogAction onClick={handleDeleteUser} disabled={isPendingDelete} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
-                {isPendingDelete ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                Delete User
+                  {isPendingDelete ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                  Delete User
                 </AlertDialogAction>
-            </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
-      )}
-
+              </AlertDialogFooter>
+            </>
+          )}
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
