@@ -533,9 +533,12 @@ const sidebarMenuButtonVariants = cva(
 )
 
 const SidebarMenuButton = React.forwardRef<
-  HTMLAnchorElement,
-  React.ComponentPropsWithoutRef<'a'> & {
+  HTMLButtonElement, // Changed from HTMLAnchorElement
+  React.ComponentPropsWithoutRef<'button'> & { // Changed from 'a'
     isActive?: boolean;
+    // No asChild prop needed here if using legacyBehavior for Link
+    // href can be accepted but won't be used directly by the button for navigation
+    href?: string; 
   } & VariantProps<typeof sidebarMenuButtonVariants>
 >(
   (
@@ -545,22 +548,22 @@ const SidebarMenuButton = React.forwardRef<
       size = 'default',
       className,
       children,
-      asChild: _asChildIgnored, // Explicitly destructure asChild to prevent it from being spread
-      ...otherProps
+      // href, // href is implicitly part of ComponentPropsWithoutRef<'button'> if type="link" but we are not using it like that
+      ...otherProps // This will include onClick, etc., from Link when legacyBehavior is used
     },
     ref
   ) => {
     return (
-      <a
+      <button // Changed to <button>
         ref={ref}
         data-sidebar="menu-button"
         data-size={size}
-        data-active={isActive}
+        data-active={String(isActive)} // Ensure boolean becomes string for data attribute
         className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
-        {...otherProps} // otherProps will not contain _asChildIgnored
+        {...otherProps} // Spread props like onClick from parent Link
       >
         {children}
-      </a>
+      </button>
     );
   }
 );
