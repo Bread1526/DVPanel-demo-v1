@@ -30,6 +30,7 @@ async function getPanelSettingsForDebug(): Promise<PanelSettingsData | undefined
         const settingsResult = await loadGeneralPanelSettings();
         return settingsResult.data;
     } catch {
+        // If settings can't be loaded, default to debugMode false
         return undefined;
     }
 }
@@ -43,7 +44,7 @@ async function ensureOwnerFileOnLogin(ownerUsername: string, ownerPasswordEnv: s
     const dataPath = getDataPath();
     const ownerFilename = `${ownerUsername}-Owner.json`;
     const ownerFilePath = path.join(dataPath, ownerFilename);
-    if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Target owner file path: ${ownerFilePath}`);
+    if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Target owner file path for creation/update: ${ownerFilePath}`);
 
     const { hash, salt } = await hashPassword(ownerPasswordEnv);
     if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Password hashed for owner.`);
@@ -58,17 +59,17 @@ async function ensureOwnerFileOnLogin(ownerUsername: string, ownerPasswordEnv: s
           createdAt = (existingOwnerData as UserData).createdAt;
           if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Preserving createdAt: ${createdAt}`);
         } else {
-          console.warn(`[LoginAction - ensureOwnerFileOnLogin] Could not find valid createdAt in existing owner file or file empty/corrupt.`);
+          if (debugMode) console.warn(`[LoginAction - ensureOwnerFileOnLogin] Could not find valid createdAt in existing owner file ${ownerFilename} or file was empty/corrupt. Using current time for createdAt.`);
         }
       } catch (loadErr) {
-        console.warn(`[LoginAction - ensureOwnerFileOnLogin] Error loading existing owner file ${ownerFilename} to preserve createdAt:`, loadErr);
+        if (debugMode) console.warn(`[LoginAction - ensureOwnerFileOnLogin] Error loading existing owner file ${ownerFilename} to preserve createdAt:`, loadErr instanceof Error ? loadErr.message : String(loadErr));
       }
     } else {
-      if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Owner file ${ownerFilename} does not exist. Will create new.`);
+      if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Owner file ${ownerFilename} does not exist. Will create new with current time for createdAt.`);
     }
 
     const ownerUserData: UserData = {
-      id: 'owner_root',
+      id: 'owner_root', // Fixed ID for the owner account
       username: ownerUsername,
       hashedPassword: hash,
       salt: salt,
@@ -76,7 +77,7 @@ async function ensureOwnerFileOnLogin(ownerUsername: string, ownerPasswordEnv: s
       projects: [], // Owners have implicit access to all
       assignedPages: [], // Owners have implicit access to all
       allowedSettingsPages: [], // Owners have implicit access to all
-      lastLogin: now,
+      lastLogin: now, // Set last login time
       status: "Active",
       createdAt: createdAt,
       updatedAt: now,
@@ -84,18 +85,20 @@ async function ensureOwnerFileOnLogin(ownerUsername: string, ownerPasswordEnv: s
     
     if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Owner user data prepared:`, { username: ownerUserData.username, role: ownerUserData.role, id: ownerUserData.id });
     await saveEncryptedData(ownerFilename, ownerUserData);
-    if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Successfully called saveEncryptedData for ${ownerFilename}.`);
+    if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Successfully called saveEncryptedData for ${ownerFilename} at path ${ownerFilePath}.`);
     
     // Verify file existence immediately after save attempt
     if (fs.existsSync(ownerFilePath)) {
         if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] VERIFIED: Owner file ${ownerFilename} exists at ${ownerFilePath} after save.`);
     } else {
-        console.error(`[LoginAction - ensureOwnerFileOnLogin] CRITICAL VERIFICATION FAILURE: Owner file ${ownerFilename} DOES NOT EXIST at ${ownerFilePath} even after saveEncryptedData call. Check storageService or permissions.`);
+        // This log is critical if the file isn't being created.
+        console.error(`[LoginAction - ensureOwnerFileOnLogin] CRITICAL VERIFICATION FAILURE: Owner file ${ownerFilename} DOES NOT EXIST at ${ownerFilePath} even after saveEncryptedData call. Check storageService or filesystem permissions.`);
     }
 
   } catch (e) {
-    console.error("[LoginAction - ensureOwnerFileOnLogin] CRITICAL: Failed to create/update owner user file:", e);
-    throw e; // Propagate error to be caught by the main login try-catch
+    const error = e instanceof Error ? e : new Error(String(e));
+    console.error("[LoginAction - ensureOwnerFileOnLogin] CRITICAL: Failed to create/update owner user file:", error.message, error.stack);
+    // Login proceeds if .env creds are valid, but this error is logged.
   }
 }
 
@@ -114,7 +117,7 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
   const validatedFields = LoginSchema.safeParse(rawFormData);
 
   if (!validatedFields.success) {
-    console.error("[LoginAction] Validation failed:", validatedFields.error.flatten().fieldErrors);
+    if (debugMode) console.error("[LoginAction] Validation failed:", validatedFields.error.flatten().fieldErrors);
     return {
       message: "Validation failed.",
       status: "error",
@@ -134,12 +137,7 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
       if (username === ownerUsernameEnv && password === ownerPasswordEnv) {
         if (debugMode) console.log("[LoginAction] Owner .env credentials match for:", ownerUsernameEnv);
         
-        try {
-          await ensureOwnerFileOnLogin(ownerUsernameEnv, ownerPasswordEnv);
-          if (debugMode) console.log("[LoginAction] Owner file ensured/updated successfully by ensureOwnerFileOnLogin.");
-        } catch (ownerFileError) {
-            console.error("[LoginAction] Error during owner file creation/update, but proceeding with owner login as .env credentials matched:", ownerFileError);
-        }
+        await ensureOwnerFileOnLogin(ownerUsernameEnv, ownerPasswordEnv);
 
         session.user = {
           id: 'owner_root',
@@ -155,15 +153,15 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
         redirect(destination); 
       }
     } else {
-      console.warn("[LoginAction] OWNER_USERNAME or OWNER_PASSWORD is not set in .env.local. The .env owner login path is disabled if no owner file exists yet.");
+      if (debugMode) console.warn("[LoginAction] OWNER_USERNAME or OWNER_PASSWORD is not set in .env.local. The .env owner login path is disabled if no owner file exists yet.");
     }
 
     if (debugMode) console.log("[LoginAction] Attempting login for regular user:", username);
     const usersResult = await loadUsers();
 
     if (usersResult.status !== 'success' || !usersResult.users) {
-      console.error("[LoginAction] Error loading user data for regular users:", usersResult.error);
-      return { message: "System error: Could not load user data. Please try again later or contact support.", status: "error" };
+      if (debugMode) console.error("[LoginAction] Error loading user data for regular users:", usersResult.error);
+      return { message: "System error: Could not load user data.", status: "error" };
     }
     
     const user = usersResult.users.find(u => u.username === username && u.id !== 'owner_root');
@@ -200,9 +198,11 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
 
   } catch (error: any) {
     if (error.digest?.startsWith('NEXT_REDIRECT')) {
-      throw error;
+      throw error; // Next.js redirects should not be caught as errors here
     }
-    console.error("[LoginAction] Unexpected login error:", error);
+    if (debugMode) console.error("[LoginAction] Unexpected login error:", error.message, error.stack);
     return { message: `An unexpected error occurred during login: ${error.message || 'Unknown error'}. Please try again.`, status: "error" };
   }
 }
+
+    
