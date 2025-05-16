@@ -1,5 +1,4 @@
 // src/lib/config.ts
-'use server';
 
 /**
  * @fileOverview Configuration loader for DVPanel.
@@ -48,8 +47,8 @@ export function getDataPath(): string {
   if (memoizedDataPath) {
     return memoizedDataPath;
   }
-  // Node.js 'path' module is not available in edge runtime, but this file is 'use server'
-  // and should primarily be used in server-side contexts (actions, API routes).
+  // Node.js 'path' module is not available in edge runtime, but this file
+  // should primarily be used in server-side contexts (actions, API routes).
   const path = require('path');
   const dataPath = process.env[DATA_PATH_ENV_VAR] || DEFAULT_DATA_PATH;
   
