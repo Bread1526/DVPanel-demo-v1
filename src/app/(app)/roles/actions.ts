@@ -5,44 +5,39 @@ import { z } from "zod";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storageService";
-import { type PanelSettingsData, loadPanelSettings as loadGeneralPanelSettings } from '@/app/(app)/settings/actions'; // Adjusted import path
+import { getDataPath } from "@/backend/lib/config";
+import path from 'path';
+import fs from 'fs/promises'; // Using promises API for readdir and unlink
+import { type PanelSettingsData, loadPanelSettings as loadGeneralPanelSettings } from '@/app/(app)/settings/actions';
 
-const USERS_FILENAME = "users.json";
-
-// Schemas
-const userPermissionsSchema = z.object({
-  projectIds: z.array(z.string()).optional().default([]),
-  // Add other granular permissions here later if needed for "Custom" role
-  // e.g., canViewLogs: z.boolean().optional(), canManageFiles: z.boolean().optional()
-});
-
-export type UserPermissions = z.infer<typeof userPermissionsSchema>;
-
+// Schema for individual user data
 const userSchema = z.object({
   id: z.string().uuid(),
-  username: z.string().min(3, "Username must be at least 3 characters long."),
+  username: z.string().min(3, "Username must be at least 3 characters long.")
+            .regex(/^[a-zA-Z0-9_.-]+$/, "Username can only contain letters, numbers, dots, underscores, and hyphens."),
   hashedPassword: z.string(),
   salt: z.string(),
-  role: z.enum(["Administrator", "Admin", "Custom"]), // "Owner" is not managed here
-  projects: z.array(z.string()).optional().default([]), // For Admin/Custom roles
-  assignedPages: z.array(z.string()).optional().default([]), // For Custom role page/module access
-  allowedSettingsPages: z.array(z.string()).optional().default([]), // For settings page access
-  lastLogin: z.string().optional(),
+  role: z.enum(["Administrator", "Admin", "Custom", "Owner"]), // Added Owner for schema completeness
+  projects: z.array(z.string()).optional().default([]),
+  assignedPages: z.array(z.string()).optional().default([]),
+  allowedSettingsPages: z.array(z.string()).optional().default([]),
+  lastLogin: z.string().datetime().optional(),
   status: z.enum(["Active", "Inactive"]).default("Active"),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
 
 export type UserData = z.infer<typeof userSchema>;
-export type UserInput = Omit<UserData, "id" | "hashedPassword" | "salt" | "createdAt" | "updatedAt" | "lastLogin" | "status"> & {
-  password?: string; // Optional for updates
-  id?: string; // Optional for updates
+
+// Input type for adding or updating a user (password is optional for updates)
+export type UserInput = Omit<UserData, "id" | "hashedPassword" | "salt" | "createdAt" | "updatedAt" | "lastLogin"> & {
+  password?: string;
+  id?: string; // For updates
   status?: "Active" | "Inactive";
 };
 
-
 // Password Hashing Utilities
-async function hashPassword(password: string): Promise<{ hash: string; salt: string }> {
+export async function hashPassword(password: string): Promise<{ hash: string; salt: string }> {
   return new Promise((resolve, reject) => {
     const salt = crypto.randomBytes(16).toString("hex");
     crypto.pbkdf2(password, salt, 100000, 64, "sha512", (err, derivedKey) => {
@@ -61,63 +56,111 @@ export async function verifyPassword(password: string, storedHash: string, salt:
   });
 }
 
-// --- State types for server actions ---
+// State types for server actions
 export interface LoadUsersState {
   users?: UserData[];
   error?: string;
-  status: "success" | "error" | "pending";
+  status: "success" | "error"; // Simplified status
 }
 export interface UserActionState {
   message: string;
-  status: "idle" | "success" | "error" | "validating";
+  status: "success" | "error"; // Simplified
   errors?: Partial<Record<keyof UserInput | "_form", string[]>>;
-  user?: UserData;
+  user?: UserData; // The affected user data
 }
 
-// const initialUserActionState: UserActionState = { message: "", status: "idle" };
+const initialUserActionState: UserActionState = { message: "", status: "error" }; // Default to error
 
+// Helper to get user file path
+function getUserFilePath(username: string, role: UserData["role"]): string {
+  const dataPath = getDataPath();
+  // Sanitize username and role for filename to be safe, though regex on username helps.
+  // Further sanitization might be needed if roles can have special characters.
+  const safeUsername = username.replace(/[^a-zA-Z0-9_.-]/g, '_');
+  const safeRole = role.replace(/[^a-zA-Z0-9]/g, '_');
+  const filename = `${safeUsername}-${safeRole}.json`;
+  return path.join(dataPath, filename);
+}
+
+async function getPanelSettingsForDebug(): Promise<PanelSettingsData | undefined> {
+    try {
+        const settingsResult = await loadGeneralPanelSettings(); // This is an async server action
+        return settingsResult.data;
+    } catch {
+        return undefined;
+    }
+}
 
 // --- Server Actions ---
 
 export async function loadUsers(): Promise<LoadUsersState> {
-  console.log("[RolesActions] Attempting to load users...");
+  console.log("[RolesActions] Attempting to load users from individual files...");
+  const dataPath = getDataPath();
+  const users: UserData[] = [];
+  let files: string[];
+
   try {
-    const data = await loadEncryptedData(USERS_FILENAME);
-    if (data === null) {
-      console.log("[RolesActions] No users.json file found or it's empty. Returning empty list.");
+    files = await fs.readdir(dataPath);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      console.log("[RolesActions] Data directory not found. Returning empty list.");
       return { users: [], status: "success" };
     }
-    const usersArraySchema = z.array(userSchema);
-    const parsedData = usersArraySchema.safeParse(data);
-
-    if (!parsedData.success) {
-      console.error("[RolesActions] Failed to parse users.json:", parsedData.error.flatten().fieldErrors);
-      return { users: [], status: "success", error: "User data file is corrupt or in an old format. Displaying no users." };
-    }
-    console.log(`[RolesActions] Successfully loaded ${parsedData.data.length} users.`);
-    return { users: parsedData.data, status: "success" };
-  } catch (e) {
-    const error = e instanceof Error ? e : new Error(String(e));
-    console.error("[RolesActions] Error loading users:", error);
-    return { error: `Failed to load users: ${error.message}`, status: "error" };
+    console.error("[RolesActions] Error reading data directory:", e);
+    return { error: "Failed to read user data directory.", status: "error" };
   }
+
+  for (const file of files) {
+    // Match pattern {username}-{role}.json, exclude settings.json
+    if (file.match(/^[a-zA-Z0-9_.-]+-[a-zA-Z0-9]+\.json$/) && file !== 'settings.json') {
+      try {
+        const fileData = await loadEncryptedData(file);
+        if (fileData) {
+          const parsedUser = userSchema.safeParse(fileData);
+          if (parsedUser.success) {
+            users.push(parsedUser.data);
+          } else {
+            console.warn(`[RolesActions] Failed to parse user file ${file}:`, parsedUser.error.flatten().fieldErrors);
+          }
+        }
+      } catch (e) {
+        console.error(`[RolesActions] Error loading or decrypting user file ${file}:`, e);
+      }
+    }
+  }
+  console.log(`[RolesActions] Successfully loaded ${users.length} users.`);
+  return { users, status: "success" };
 }
 
-export async function addUser(prevState: UserActionState, formData: UserInput): Promise<UserActionState> {
-  console.log("[RolesActions] Attempting to add user:", formData.username);
+export async function addUser(prevState: UserActionState, userInput: UserInput): Promise<UserActionState> {
+  console.log("[RolesActions] Attempting to add user:", userInput.username);
   const now = new Date().toISOString();
 
-  const rawData = {
-    username: formData.username,
-    password: formData.password,
-    role: formData.role,
-    projects: formData.projects || [],
-    assignedPages: formData.assignedPages || [],
-    allowedSettingsPages: formData.allowedSettingsPages || [],
-  };
+  const ownerUsernameEnv = process.env.OWNER_USERNAME;
+  if (ownerUsernameEnv && userInput.username === ownerUsernameEnv) {
+    return { 
+      message: "Cannot add a user with the same username as the Owner.", 
+      status: "error", 
+      errors: { username: ["This username is reserved for the Owner account."] }
+    };
+  }
 
-  const validationSchema = userSchema.pick({ username: true, role: true, projects: true, assignedPages: true, allowedSettingsPages: true })
-    .extend({ password: z.string().min(8, "Password must be at least 8 characters long.") });
+  const validationSchema = userSchema.pick({ 
+    username: true, role: true, projects: true, assignedPages: true, allowedSettingsPages: true, status: true 
+  }).extend({ 
+    password: z.string().min(8, "Password must be at least 8 characters long.") 
+  });
+  
+  // Need to ensure all fields expected by userSchema are present in rawData for validation
+  const rawData = {
+    username: userInput.username,
+    password: userInput.password,
+    role: userInput.role,
+    projects: userInput.projects || [],
+    assignedPages: userInput.assignedPages || [],
+    allowedSettingsPages: userInput.allowedSettingsPages || [],
+    status: userInput.status || "Active",
+  };
 
   const validatedFields = validationSchema.safeParse(rawData);
 
@@ -130,35 +173,34 @@ export async function addUser(prevState: UserActionState, formData: UserInput): 
     };
   }
 
-  const { password, ...userData } = validatedFields.data;
+  const { password, ...userDataToStore } = validatedFields.data;
 
   try {
-    const { users, error: loadError } = await loadUsers();
-    if (loadError || !users) {
+    const { users: existingUsers, error: loadError, status: loadStatus } = await loadUsers();
+    if (loadStatus === "error" || !existingUsers) {
       return { message: `Failed to load existing users: ${loadError || 'Unknown error'}`, status: "error" };
     }
 
-    if (users.some(u => u.username === userData.username)) {
+    if (existingUsers.some(u => u.username === userDataToStore.username)) {
       return { message: "Username already exists.", status: "error", errors: { username: ["Username already taken"] } };
     }
     
     const { hash, salt } = await hashPassword(password);
     const newUser: UserData = {
       id: uuidv4(),
-      ...userData,
+      ...userDataToStore, // this contains validated username, role, projects, assignedPages, allowedSettingsPages, status
       hashedPassword: hash,
       salt: salt,
-      status: "Active",
       createdAt: now,
       updatedAt: now,
     };
 
-    const updatedUsers = [...users, newUser];
-    await saveEncryptedData(USERS_FILENAME, updatedUsers);
+    const filePath = getUserFilePath(newUser.username, newUser.role);
+    await saveEncryptedData(path.basename(filePath), newUser); // Pass only filename
     
     const panelSettings = await getPanelSettingsForDebug();
     const successMessage = panelSettings?.debugMode 
-        ? `User "${newUser.username}" added successfully to ${USERS_FILENAME}.`
+        ? `User "${newUser.username}" added successfully to ${path.basename(filePath)}.`
         : `User "${newUser.username}" added successfully.`;
 
     return { message: successMessage, status: "success", user: newUser };
@@ -169,83 +211,96 @@ export async function addUser(prevState: UserActionState, formData: UserInput): 
   }
 }
 
-
-export async function updateUser(prevState: UserActionState, formData: UserInput): Promise<UserActionState> {
-  const userId = formData.id;
+export async function updateUser(prevState: UserActionState, userInput: UserInput): Promise<UserActionState> {
+  const userId = userInput.id;
   if (!userId) {
-    return { message: "User ID is missing.", status: "error", errors: { _form: ["User ID is required for update."] } };
+    return { message: "User ID is missing for update.", status: "error", errors: { _form: ["User ID is required for update."] } };
   }
   console.log(`[RolesActions] Attempting to update user ID: ${userId}`);
+  
+  if (userId === 'owner_root' && (userInput.username !== process.env.OWNER_USERNAME || userInput.role !== 'Owner')) {
+      return { message: "Owner username and role cannot be changed via UI.", status: "error" };
+  }
+   if (userId === 'owner_root' && userInput.password) {
+      return { message: "Owner password must be changed via .env.local file.", status: "error" };
+  }
+
+
   const now = new Date().toISOString();
 
-  const rawData = {
-    id: formData.id,
-    username: formData.username,
-    password: formData.password, // Optional
-    role: formData.role,
-    projects: formData.projects || [],
-    assignedPages: formData.assignedPages || [],
-    allowedSettingsPages: formData.allowedSettingsPages || [],
-    status: formData.status || "Active",
-  };
+  const updateValidationSchema = userSchema.pick({ 
+    username: true, role: true, projects: true, status: true, assignedPages: true, allowedSettingsPages: true 
+  }).extend({ 
+    password: z.string().min(8, "Password must be at least 8 characters long.").optional().or(z.literal('')) 
+  }).partial(); // Make all fields optional for update, but they will be merged with existing
 
-  const updateValidationSchema = userSchema.pick({ id:true, username: true, role: true, projects: true, status:true, assignedPages: true, allowedSettingsPages: true })
-    .extend({ password: z.string().min(8, "Password must be at least 8 characters long.").optional().or(z.literal('')) });
+  const validatedChanges = updateValidationSchema.safeParse(userInput);
 
-  const validatedFields = updateValidationSchema.safeParse(rawData);
-
-  if (!validatedFields.success) {
-    console.error("[RolesActions] Update user validation failed:", validatedFields.error.flatten().fieldErrors);
+  if (!validatedChanges.success) {
+    console.error("[RolesActions] Update user validation failed:", validatedChanges.error.flatten().fieldErrors);
     return {
-      message: "Validation failed.",
+      message: "Validation failed for update.",
       status: "error",
-      errors: validatedFields.error.flatten().fieldErrors,
+      errors: validatedChanges.error.flatten().fieldErrors,
     };
   }
   
-  const { password, ...userDataToUpdate } = validatedFields.data;
+  const { password: newPassword, ...updatesToApply } = validatedChanges.data;
 
   try {
-    const { users, error: loadError } = await loadUsers();
-    if (loadError || !users) {
+    const { users: allUsers, error: loadError, status: loadStatus } = await loadUsers();
+    if (loadStatus === 'error' || !allUsers) {
       return { message: `Failed to load existing users: ${loadError || 'Unknown error'}`, status: "error" };
     }
 
-    const userIndex = users.findIndex(u => u.id === userId);
-    if (userIndex === -1) {
-      return { message: "User not found.", status: "error", errors: { _form: ["User to update not found."] } };
+    const currentUserIndex = allUsers.findIndex(u => u.id === userId);
+    if (currentUserIndex === -1) {
+      return { message: "User not found for update.", status: "error", errors: { _form: ["User to update not found."] } };
     }
+    const currentUserData = allUsers[currentUserIndex];
 
-    const existingUser = users[userIndex];
+    // Check for username collision if username is being changed
+    if (updatesToApply.username && updatesToApply.username !== currentUserData.username) {
+      if (updatesToApply.username === process.env.OWNER_USERNAME) {
+        return { message: "Cannot change username to Owner's username.", status: "error", errors: { username: ["This username is reserved."] }};
+      }
+      if (allUsers.some(u => u.id !== userId && u.username === updatesToApply.username)) {
+        return { message: "New username already exists.", status: "error", errors: { username: ["New username is already taken."] } };
+      }
+    }
     
-    if (userDataToUpdate.username !== existingUser.username && users.some(u => u.id !== userId && u.username === userDataToUpdate.username)) {
-      return { message: "Username already exists.", status: "error", errors: { username: ["Username already taken by another user"] } };
-    }
-
-    let newHashedPassword = existingUser.hashedPassword;
-    let newSalt = existingUser.salt;
-
-    if (password) { 
-      const { hash, salt } = await hashPassword(password);
-      newHashedPassword = hash;
-      newSalt = salt;
-    }
+    const oldFilePath = getUserFilePath(currentUserData.username, currentUserData.role);
 
     const updatedUser: UserData = {
-      ...existingUser,
-      ...userDataToUpdate,
-      hashedPassword: newHashedPassword,
-      salt: newSalt,
+      ...currentUserData,
+      ...updatesToApply, // Apply validated changes
       updatedAt: now,
     };
 
-    const updatedUsersList = [...users];
-    updatedUsersList[userIndex] = updatedUser;
-    await saveEncryptedData(USERS_FILENAME, updatedUsersList);
+    // Re-hash password if a new one was provided
+    if (newPassword) {
+      const { hash, salt } = await hashPassword(newPassword);
+      updatedUser.hashedPassword = hash;
+      updatedUser.salt = salt;
+    }
+
+    const newFilePath = getUserFilePath(updatedUser.username, updatedUser.role);
+
+    if (oldFilePath !== newFilePath) {
+      try {
+        await fs.unlink(oldFilePath);
+        console.log(`[RolesActions] Deleted old user file: ${path.basename(oldFilePath)}`);
+      } catch (e) {
+        // Log error but proceed if old file didn't exist or couldn't be deleted
+        console.warn(`[RolesActions] Could not delete old user file ${path.basename(oldFilePath)}:`, e);
+      }
+    }
+    
+    await saveEncryptedData(path.basename(newFilePath), updatedUser);
 
     const panelSettings = await getPanelSettingsForDebug();
     const successMessage = panelSettings?.debugMode 
-        ? `User "${updatedUser.username}" updated successfully in ${USERS_FILENAME}.`
+        ? `User "${updatedUser.username}" updated successfully in ${path.basename(newFilePath)}.`
         : `User "${updatedUser.username}" updated successfully.`;
 
     return { message: successMessage, status: "success", user: updatedUser };
@@ -262,25 +317,42 @@ export async function deleteUser(userId: string): Promise<UserActionState> {
   if (!userId) {
     return { message: "User ID is required for deletion.", status: "error" };
   }
+  if (userId === 'owner_root') {
+    return { message: "Owner account cannot be deleted via UI.", status: "error" };
+  }
 
   try {
-    const { users, error: loadError } = await loadUsers();
-    if (loadError || !users) {
+    const { users: allUsers, error: loadError, status: loadStatus } = await loadUsers();
+    if (loadStatus === 'error' || !allUsers) {
       return { message: `Failed to load existing users: ${loadError || 'Unknown error'}`, status: "error" };
     }
 
-    const initialLength = users.length;
-    const updatedUsers = users.filter(u => u.id !== userId);
-
-    if (updatedUsers.length === initialLength) {
+    const userToDelete = allUsers.find(u => u.id === userId);
+    if (!userToDelete) {
       return { message: "User not found for deletion.", status: "error" };
     }
+    
+    // Owner check again just in case (e.g., if owner_root ID was somehow assigned to another user file)
+    if (userToDelete.username === process.env.OWNER_USERNAME && userToDelete.role === 'Owner') {
+         return { message: "Owner account cannot be deleted.", status: "error" };
+    }
 
-    await saveEncryptedData(USERS_FILENAME, updatedUsers);
+
+    const filePath = getUserFilePath(userToDelete.username, userToDelete.role);
+    try {
+      await fs.unlink(filePath);
+    } catch (e) {
+       if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+         console.warn(`[RolesActions] File not found for user ${userToDelete.username}, assuming already deleted.`);
+         // Proceed to return success as the user effectively doesn't exist
+       } else {
+         throw e; // Re-throw other fs errors
+       }
+    }
     
     const panelSettings = await getPanelSettingsForDebug();
     const successMessage = panelSettings?.debugMode
-        ? `User ID "${userId}" deleted successfully from ${USERS_FILENAME}.`
+        ? `User "${userToDelete.username}" (file: ${path.basename(filePath)}) deleted successfully.`
         : `User deleted successfully.`;
         
     return { message: successMessage, status: "success" };
@@ -289,13 +361,4 @@ export async function deleteUser(userId: string): Promise<UserActionState> {
     console.error(`[RolesActions] Error deleting user ID ${userId}:`, error);
     return { message: `Error deleting user: ${error.message}`, status: "error" };
   }
-}
-
-async function getPanelSettingsForDebug(): Promise<PanelSettingsData | undefined> {
-    try {
-        const settings = await loadGeneralPanelSettings();
-        return settings.data;
-    } catch {
-        return undefined;
-    }
 }
