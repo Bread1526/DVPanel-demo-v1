@@ -11,6 +11,7 @@ import { getDataPath } from "@/backend/lib/config";
 import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storageService";
 import fs from 'fs';
 import path from 'path';
+import { type PanelSettingsData, loadPanelSettings as loadGeneralPanelSettings } from '@/app/(app)/settings/actions';
 
 const LoginSchema = z.object({
   username: z.string().min(1, "Username is required."),
@@ -24,26 +25,38 @@ export interface LoginState {
   errors?: Partial<Record<keyof z.infer<typeof LoginSchema> | "_form", string[]>>;
 }
 
+async function getPanelSettingsForDebug(): Promise<PanelSettingsData | undefined> {
+    try {
+        const settingsResult = await loadGeneralPanelSettings();
+        return settingsResult.data;
+    } catch {
+        return undefined;
+    }
+}
+
 async function ensureOwnerFileOnLogin(ownerUsername: string, ownerPasswordEnv: string) {
-  console.log(`[LoginAction - ensureOwnerFileOnLogin] Starting for owner: ${ownerUsername}`);
+  const panelSettings = await getPanelSettingsForDebug();
+  const debugMode = panelSettings?.debugMode ?? false;
+
+  if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Starting for owner: ${ownerUsername}`);
   try {
     const dataPath = getDataPath();
     const ownerFilename = `${ownerUsername}-Owner.json`;
     const ownerFilePath = path.join(dataPath, ownerFilename);
-    console.log(`[LoginAction - ensureOwnerFileOnLogin] Target owner file path: ${ownerFilePath}`);
+    if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Target owner file path: ${ownerFilePath}`);
 
     const { hash, salt } = await hashPassword(ownerPasswordEnv);
-    console.log(`[LoginAction - ensureOwnerFileOnLogin] Password hashed for owner.`);
+    if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Password hashed for owner.`);
     const now = new Date().toISOString();
 
     let createdAt = now;
     if (fs.existsSync(ownerFilePath)) {
-      console.log(`[LoginAction - ensureOwnerFileOnLogin] Owner file ${ownerFilename} exists. Attempting to load to preserve createdAt.`);
+      if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Owner file ${ownerFilename} exists. Attempting to load to preserve createdAt.`);
       try {
         const existingOwnerData = await loadEncryptedData(ownerFilename);
         if (existingOwnerData && typeof (existingOwnerData as UserData).createdAt === 'string') {
           createdAt = (existingOwnerData as UserData).createdAt;
-          console.log(`[LoginAction - ensureOwnerFileOnLogin] Preserving createdAt: ${createdAt}`);
+          if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Preserving createdAt: ${createdAt}`);
         } else {
           console.warn(`[LoginAction - ensureOwnerFileOnLogin] Could not find valid createdAt in existing owner file or file empty/corrupt.`);
         }
@@ -51,7 +64,7 @@ async function ensureOwnerFileOnLogin(ownerUsername: string, ownerPasswordEnv: s
         console.warn(`[LoginAction - ensureOwnerFileOnLogin] Error loading existing owner file ${ownerFilename} to preserve createdAt:`, loadErr);
       }
     } else {
-      console.log(`[LoginAction - ensureOwnerFileOnLogin] Owner file ${ownerFilename} does not exist. Will create new.`);
+      if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Owner file ${ownerFilename} does not exist. Will create new.`);
     }
 
     const ownerUserData: UserData = {
@@ -60,22 +73,22 @@ async function ensureOwnerFileOnLogin(ownerUsername: string, ownerPasswordEnv: s
       hashedPassword: hash,
       salt: salt,
       role: 'Owner',
-      projects: [],
-      assignedPages: [],
-      allowedSettingsPages: [],
+      projects: [], // Owners have implicit access to all
+      assignedPages: [], // Owners have implicit access to all
+      allowedSettingsPages: [], // Owners have implicit access to all
       lastLogin: now,
       status: "Active",
       createdAt: createdAt,
       updatedAt: now,
     };
     
-    console.log(`[LoginAction - ensureOwnerFileOnLogin] Owner user data prepared:`, { username: ownerUserData.username, role: ownerUserData.role, id: ownerUserData.id });
+    if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Owner user data prepared:`, { username: ownerUserData.username, role: ownerUserData.role, id: ownerUserData.id });
     await saveEncryptedData(ownerFilename, ownerUserData);
-    console.log(`[LoginAction - ensureOwnerFileOnLogin] Successfully called saveEncryptedData for ${ownerFilename}.`);
+    if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Successfully called saveEncryptedData for ${ownerFilename}.`);
     
     // Verify file existence immediately after save attempt
     if (fs.existsSync(ownerFilePath)) {
-        console.log(`[LoginAction - ensureOwnerFileOnLogin] VERIFIED: Owner file ${ownerFilename} exists at ${ownerFilePath} after save.`);
+        if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] VERIFIED: Owner file ${ownerFilename} exists at ${ownerFilePath} after save.`);
     } else {
         console.error(`[LoginAction - ensureOwnerFileOnLogin] CRITICAL VERIFICATION FAILURE: Owner file ${ownerFilename} DOES NOT EXIST at ${ownerFilePath} even after saveEncryptedData call. Check storageService or permissions.`);
     }
@@ -88,12 +101,15 @@ async function ensureOwnerFileOnLogin(ownerUsername: string, ownerPasswordEnv: s
 
 
 export async function login(prevState: LoginState, formData: FormData): Promise<LoginState> {
+  const panelSettings = await getPanelSettingsForDebug();
+  const debugMode = panelSettings?.debugMode ?? false;
+
   const rawFormData = {
     username: formData.get("username") as string,
     password: formData.get("password") as string,
     redirectUrl: formData.get("redirectUrl") as string | undefined,
   };
-  console.log("[LoginAction] Received form data:", rawFormData);
+  if (debugMode) console.log("[LoginAction] Received form data:", rawFormData);
 
   const validatedFields = LoginSchema.safeParse(rawFormData);
 
@@ -116,18 +132,13 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
 
     if (ownerUsernameEnv && ownerPasswordEnv) {
       if (username === ownerUsernameEnv && password === ownerPasswordEnv) {
-        console.log("[LoginAction] Owner .env credentials match for:", ownerUsernameEnv);
+        if (debugMode) console.log("[LoginAction] Owner .env credentials match for:", ownerUsernameEnv);
         
         try {
           await ensureOwnerFileOnLogin(ownerUsernameEnv, ownerPasswordEnv);
-          console.log("[LoginAction] Owner file ensured/updated successfully by ensureOwnerFileOnLogin.");
+          if (debugMode) console.log("[LoginAction] Owner file ensured/updated successfully by ensureOwnerFileOnLogin.");
         } catch (ownerFileError) {
-            // Log the error but still proceed with login if .env credentials are valid.
-            // This makes the system resilient if file operations fail but owner access is critical.
             console.error("[LoginAction] Error during owner file creation/update, but proceeding with owner login as .env credentials matched:", ownerFileError);
-            // Depending on policy, you might want to return an error state if owner file creation is absolutely mandatory
-            // For example:
-            // return { message: "Owner account setup failed due to file system error. Please check server logs.", status: "error" };
         }
 
         session.user = {
@@ -137,17 +148,17 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
         };
         session.isLoggedIn = true;
         await session.save();
-        console.log("[LoginAction] Owner session saved.");
+        if (debugMode) console.log("[LoginAction] Owner session saved.");
         
         const destination = redirectUrl || '/';
-        console.log(`[LoginAction] Redirecting owner to: ${destination}`);
-        redirect(destination); // This will throw a NEXT_REDIRECT error, caught below
+        if (debugMode) console.log(`[LoginAction] Redirecting owner to: ${destination}`);
+        redirect(destination); 
       }
     } else {
-      console.warn("[LoginAction] OWNER_USERNAME or OWNER_PASSWORD is not set in .env.local. The .env owner login path is disabled if no owner file exists yet through normal user creation (which is not the case for .env owner).");
+      console.warn("[LoginAction] OWNER_USERNAME or OWNER_PASSWORD is not set in .env.local. The .env owner login path is disabled if no owner file exists yet.");
     }
 
-    console.log("[LoginAction] Attempting login for regular user:", username);
+    if (debugMode) console.log("[LoginAction] Attempting login for regular user:", username);
     const usersResult = await loadUsers();
 
     if (usersResult.status !== 'success' || !usersResult.users) {
@@ -158,22 +169,22 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     const user = usersResult.users.find(u => u.username === username && u.id !== 'owner_root');
 
     if (!user) {
-      console.log("[LoginAction] Regular user not found or is owner (handled above):", username);
+      if (debugMode) console.log("[LoginAction] Regular user not found or is owner (handled above):", username);
       return { message: "Invalid username or password.", status: "error" };
     }
     
     if (user.status === 'Inactive') {
-        console.log(`[LoginAction] User ${username} is inactive.`);
+        if (debugMode) console.log(`[LoginAction] User ${username} is inactive.`);
         return { message: "This account is inactive. Please contact an administrator.", status: "error" };
     }
 
     const isPasswordValid = await verifyPassword(password, user.hashedPassword, user.salt);
     if (!isPasswordValid) {
-      console.log("[LoginAction] Invalid password for regular user:", username);
+      if (debugMode) console.log("[LoginAction] Invalid password for regular user:", username);
       return { message: "Invalid username or password.", status: "error" };
     }
 
-    console.log(`[LoginAction] Regular user login successful for: ${username}`);
+    if (debugMode) console.log(`[LoginAction] Regular user login successful for: ${username}`);
     session.user = {
       id: user.id,
       username: user.username,
@@ -181,15 +192,14 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     };
     session.isLoggedIn = true;
     await session.save();
-    console.log("[LoginAction] Regular user session saved.");
+    if (debugMode) console.log("[LoginAction] Regular user session saved.");
     
     const destination = redirectUrl || '/';
-    console.log(`[LoginAction] Redirecting regular user to: ${destination}`);
+    if (debugMode) console.log(`[LoginAction] Redirecting regular user to: ${destination}`);
     redirect(destination);
 
   } catch (error: any) {
     if (error.digest?.startsWith('NEXT_REDIRECT')) {
-      // This is an expected error when redirect() is called, so re-throw it.
       throw error;
     }
     console.error("[LoginAction] Unexpected login error:", error);

@@ -60,22 +60,18 @@ export async function verifyPassword(password: string, storedHash: string, salt:
 export interface LoadUsersState {
   users?: UserData[];
   error?: string;
-  status: "success" | "error"; // Simplified status
+  status: "success" | "error"; 
 }
 export interface UserActionState {
   message: string;
-  status: "success" | "error"; // Simplified
+  status: "success" | "error"; 
   errors?: Partial<Record<keyof UserInput | "_form", string[]>>;
-  user?: UserData; // The affected user data
+  user?: UserData; 
 }
-
-const initialUserActionState: UserActionState = { message: "", status: "error" }; // Default to error
 
 // Helper to get user file path
 function getUserFilePath(username: string, role: UserData["role"]): string {
   const dataPath = getDataPath();
-  // Sanitize username and role for filename to be safe, though regex on username helps.
-  // Further sanitization might be needed if roles can have special characters.
   const safeUsername = username.replace(/[^a-zA-Z0-9_.-]/g, '_');
   const safeRole = role.replace(/[^a-zA-Z0-9]/g, '_');
   const filename = `${safeUsername}-${safeRole}.json`;
@@ -84,7 +80,7 @@ function getUserFilePath(username: string, role: UserData["role"]): string {
 
 async function getPanelSettingsForDebug(): Promise<PanelSettingsData | undefined> {
     try {
-        const settingsResult = await loadGeneralPanelSettings(); // This is an async server action
+        const settingsResult = await loadGeneralPanelSettings(); 
         return settingsResult.data;
     } catch {
         return undefined;
@@ -94,7 +90,10 @@ async function getPanelSettingsForDebug(): Promise<PanelSettingsData | undefined
 // --- Server Actions ---
 
 export async function loadUsers(): Promise<LoadUsersState> {
-  console.log("[RolesActions] Attempting to load users from individual files...");
+  const panelSettings = await getPanelSettingsForDebug();
+  const debugMode = panelSettings?.debugMode ?? false;
+  if (debugMode) console.log("[RolesActions] Attempting to load users from individual files...");
+
   const dataPath = getDataPath();
   const users: UserData[] = [];
   let files: string[];
@@ -103,7 +102,7 @@ export async function loadUsers(): Promise<LoadUsersState> {
     files = await fs.readdir(dataPath);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-      console.log("[RolesActions] Data directory not found. Returning empty list.");
+      if (debugMode) console.log("[RolesActions] Data directory not found. Returning empty list.");
       return { users: [], status: "success" };
     }
     console.error("[RolesActions] Error reading data directory:", e);
@@ -111,8 +110,7 @@ export async function loadUsers(): Promise<LoadUsersState> {
   }
 
   for (const file of files) {
-    // Match pattern {username}-{role}.json, exclude settings.json
-    if (file.match(/^[a-zA-Z0-9_.-]+-[a-zA-Z0-9]+\.json$/) && file !== 'settings.json') {
+    if (file.match(/^[a-zA-Z0-9_.-]+-[a-zA-Z0-9]+\.json$/) && file !== '.settings.json') { // Ensure to exclude .settings.json
       try {
         const fileData = await loadEncryptedData(file);
         if (fileData) {
@@ -128,12 +126,14 @@ export async function loadUsers(): Promise<LoadUsersState> {
       }
     }
   }
-  console.log(`[RolesActions] Successfully loaded ${users.length} users.`);
+  if (debugMode) console.log(`[RolesActions] Successfully loaded ${users.length} users.`);
   return { users, status: "success" };
 }
 
 export async function addUser(prevState: UserActionState, userInput: UserInput): Promise<UserActionState> {
-  console.log("[RolesActions] Attempting to add user:", userInput.username);
+  const panelSettings = await getPanelSettingsForDebug();
+  const debugMode = panelSettings?.debugMode ?? false;
+  if (debugMode) console.log("[RolesActions] Attempting to add user:", userInput.username);
   const now = new Date().toISOString();
 
   const ownerUsernameEnv = process.env.OWNER_USERNAME;
@@ -151,7 +151,6 @@ export async function addUser(prevState: UserActionState, userInput: UserInput):
     password: z.string().min(8, "Password must be at least 8 characters long.") 
   });
   
-  // Need to ensure all fields expected by userSchema are present in rawData for validation
   const rawData = {
     username: userInput.username,
     password: userInput.password,
@@ -188,7 +187,7 @@ export async function addUser(prevState: UserActionState, userInput: UserInput):
     const { hash, salt } = await hashPassword(password);
     const newUser: UserData = {
       id: uuidv4(),
-      ...userDataToStore, // this contains validated username, role, projects, assignedPages, allowedSettingsPages, status
+      ...userDataToStore,
       hashedPassword: hash,
       salt: salt,
       createdAt: now,
@@ -196,10 +195,9 @@ export async function addUser(prevState: UserActionState, userInput: UserInput):
     };
 
     const filePath = getUserFilePath(newUser.username, newUser.role);
-    await saveEncryptedData(path.basename(filePath), newUser); // Pass only filename
+    await saveEncryptedData(path.basename(filePath), newUser);
     
-    const panelSettings = await getPanelSettingsForDebug();
-    const successMessage = panelSettings?.debugMode 
+    const successMessage = debugMode
         ? `User "${newUser.username}" added successfully to ${path.basename(filePath)}.`
         : `User "${newUser.username}" added successfully.`;
 
@@ -212,11 +210,14 @@ export async function addUser(prevState: UserActionState, userInput: UserInput):
 }
 
 export async function updateUser(prevState: UserActionState, userInput: UserInput): Promise<UserActionState> {
+  const panelSettings = await getPanelSettingsForDebug();
+  const debugMode = panelSettings?.debugMode ?? false;
+
   const userId = userInput.id;
   if (!userId) {
     return { message: "User ID is missing for update.", status: "error", errors: { _form: ["User ID is required for update."] } };
   }
-  console.log(`[RolesActions] Attempting to update user ID: ${userId}`);
+  if (debugMode) console.log(`[RolesActions] Attempting to update user ID: ${userId}`);
   
   if (userId === 'owner_root' && (userInput.username !== process.env.OWNER_USERNAME || userInput.role !== 'Owner')) {
       return { message: "Owner username and role cannot be changed via UI.", status: "error" };
@@ -225,14 +226,13 @@ export async function updateUser(prevState: UserActionState, userInput: UserInpu
       return { message: "Owner password must be changed via .env.local file.", status: "error" };
   }
 
-
   const now = new Date().toISOString();
 
   const updateValidationSchema = userSchema.pick({ 
     username: true, role: true, projects: true, status: true, assignedPages: true, allowedSettingsPages: true 
   }).extend({ 
     password: z.string().min(8, "Password must be at least 8 characters long.").optional().or(z.literal('')) 
-  }).partial(); // Make all fields optional for update, but they will be merged with existing
+  }).partial();
 
   const validatedChanges = updateValidationSchema.safeParse(userInput);
 
@@ -259,7 +259,6 @@ export async function updateUser(prevState: UserActionState, userInput: UserInpu
     }
     const currentUserData = allUsers[currentUserIndex];
 
-    // Check for username collision if username is being changed
     if (updatesToApply.username && updatesToApply.username !== currentUserData.username) {
       if (updatesToApply.username === process.env.OWNER_USERNAME) {
         return { message: "Cannot change username to Owner's username.", status: "error", errors: { username: ["This username is reserved."] }};
@@ -273,11 +272,10 @@ export async function updateUser(prevState: UserActionState, userInput: UserInpu
 
     const updatedUser: UserData = {
       ...currentUserData,
-      ...updatesToApply, // Apply validated changes
+      ...updatesToApply, 
       updatedAt: now,
     };
 
-    // Re-hash password if a new one was provided
     if (newPassword) {
       const { hash, salt } = await hashPassword(newPassword);
       updatedUser.hashedPassword = hash;
@@ -289,17 +287,15 @@ export async function updateUser(prevState: UserActionState, userInput: UserInpu
     if (oldFilePath !== newFilePath) {
       try {
         await fs.unlink(oldFilePath);
-        console.log(`[RolesActions] Deleted old user file: ${path.basename(oldFilePath)}`);
+        if (debugMode) console.log(`[RolesActions] Deleted old user file: ${path.basename(oldFilePath)}`);
       } catch (e) {
-        // Log error but proceed if old file didn't exist or couldn't be deleted
         console.warn(`[RolesActions] Could not delete old user file ${path.basename(oldFilePath)}:`, e);
       }
     }
     
     await saveEncryptedData(path.basename(newFilePath), updatedUser);
 
-    const panelSettings = await getPanelSettingsForDebug();
-    const successMessage = panelSettings?.debugMode 
+    const successMessage = debugMode 
         ? `User "${updatedUser.username}" updated successfully in ${path.basename(newFilePath)}.`
         : `User "${updatedUser.username}" updated successfully.`;
 
@@ -313,7 +309,10 @@ export async function updateUser(prevState: UserActionState, userInput: UserInpu
 
 
 export async function deleteUser(userId: string): Promise<UserActionState> {
-  console.log(`[RolesActions] Attempting to delete user ID: ${userId}`);
+  const panelSettings = await getPanelSettingsForDebug();
+  const debugMode = panelSettings?.debugMode ?? false;
+  if (debugMode) console.log(`[RolesActions] Attempting to delete user ID: ${userId}`);
+
   if (!userId) {
     return { message: "User ID is required for deletion.", status: "error" };
   }
@@ -332,26 +331,22 @@ export async function deleteUser(userId: string): Promise<UserActionState> {
       return { message: "User not found for deletion.", status: "error" };
     }
     
-    // Owner check again just in case (e.g., if owner_root ID was somehow assigned to another user file)
     if (userToDelete.username === process.env.OWNER_USERNAME && userToDelete.role === 'Owner') {
          return { message: "Owner account cannot be deleted.", status: "error" };
     }
-
 
     const filePath = getUserFilePath(userToDelete.username, userToDelete.role);
     try {
       await fs.unlink(filePath);
     } catch (e) {
        if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-         console.warn(`[RolesActions] File not found for user ${userToDelete.username}, assuming already deleted.`);
-         // Proceed to return success as the user effectively doesn't exist
+         if (debugMode) console.warn(`[RolesActions] File not found for user ${userToDelete.username}, assuming already deleted.`);
        } else {
-         throw e; // Re-throw other fs errors
+         throw e; 
        }
     }
     
-    const panelSettings = await getPanelSettingsForDebug();
-    const successMessage = panelSettings?.debugMode
+    const successMessage = debugMode
         ? `User "${userToDelete.username}" (file: ${path.basename(filePath)}) deleted successfully.`
         : `User deleted successfully.`;
         
