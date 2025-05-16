@@ -10,10 +10,16 @@ let authAdmin: admin.auth.Auth | undefined;
 
 const serviceAccountJson = process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT;
 
-if (!serviceAccountJson) {
+if (serviceAccountJson && serviceAccountJson.length > 10) { // Basic check if it seems to have a value
+  console.log('Firebase Admin SDK: FIREBASE_ADMIN_SERVICE_ACCOUNT environment variable IS SET.');
+} else {
   console.warn(
-    'Firebase Admin SDK not configured: FIREBASE_ADMIN_SERVICE_ACCOUNT environment variable is not set. Firebase Admin features will not be available.'
+    'Firebase Admin SDK not configured: FIREBASE_ADMIN_SERVICE_ACCOUNT environment variable is NOT SET or is too short. Firebase Admin features will not be available.'
   );
+}
+
+if (!serviceAccountJson) {
+  // Already warned above, but keeping this condition explicit
 } else {
   if (!admin.apps.length) {
     try {
@@ -27,10 +33,12 @@ if (!serviceAccountJson) {
       authAdmin = admin.auth();
       // databaseAdmin = admin.database(); // Uncomment if using Realtime Database
     } catch (error: any) {
-      console.error('Firebase Admin SDK initialization error:', error.message);
+      console.error('Firebase Admin SDK PARSING OR INITIALIZATION ERROR:', error.message);
       console.error(
-        'Ensure FIREBASE_ADMIN_SERVICE_ACCOUNT is a valid JSON string representing your service account key.'
+        'Ensure FIREBASE_ADMIN_SERVICE_ACCOUNT in your .env.local (at project root) is a VALID JSON string (ideally single-line) from your service account key.'
       );
+      // For debugging, you might want to log a snippet of the variable, but be careful with credentials:
+      // console.error('First 50 chars of FIREBASE_ADMIN_SERVICE_ACCOUNT:', serviceAccountJson.substring(0, 50));
     }
   } else {
     // App already initialized, re-assign local variables
@@ -38,6 +46,7 @@ if (!serviceAccountJson) {
         firestoreAdmin = admin.apps[0]!.firestore();
         authAdmin = admin.apps[0]!.auth();
         // databaseAdmin = admin.apps[0]!.database(); // Uncomment if using Realtime Database
+        console.log('Firebase Admin SDK: Re-using existing initialized app.');
     }
   }
 }
