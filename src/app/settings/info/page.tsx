@@ -193,7 +193,7 @@ const termsOfServiceContent = (
 const licenseAgreementContent = (
   <div className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground">
     <h2 className="text-xl font-semibold text-foreground">DVPanel Software License Agreement</h2>
-    <p className="text-xs">Effective Date: [Insert date]</p>
+    <p className="text-xs">Effective Date: 5/16/2025</p>
     <p>Author: DVPanel Team</p>
     <p>Contact: admin@dvpanel.com</p>
     <p>Website: https://dvpanel.com</p>
@@ -280,7 +280,7 @@ const licenseAgreementContent = (
 const privacyPolicyContent = (
   <div className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground">
     <h2 className="text-xl font-semibold text-foreground">Privacy Policy</h2>
-    <p className="text-xs">Effective Date: [Insert Date]</p>
+    <p className="text-xs">Effective Date: 5/16/2025</p>
     <p>Maintained by: DVPanel Team</p>
     <p>Contact: admin@dvpanel.com</p>
     <p>Website: https://dvpanel.com</p>
@@ -471,7 +471,7 @@ export default function InfoPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="flex flex-col items-center text-center p-4 border rounded-lg shadow-sm bg-card/50">
                 <Image
-                  src="https://placehold.co/80x80.png"
+                  src="https://codehs.com/uploads/2be96f79fc030f8b32afed029e2da4db"
                   alt="Road.js"
                   width={80}
                   height={80}
