@@ -3,7 +3,8 @@
 
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
-import { VariantProps, cva } from "class-variance-authority"
+import type { VariantProps } from "class-variance-authority"
+import { cva } from "class-variance-authority"
 import { PanelLeft } from "lucide-react"
 
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -14,10 +15,7 @@ import { Separator } from "@/components/ui/separator"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
-  Tooltip,
-  TooltipContent,
   TooltipProvider,
-  TooltipTrigger,
 } from "@/components/ui/tooltip"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
@@ -533,12 +531,11 @@ const sidebarMenuButtonVariants = cva(
 )
 
 const SidebarMenuButton = React.forwardRef<
-  HTMLButtonElement, // Changed from HTMLAnchorElement
-  React.ComponentPropsWithoutRef<'button'> & { // Changed from 'a'
+  HTMLAnchorElement, // Changed to HTMLAnchorElement
+  React.ComponentPropsWithoutRef<'a'> & { // Changed to 'a'
     isActive?: boolean;
-    // No asChild prop needed here if using legacyBehavior for Link
-    // href can be accepted but won't be used directly by the button for navigation
-    href?: string; 
+    // Explicitly ignore asChild from props if passed down
+    asChild?: boolean; 
   } & VariantProps<typeof sidebarMenuButtonVariants>
 >(
   (
@@ -548,22 +545,22 @@ const SidebarMenuButton = React.forwardRef<
       size = 'default',
       className,
       children,
-      // href, // href is implicitly part of ComponentPropsWithoutRef<'button'> if type="link" but we are not using it like that
-      ...otherProps // This will include onClick, etc., from Link when legacyBehavior is used
+      asChild: _asChildIgnored, // Destructure and ignore asChild
+      ...otherProps 
     },
     ref
   ) => {
     return (
-      <button // Changed to <button>
+      <a // Changed to <a>
         ref={ref}
         data-sidebar="menu-button"
         data-size={size}
-        data-active={String(isActive)} // Ensure boolean becomes string for data attribute
+        data-active={String(isActive)}
         className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
-        {...otherProps} // Spread props like onClick from parent Link
+        {...otherProps} 
       >
         {children}
-      </button>
+      </a>
     );
   }
 );
@@ -737,3 +734,5 @@ export {
   SidebarTrigger,
   useSidebar,
 }
+
+    

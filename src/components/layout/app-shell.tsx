@@ -27,7 +27,7 @@ import {
   UserCircle,
   LogOut,
   Replace,
-  ShieldCheck,
+  ShieldCheck, 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -71,6 +71,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               
               const menuButton = (
                 <SidebarMenuButton
+                  // href={item.href} // href is passed by Link
                   isActive={isActive}
                 >
                   <item.icon />
@@ -81,10 +82,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 </SidebarMenuButton>
               );
 
-              // Use legacyBehavior with passHref for Link.
-              // SidebarMenuButton will be a <button> and a child of Link's <a>.
               let linkWrappedButton = (
-                <Link href={item.href} legacyBehavior passHref>
+                <Link href={item.href} asChild>
                   {menuButton}
                 </Link>
               );
@@ -94,7 +93,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <SidebarMenuItem key={item.label}>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        {/* TooltipTrigger wraps the <a> rendered by Link */}
+                        {/* TooltipTrigger wraps the Link which passes its props to SidebarMenuButton */}
                         {linkWrappedButton}
                       </TooltipTrigger>
                       <TooltipContent side="right" align="center">
@@ -153,3 +152,5 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </>
   );
 }
+
+    
