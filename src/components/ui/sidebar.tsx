@@ -533,9 +533,10 @@ const sidebarMenuButtonVariants = cva(
 )
 
 const SidebarMenuButton = React.forwardRef<
-  HTMLAnchorElement,
-  React.ComponentPropsWithoutRef<"a"> & {
+  HTMLButtonElement, // Changed to HTMLButtonElement
+  React.ComponentPropsWithoutRef<"button"> & { // Changed to "button"
     isActive?: boolean;
+    href?: string; // href is passed by Link passHref and used by legacy Link
   } & VariantProps<typeof sidebarMenuButtonVariants>
 >(
   (
@@ -545,23 +546,25 @@ const SidebarMenuButton = React.forwardRef<
       size = "default",
       className,
       children,
-      // Explicitly destructure asChild and do not spread it
+      href, 
+      // Explicitly destructure asChild and do not spread it if it comes from TooltipTrigger
       asChild: _asChildIgnored, 
-      ...otherProps
+      ...props 
     },
     ref
   ) => {
+    // This component renders a button. The parent Link (with legacyBehavior) will render the <a>.
     return (
-      <a
+      <button
         ref={ref}
         data-sidebar="menu-button"
         data-size={size}
         data-active={isActive}
         className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
-        {...otherProps}
+        {...props} 
       >
         {children}
-      </a>
+      </button>
     );
   }
 );
