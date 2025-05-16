@@ -47,7 +47,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           {isLoginPage ? (
-            children // For /login, render children directly without AppShell
+            children // For /login, render children directly without AppShell or SidebarProvider
           ) : (
             <SidebarProvider defaultOpen>
               <AppShell>{children}</AppShell>
