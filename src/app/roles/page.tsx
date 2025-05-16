@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye, ArrowLeft, ShieldQuestion } from "lucide-react"; // Added Eye, ArrowLeft
+import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye, ArrowLeft } from "lucide-react";
 import AddUserRoleDialog from "./components/add-user-role-dialog";
 import { loadUsers, deleteUser, type UserData, type UserActionState } from "./actions";
 import { useToast } from "@/hooks/use-toast";
@@ -22,6 +22,34 @@ const rolesDefinitions = [
 ];
 
 const OWNER_USERNAME = "root_owner"; 
+
+// Duplicating these here for display purposes in View Role mode.
+// In a larger app, these might come from a shared config or context.
+const availableProjects = [ 
+  { id: 'project_ecommerce_api', name: 'E-commerce API'},
+  { id: 'project_company_website', name: 'Company Website'},
+  { id: 'project_data_worker', name: 'Data Processing Worker'},
+  { id: 'project_blog_platform', name: 'Blog Platform'},
+];
+
+const availableAppPages = [
+  { id: 'dashboard', name: 'Dashboard (/)' },
+  { id: 'projects_page', name: 'Projects Page (/projects)' },
+  { id: 'files', name: 'File Manager (/files)' },
+  { id: 'ports', name: 'Port Manager (/ports)' },
+  { id: 'settings_area', name: 'Settings Area (/settings)' }, 
+];
+
+const availableSettingsPages = [
+  { id: 'settings_general', name: 'General' },
+  { id: 'settings_panel', name: 'Panel' },
+  { id: 'settings_daemon', name: 'Daemon' },
+  { id: 'settings_security', name: 'Security' },
+  { id: 'settings_popups', name: 'Popups' },
+  { id: 'settings_debug', name: 'Debug' },
+  { id: 'settings_license', name: 'License' },
+  { id: 'settings_info', name: 'Info' },
+];
 
 export default function RolesPage() {
   const [users, setUsers] = useState<UserData[]>([]);
@@ -53,7 +81,7 @@ export default function RolesPage() {
   }, []);
 
   useEffect(() => {
-    if (!viewingUserAsRole) { // Only fetch users if not in "View Role" mode
+    if (!viewingUserAsRole) { 
       fetchUsers();
     }
   }, [fetchUsers, viewingUserAsRole]);
@@ -73,19 +101,21 @@ export default function RolesPage() {
     });
   };
 
-  const handleUserChange = () => {
-    fetchUsers();
-    if (viewingUserAsRole) { // If editing from view mode, refresh the viewed user's data
+  const handleUserChange = async () => { // Made async to await fetchUsers
+    await fetchUsers();
+    if (viewingUserAsRole) { 
         const updatedUser = users.find(u => u.id === viewingUserAsRole.id);
         if (updatedUser) {
             setViewingUserAsRole(updatedUser);
-        } else { // User might have been deleted or ID changed, unlikely but good to handle
+        } else { 
             setViewingUserAsRole(null); 
         }
     }
   };
 
   if (viewingUserAsRole) {
+    const findNameById = (id: string, list: {id: string, name: string}[]) => list.find(item => item.id === id)?.name || id;
+
     return (
       <div>
         <PageHeader 
@@ -111,38 +141,54 @@ export default function RolesPage() {
         />
         <Card>
           <CardHeader>
-            <CardTitle>Role Information</CardTitle>
+            <CardTitle>Role Information & Permissions</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <p><span className="font-semibold">Username:</span> {viewingUserAsRole.username}</p>
-            <p><span className="font-semibold">Role:</span> <Badge variant={viewingUserAsRole.role === 'Administrator' ? 'secondary' : 'outline'}>{viewingUserAsRole.role}</Badge></p>
-            <p><span className="font-semibold">Status:</span> <Badge variant={viewingUserAsRole.status === 'Active' ? 'default' : 'destructive'} className={viewingUserAsRole.status === 'Active' ? 'bg-green-500/20 text-green-700 dark:bg-green-500/10 dark:text-green-400 border-green-500/30' : ''}>{viewingUserAsRole.status}</Badge></p>
-            
-            { (viewingUserAsRole.role === 'Admin' || viewingUserAsRole.role === 'Custom') && viewingUserAsRole.projects && viewingUserAsRole.projects.length > 0 && (
+          <CardContent className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <h4 className="font-semibold">Assigned Projects:</h4>
-                <ul className="list-disc list-inside pl-4">
-                  {viewingUserAsRole.projects.map(pId => <li key={pId}>{pId}</li>)} {/* Replace pId with actual project name later */}
-                </ul>
+                <h4 className="font-semibold mb-1">User Details</h4>
+                <p><span className="font-semibold text-muted-foreground">Username:</span> {viewingUserAsRole.username}</p>
+                <p><span className="font-semibold text-muted-foreground">Role:</span> <Badge variant={viewingUserAsRole.role === 'Administrator' ? 'secondary' : 'outline'}>{viewingUserAsRole.role}</Badge></p>
+                <p><span className="font-semibold text-muted-foreground">Status:</span> <Badge variant={viewingUserAsRole.status === 'Active' ? 'default' : 'destructive'} className={viewingUserAsRole.status === 'Active' ? 'bg-green-500/20 text-green-700 dark:bg-green-500/10 dark:text-green-400 border-green-500/30' : ''}>{viewingUserAsRole.status}</Badge></p>
               </div>
-            )}
-            { viewingUserAsRole.role === 'Custom' && viewingUserAsRole.assignedPages && viewingUserAsRole.assignedPages.length > 0 && (
-              <div>
-                <h4 className="font-semibold">Accessible Pages:</h4>
-                <ul className="list-disc list-inside pl-4">
-                  {viewingUserAsRole.assignedPages.map(pageId => <li key={pageId}>{pageId}</li>)} {/* Replace pageId with actual page name later */}
-                </ul>
+
+              <div className="space-y-4">
+                { (viewingUserAsRole.role === 'Admin' || viewingUserAsRole.role === 'Custom') && viewingUserAsRole.projects && viewingUserAsRole.projects.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold mb-1">Assigned Projects:</h4>
+                    <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
+                      {viewingUserAsRole.projects.map(pId => <li key={pId}>{findNameById(pId, availableProjects)}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                { viewingUserAsRole.role === 'Custom' && viewingUserAsRole.assignedPages && viewingUserAsRole.assignedPages.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold mb-1">Accessible Application Pages:</h4>
+                    <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
+                      {viewingUserAsRole.assignedPages.map(pageId => <li key={pageId}>{findNameById(pageId, availableAppPages)}</li>)}
+                    </ul>
+                  </div>
+                )}
+                
+                { (viewingUserAsRole.role === 'Administrator' || viewingUserAsRole.role === 'Admin' || viewingUserAsRole.role === 'Custom') && viewingUserAsRole.allowedSettingsPages && viewingUserAsRole.allowedSettingsPages.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold mb-1">Accessible Settings Modules:</h4>
+                    <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
+                      {viewingUserAsRole.allowedSettingsPages.map(settingId => <li key={settingId}>{findNameById(settingId, availableSettingsPages)}</li>)}
+                    </ul>
+                  </div>
+                )}
               </div>
-            )}
-             { (viewingUserAsRole.role === 'Administrator' || viewingUserAsRole.role === 'Admin' || viewingUserAsRole.role === 'Custom') && viewingUserAsRole.allowedSettingsPages && viewingUserAsRole.allowedSettingsPages.length > 0 && (
-              <div>
-                <h4 className="font-semibold">Accessible Settings Modules:</h4>
-                <ul className="list-disc list-inside pl-4">
-                  {viewingUserAsRole.allowedSettingsPages.map(settingId => <li key={settingId}>{settingId}</li>)} {/* Replace settingId with actual module name later */}
-                </ul>
-              </div>
-            )}
-            {/* TODO: Add more detailed permission breakdown here in the future */}
+            </div>
+             {(viewingUserAsRole.projects?.length === 0 && viewingUserAsRole.assignedPages?.length === 0 && viewingUserAsRole.allowedSettingsPages?.length === 0 && (viewingUserAsRole.role === 'Admin' || viewingUserAsRole.role === 'Custom') ) && (
+                 <p className="text-sm text-muted-foreground text-center col-span-full pt-4">No specific project, page, or settings permissions assigned.</p>
+             )}
+             {viewingUserAsRole.role === 'Administrator' && viewingUserAsRole.allowedSettingsPages?.length === 0 && (
+                 <p className="text-sm text-muted-foreground text-center col-span-full pt-4">No specific settings module permissions assigned. Administrator has implicit access to all application pages and projects.</p>
+             )}
+
+
           </CardContent>
         </Card>
       </div>
@@ -176,7 +222,7 @@ export default function RolesPage() {
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
               </div>
             ) : users.length === 0 && !error ? (
-              <p className="text-center text-muted-foreground py-8">No users found.</p>
+              <p className="text-center text-muted-foreground py-8">No users found. Add a user to get started.</p>
             ) : (
               <Table>
                 <TableHeader>
@@ -213,7 +259,7 @@ export default function RolesPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setViewingUserAsRole(user); }}>
-                              <Eye className="mr-2 h-4 w-4" /> View Role
+                              <Eye className="mr-2 h-4 w-4" /> View Role Details
                             </DropdownMenuItem>
                             <AddUserRoleDialog 
                               isEditing={true} 
@@ -225,16 +271,6 @@ export default function RolesPage() {
                                 </DropdownMenuItem>
                               }
                             />
-                             <DropdownMenuItem 
-                                onSelect={(e) => {
-                                    e.preventDefault(); 
-                                    // Placeholder for a more detailed permission view if needed in future
-                                    // For now, "View Role" provides a summary
-                                    toast({title: "Permissions Hint", description: "Detailed permissions view can be expanded here or within 'View Role' mode."})
-                                }}
-                            >
-                              <ShieldQuestion className="mr-2 h-4 w-4" /> View Permissions
-                            </DropdownMenuItem>
                             <DropdownMenuItem 
                               className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground"
                               onSelect={(e) => { 
@@ -262,8 +298,8 @@ export default function RolesPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {rolesDefinitions.map(role => (
-              <div key={role.name} className="p-3 border rounded-lg bg-card/50">
-                <h4 className="font-semibold">{role.name}</h4>
+              <div key={role.name} className="p-3 border rounded-lg bg-card/50 shadow-sm">
+                <h4 className="font-semibold text-foreground">{role.name}</h4>
                 <p className="text-sm text-muted-foreground">{role.description}</p>
               </div>
             ))}
@@ -301,5 +337,6 @@ export default function RolesPage() {
     </div>
   );
 }
+    
 
     
