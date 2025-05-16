@@ -21,7 +21,6 @@ export type UserPermissions = z.infer<typeof userPermissionsSchema>;
 const userSchema = z.object({
   id: z.string().uuid(),
   username: z.string().min(3, "Username must be at least 3 characters long."),
-  // email: z.string().email("Invalid email address."), // Email removed
   hashedPassword: z.string(),
   salt: z.string(),
   role: z.enum(["Administrator", "Admin", "Custom"]), // "Owner" is not managed here
@@ -53,15 +52,14 @@ async function hashPassword(password: string): Promise<{ hash: string; salt: str
   });
 }
 
-// Not used in this step, but essential for login later
-// async function verifyPassword(password: string, storedHash: string, salt: string): Promise<boolean> {
-//   return new Promise((resolve, reject) => {
-//     crypto.pbkdf2(password, salt, 100000, 64, "sha512", (err, derivedKey) => {
-//       if (err) reject(err);
-//       resolve(derivedKey.toString("hex") === storedHash);
-//     });
-//   });
-// }
+export async function verifyPassword(password: string, storedHash: string, salt: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    crypto.pbkdf2(password, salt, 100000, 64, "sha512", (err, derivedKey) => {
+      if (err) reject(err);
+      resolve(derivedKey.toString("hex") === storedHash);
+    });
+  });
+}
 
 // --- State types for server actions ---
 export interface LoadUsersState {
@@ -301,3 +299,6 @@ async function getPanelSettingsForDebug(): Promise<PanelSettingsData | undefined
         return undefined;
     }
 }
+
+
+    

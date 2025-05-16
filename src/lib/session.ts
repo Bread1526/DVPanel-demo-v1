@@ -1,4 +1,3 @@
-
 // src/lib/session.ts
 import type { IronSessionOptions } from 'iron-session';
 import type { UserData } from '@/app/roles/actions'; // Assuming UserData includes id, username, role
@@ -7,7 +6,7 @@ export interface SessionData {
   user?: {
     id: string;
     username: string;
-    role: UserData['role'];
+    role: UserData['role'] | 'Owner'; // Allow 'Owner' role
     // Add other user fields you want in the session
   };
   isLoggedIn: boolean;

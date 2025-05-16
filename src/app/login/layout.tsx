@@ -14,7 +14,7 @@ export default function LoginLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="bg-background text-foreground">
-        <main className="flex min-h-screen flex-col items-center justify-center p-4">
+        <main className="flex min-h-screen flex-col items-center justify-center p-4 bg-gradient-to-br from-slate-900 via-background to-slate-800">
           {children}
         </main>
       </body>
