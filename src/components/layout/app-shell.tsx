@@ -24,7 +24,6 @@ import {
   Network,
   Users,
   Settings,
-  ShieldCheck,
   UserCircle,
   LogOut,
   Replace,
@@ -48,7 +47,6 @@ const navItems = [
   { href: '/files', label: 'File Manager', icon: FileText },
   { href: '/ports', label: 'Port Manager', icon: Network },
   { href: '/roles', label: 'User Roles', icon: Users },
-  { href: '/license', label: 'License', icon: ShieldCheck },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -70,8 +68,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {navItems.map((item) => {
               const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
               
-              const menuButtonElement = (
-                <SidebarMenuButton isActive={isActive} href={item.href}> {/* Pass href for legacy Link */}
+              const menuButton = (
+                <SidebarMenuButton
+                  isActive={isActive}
+                  // asChild prop is handled by TooltipTrigger or Link directly
+                >
                   <item.icon />
                   <span>{item.label}</span>
                   {item.count && (
@@ -80,15 +81,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 </SidebarMenuButton>
               );
 
+              let linkWrappedButton = (
+                <Link href={item.href} asChild legacyBehavior={false}>
+                  {menuButton}
+                </Link>
+              );
+              
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
                 return (
                   <SidebarMenuItem key={item.label}>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Link href={item.href} passHref legacyBehavior>
-                          {/* SidebarMenuButton now renders a <button>, so it can be a child of <a> */}
-                          {menuButtonElement}
-                        </Link>
+                        {linkWrappedButton}
                       </TooltipTrigger>
                       <TooltipContent side="right" align="center">
                         {item.label}
@@ -100,9 +104,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
               return (
                 <SidebarMenuItem key={item.label}>
-                  <Link href={item.href} passHref legacyBehavior>
-                     {menuButtonElement}
-                  </Link>
+                  {linkWrappedButton}
                 </SidebarMenuItem>
               );
             })}
