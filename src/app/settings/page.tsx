@@ -11,7 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Save, Loader2, Settings as SettingsIcon, SlidersHorizontal, Shield, MessageSquareMore, Info, AlertTriangle, Bug } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import Image from 'next/image';
+import { Save, Loader2, Settings as SettingsIcon, SlidersHorizontal, Shield, MessageSquareMore, Info, AlertTriangle, Bug, Link as LinkIcon, ExternalLink, Wifi, User, Users as UsersIcon } from "lucide-react";
 import { savePanelSettings, loadPanelSettings, type SavePanelSettingsState, type PanelSettingsData } from './actions';
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -19,6 +21,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 const initialSaveState: SavePanelSettingsState = {
   message: "",
   status: "idle",
+  errors: {},
+  data: undefined,
 };
 
 const defaultPopupSettings = {
@@ -34,21 +38,23 @@ export default function SettingsPage() {
   const [currentPanelIp, setCurrentPanelIp] = useState("");
   const [currentDebugMode, setCurrentDebugMode] = useState(false);
   
-  // Popup settings state
   const [currentNotificationDuration, setCurrentNotificationDuration] = useState(defaultPopupSettings.notificationDuration);
   const [currentDisableAllNotifications, setCurrentDisableAllNotifications] = useState(defaultPopupSettings.disableAllNotifications);
   const [currentDisableAutoClose, setCurrentDisableAutoClose] = useState(defaultPopupSettings.disableAutoClose);
   const [currentEnableCopyError, setCurrentEnableCopyError] = useState(defaultPopupSettings.enableCopyError);
   const [currentShowConsoleErrors, setCurrentShowConsoleErrors] = useState(defaultPopupSettings.showConsoleErrorsInNotifications);
 
+  const [latency, setLatency] = useState<number | null>(null);
+  const [isPinging, setIsPinging] = useState(false);
+
   const { toast } = useToast();
-  const [isTransitionPending, startTransition] = useTransition(); 
+  const [isTransitionPendingForAction, startTransitionForAction] = useTransition(); 
 
   const updateLocalState = (data?: PanelSettingsData) => {
     if (data) {
       setCurrentPanelPort(data.panelPort);
       setCurrentPanelIp(data.panelIp || ""); 
-      setCurrentDebugMode(data.debugMode ?? false); // Ensure debugMode has a default
+      setCurrentDebugMode(data.debugMode ?? false);
       setCurrentNotificationDuration(data.popup?.notificationDuration ?? defaultPopupSettings.notificationDuration);
       setCurrentDisableAllNotifications(data.popup?.disableAllNotifications ?? defaultPopupSettings.disableAllNotifications);
       setCurrentDisableAutoClose(data.popup?.disableAutoClose ?? defaultPopupSettings.disableAutoClose);
@@ -59,8 +65,16 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const fetchSettings = async () => {
+      console.log("[SettingsPage] useEffect: Calling loadPanelSettings");
       const result = await loadPanelSettings();
+      console.log("[SettingsPage] useEffect: loadPanelSettings result:", result);
       updateLocalState(result.data);
+      
+      // Store fetched popup settings in localStorage for Toaster to use
+      if (result.data?.popup) {
+        localStorage.setItem('dvpanel-popup-settings', JSON.stringify(result.data.popup));
+      }
+
       const effectiveDuration = result.data?.popup?.notificationDuration ? result.data.popup.notificationDuration * 1000 : 5000;
       const isDebug = result.data?.debugMode;
 
@@ -87,17 +101,19 @@ export default function SettingsPage() {
       }
     };
     fetchSettings();
-  }, [toast]);
+  }, []); // Empty dependency array: run only on mount
 
-  const [formState, formAction, isPending] = useActionState(savePanelSettings, initialSaveState);
+  const [formState, formAction, isActionPending] = useActionState(savePanelSettings, initialSaveState);
 
   useEffect(() => {
-    // Use current state for duration if formState.data is not yet available (e.g. on initial error)
     const toastDurationSource = formState.data?.popup?.notificationDuration ?? currentNotificationDuration;
     const effectiveDuration = toastDurationSource * 1000;
 
     if (formState.status === "success" && formState.message) {
-      updateLocalState(formState.data); // Update local state with successfully saved data
+      updateLocalState(formState.data); 
+       if (formState.data?.popup) {
+        localStorage.setItem('dvpanel-popup-settings', JSON.stringify(formState.data.popup));
+      }
       toast({
         title: "Settings Update",
         description: formState.message,
@@ -107,7 +123,7 @@ export default function SettingsPage() {
       let description = formState.message;
       if (formState.errors?.general) {
         description = formState.errors.general; 
-      } else if (formState.errors) {
+      } else if (formState.errors && Object.keys(formState.errors).length > 0) {
         description = "Validation failed. Please check the form fields.";
       }
       toast({
@@ -118,23 +134,53 @@ export default function SettingsPage() {
         errorContent: formState.errors?.general || Object.values(formState.errors || {}).flat().join('; ')
       });
     }
-  }, [formState, toast, currentNotificationDuration]); // currentNotificationDuration added as fallback
-  
+  }, [formState, currentNotificationDuration]);
+
   const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
     
-    // Switches might not be present in formData if unchecked, so set them explicitly
-    formData.set('debug-mode', currentDebugMode ? 'on' : '');
-    formData.set('popup-disable-all', currentDisableAllNotifications ? 'on' : '');
-    formData.set('popup-disable-autoclose', currentDisableAutoClose ? 'on' : '');
-    formData.set('popup-enable-copy', currentEnableCopyError ? 'on' : '');
-    formData.set('popup-show-console-errors', currentShowConsoleErrors ? 'on' : '');
+    const submittedData: PanelSettingsData = {
+      panelPort: currentPanelPort,
+      panelIp: currentPanelIp,
+      debugMode: currentDebugMode,
+      popup: {
+        notificationDuration: currentNotificationDuration,
+        disableAllNotifications: currentDisableAllNotifications,
+        disableAutoClose: currentDisableAutoClose,
+        enableCopyError: currentEnableCopyError,
+        showConsoleErrorsInNotifications: currentShowConsoleErrors,
+      }
+    };
+    console.log("[SettingsPage] handleFormSubmit: Submitting with data:", submittedData);
     
-    startTransition(() => {
-      formAction(formData);
+    startTransitionForAction(() => {
+      formAction(submittedData);
     });
   };
+  
+  useEffect(() => {
+    setIsPinging(true);
+    const intervalId = setInterval(async () => {
+      const startTime = Date.now();
+      try {
+        const response = await fetch('/api/ping');
+        if (response.ok) {
+          const endTime = Date.now();
+          setLatency(endTime - startTime);
+        } else {
+          setLatency(null);
+        }
+      } catch (error) {
+        setLatency(null);
+      }
+    }, 500);
+
+    return () => {
+      clearInterval(intervalId);
+      setIsPinging(false);
+    };
+  }, []);
+
 
   const handleTestDefaultPopup = () => {
     toast({
@@ -160,6 +206,7 @@ export default function SettingsPage() {
     }
   };
 
+  const isPending = isActionPending || isTransitionPendingForAction;
 
   return (
     <div>
@@ -169,7 +216,7 @@ export default function SettingsPage() {
       />
 
       <Tabs defaultValue="panel" className="w-full">
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 md:grid-cols-6">
+        <TabsList className="inline-flex flex-wrap w-full justify-start h-auto items-center gap-1 py-1 px-1 mb-2">
           <TabsTrigger value="panel">
             <SlidersHorizontal className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Panel
           </TabsTrigger>
@@ -189,10 +236,13 @@ export default function SettingsPage() {
           <TabsTrigger value="general">
             <SettingsIcon className="mr-2 h-4 w-4 md:hidden lg:inline-block" />General
           </TabsTrigger>
+           <TabsTrigger value="info">
+            <Info className="mr-2 h-4 w-4 md:hidden lg:inline-block" />Info
+          </TabsTrigger>
         </TabsList>
 
         <form onSubmit={handleFormSubmit}>
-          <TabsContent value="panel">
+          <TabsContent value="panel" forceMount>
             <Card>
               <CardHeader>
                 <CardTitle>Panel Settings</CardTitle>
@@ -223,7 +273,7 @@ export default function SettingsPage() {
                     name="panel-ip"
                     value={currentPanelIp}
                     onChange={(e) => setCurrentPanelIp(e.target.value)}
-                    placeholder="e.g., 0.0.0.0 or mypanel.example.com" 
+                    placeholder="e.g., 0.0.0.0 or mypanel.example.com (leave blank for 0.0.0.0)" 
                     className="md:col-span-2" 
                   />
                 </div>
@@ -242,15 +292,15 @@ export default function SettingsPage() {
                 </p>
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
-                <Button type="submit" disabled={isPending || isTransitionPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                  {(isPending || isTransitionPending) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                <Button type="submit" disabled={isPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                  {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   Save Panel Settings
                 </Button>
               </CardFooter>
             </Card>
           </TabsContent>
 
-          <TabsContent value="daemon">
+          <TabsContent value="daemon" forceMount>
             <Card>
               <CardHeader>
                 <CardTitle>Daemon Settings</CardTitle>
@@ -270,14 +320,14 @@ export default function SettingsPage() {
                 </p>
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
-                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled> {/*  disabled={isPending || isTransitionPending} */}
+                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled>
                   <Save className="mr-2 h-4 w-4"/> Save Daemon Settings
                 </Button>
               </CardFooter>
             </Card>
           </TabsContent>
 
-          <TabsContent value="security">
+          <TabsContent value="security" forceMount>
             <Card>
               <CardHeader>
                 <CardTitle>Security Settings</CardTitle>
@@ -317,14 +367,14 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
-                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled> {/* disabled={isPending || isTransitionPending} */}
+                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled>
                   <Save className="mr-2 h-4 w-4"/> Save Security Settings
                 </Button>
               </CardFooter>
             </Card>
           </TabsContent>
 
-          <TabsContent value="popups">
+          <TabsContent value="popups" forceMount>
             <Card>
               <CardHeader>
                 <CardTitle>Popup Notification Settings</CardTitle>
@@ -344,7 +394,6 @@ export default function SettingsPage() {
                     />
                     <Input
                       id="popup-duration-input"
-                      // name="popup-duration" // Name attribute removed from input as Slider now has it
                       type="number"
                       value={currentNotificationDuration}
                       onChange={(e) => setCurrentNotificationDuration(parseInt(e.target.value, 10))}
@@ -366,7 +415,7 @@ export default function SettingsPage() {
                   </div>
                   <Switch 
                     id="popup-disable-all"
-                    name="popup-disable-all" // Name attribute for form submission
+                    name="popup-disable-all"
                     checked={currentDisableAllNotifications}
                     onCheckedChange={setCurrentDisableAllNotifications}
                   />
@@ -382,7 +431,7 @@ export default function SettingsPage() {
                   </div>
                   <Switch
                     id="popup-disable-autoclose"
-                    name="popup-disable-autoclose" // Name attribute
+                    name="popup-disable-autoclose"
                     checked={currentDisableAutoClose}
                     onCheckedChange={setCurrentDisableAutoClose}
                   />
@@ -398,7 +447,7 @@ export default function SettingsPage() {
                   </div>
                   <Switch
                     id="popup-enable-copy"
-                    name="popup-enable-copy" // Name attribute
+                    name="popup-enable-copy"
                     checked={currentEnableCopyError}
                     onCheckedChange={setCurrentEnableCopyError}
                   />
@@ -414,7 +463,7 @@ export default function SettingsPage() {
                   </div>
                   <Switch
                     id="popup-show-console-errors"
-                    name="popup-show-console-errors" // Name attribute
+                    name="popup-show-console-errors"
                     checked={currentShowConsoleErrors}
                     onCheckedChange={setCurrentShowConsoleErrors}
                   />
@@ -424,15 +473,15 @@ export default function SettingsPage() {
                 )}
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
-                <Button type="submit" disabled={isPending || isTransitionPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                  {(isPending || isTransitionPending) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                <Button type="submit" disabled={isPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                  {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   Save Popup Settings
                 </Button>
               </CardFooter>
             </Card>
           </TabsContent>
           
-          <TabsContent value="debug">
+          <TabsContent value="debug" forceMount>
             <Card>
               <CardHeader>
                 <CardTitle>Debug Settings</CardTitle>
@@ -448,7 +497,7 @@ export default function SettingsPage() {
                   </div>
                   <Switch 
                     id="debug-mode-switch" 
-                    name="debug-mode" // Name attribute for form submission
+                    name="debug-mode"
                     checked={currentDebugMode}
                     onCheckedChange={setCurrentDebugMode}
                   />
@@ -477,15 +526,15 @@ export default function SettingsPage() {
                 )}
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
-                <Button type="submit" disabled={isPending || isTransitionPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                  {(isPending || isTransitionPending) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                <Button type="submit" disabled={isPending} className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                  {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   Save Debug Settings
                 </Button>
               </CardFooter>
             </Card>
           </TabsContent>
 
-          <TabsContent value="general">
+          <TabsContent value="general" forceMount>
             <Card>
               <CardHeader>
                 <CardTitle>General Application Settings</CardTitle>
@@ -495,17 +544,125 @@ export default function SettingsPage() {
                  <p className="text-muted-foreground">
                     General settings for panel administration, such as changing the panel owner username and password (encrypted), will be available here in a future update.
                   </p>
-                   {/* Placeholder for future username/password fields */}
               </CardContent>
               <CardFooter className="border-t px-6 py-4">
-                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled> {/* disabled={isPending || isTransitionPending} */}
+                <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled>
                   <Save className="mr-2 h-4 w-4"/> Save General Settings
                 </Button>
               </CardFooter>
             </Card>
           </TabsContent>
+
+          <TabsContent value="info">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><Info className="h-6 w-6 text-primary"/>DVPanel Information</CardTitle>
+                <CardDescription>Details about DVPanel, resources, and credits.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-8">
+                <section>
+                  <h3 className="text-lg font-semibold mb-3">Informational Links</h3>
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                    {[
+                      { label: "Sitemap", dialogContent: "Sitemap details will be available here." },
+                      { label: "Terms of Service", dialogContent: "Terms of Service details will be available here." },
+                      { label: "License", dialogContent: "License details (e.g., MIT, Apache 2.0) will be here." },
+                      { label: "Privacy Policy", dialogContent: "Privacy Policy details will be available here." },
+                    ].map(item => (
+                      <Dialog key={item.label}>
+                        <DialogTrigger asChild>
+                          <Button variant="link" className="p-0 h-auto justify-start text-primary hover:underline">
+                            <LinkIcon className="mr-2 h-4 w-4" />{item.label}
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-md">
+                          <DialogHeader>
+                            <DialogTitle>{item.label}</DialogTitle>
+                          </DialogHeader>
+                          <DialogDescription className="py-4">
+                            {item.dialogContent}
+                          </DialogDescription>
+                          <DialogFooter>
+                            <DialogClose asChild>
+                              <Button type="button" variant="secondary">Close</Button>
+                            </DialogClose>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+                    ))}
+                  </div>
+                </section>
+
+                <section>
+                  <h3 className="text-lg font-semibold mb-3">External Resources</h3>
+                  <div className="space-y-2">
+                    {[
+                      { label: "Official Website", href: "https://dvpanel.com" },
+                      { label: "Demo Pro Panel", href: "https://pro.demo.dvpanel.com" },
+                      { label: "Free Demo Panel", href: "https://free.demo.dvpanel.com" },
+                    ].map(link => (
+                      <a key={link.label} href={link.href} target="_blank" rel="noopener noreferrer" className="flex items-center text-primary hover:underline">
+                        <ExternalLink className="mr-2 h-4 w-4" />{link.label}
+                      </a>
+                    ))}
+                  </div>
+                </section>
+
+                <section>
+                  <h3 className="text-lg font-semibold mb-2">Panel Connectivity</h3>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Wifi className={`h-5 w-5 ${latency !== null ? 'text-green-500' : 'text-red-500'}`} />
+                    <span>Ping to Panel:</span>
+                    {isPinging && latency === null && <span className="text-muted-foreground">Pinging...</span>}
+                    {latency !== null && <span className="font-semibold text-foreground">{latency} ms</span>}
+                    {!isPinging && latency === null && <span className="text-red-500">Unavailable</span>}
+                  </div>
+                   <p className="text-xs text-muted-foreground mt-1">Latency to the server hosting this panel instance. Updates every 0.5 seconds.</p>
+                </section>
+
+                <section>
+                  <h3 className="text-lg font-semibold mb-4">Credits</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    <div className="flex flex-col items-center text-center p-4 border rounded-lg shadow-sm">
+                      <Image 
+                        src="https://placehold.co/80x80.png" 
+                        alt="Road.js" 
+                        width={80} 
+                        height={80} 
+                        className="rounded-full mb-3"
+                        data-ai-hint="male avatar" 
+                      />
+                      <h4 className="font-semibold text-foreground">Road.js</h4>
+                      <p className="text-sm text-muted-foreground">Founder & Lead Developer</p>
+                    </div>
+                    <div className="flex flex-col items-center text-center p-4 border rounded-lg shadow-sm">
+                       <Image 
+                        src="https://placehold.co/80x80.png" 
+                        alt="Novasdad" 
+                        width={80} 
+                        height={80} 
+                        className="rounded-full mb-3"
+                        data-ai-hint="male avatar"
+                      />
+                      <h4 className="font-semibold text-foreground">Novasdad</h4>
+                      <p className="text-sm text-muted-foreground">Co-Owner & Lead Designer</p>
+                    </div>
+                  </div>
+                </section>
+                
+                <section className="text-center text-xs text-muted-foreground pt-6 border-t">
+                  <p>&copy; {new Date().getFullYear()} DVPanel. All rights reserved.</p>
+                  <p>Proudly built by Road.js and the DVPanel Team.</p>
+                </section>
+
+              </CardContent>
+              {/* No CardFooter or Save button for the Info tab */}
+            </Card>
+          </TabsContent>
+
         </form>
       </Tabs>
     </div>
   );
 }
+
