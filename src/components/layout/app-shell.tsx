@@ -16,7 +16,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation'; // Added useRouter
 import {
   LayoutDashboard,
   Layers,
@@ -39,23 +39,65 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'; 
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'; 
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useEffect, useState } from 'react'; // Added useState, useEffect
+import { logout } from '@/app/logout/actions'; // Import the logout action
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/projects', label: 'Projects', icon: Layers, count: 5 },
+  { href: '/projects', label: 'Projects', icon: Layers, count: 5 }, // Project count is mock
   { href: '/files', label: 'File Manager', icon: FileText },
   { href: '/ports', label: 'Port Manager', icon: Network },
   { href: '/roles', label: 'User Roles', icon: Users },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
+interface CurrentUser {
+  id: string;
+  username: string;
+  role: string;
+}
+
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { state: sidebarState } = useSidebar(); 
   const isMobile = useIsMobile(); 
+  const router = useRouter();
+
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [isLoadingUser, setIsLoadingUser] = useState(true);
+
+  useEffect(() => {
+    async function fetchUser() {
+      setIsLoadingUser(true);
+      try {
+        const res = await fetch('/api/auth/user');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.isLoggedIn && data.user) {
+            setCurrentUser(data.user);
+          } else {
+            setCurrentUser(null); 
+          }
+        } else {
+           setCurrentUser(null);
+        }
+      } catch (error) {
+        console.error("Failed to fetch user", error);
+        setCurrentUser(null);
+      } finally {
+        setIsLoadingUser(false);
+      }
+    }
+    fetchUser();
+  }, [pathname]); // Re-fetch user if path changes, might be useful for some auth flows
+
+  const handleLogout = async () => {
+    await logout();
+    // The redirect is handled within the logout server action
+  };
 
   return (
     <>
@@ -71,55 +113,52 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {navItems.map((item) => {
               const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
               
-              const menuButtonContent = (
-                <>
+              const menuButton = (
+                <SidebarMenuButton
+                  isActive={isActive}
+                  variant="default"
+                  size="default"
+                >
                   <item.icon />
                   <span className={cn(
-                    // Hide label text when sidebar is collapsed and not on mobile
+                    {"invisible group-data-[[data-state=collapsed]]:visible": sidebarState === 'collapsed' && !isMobile },
                     {"group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile }
                   )}>
                     {item.label}
                   </span>
                   {item.count && (
                      <SidebarMenuBadge className={cn(
-                       // Hide badge when sidebar is collapsed and not on mobile
                        {"group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile}
                      )}>
                        {item.count}
                      </SidebarMenuBadge>
                   )}
-                </>
+                </SidebarMenuButton>
               );
 
-              // Link uses legacyBehavior to render its own <a>, passing href and onClick to SidebarMenuButton.
-              // SidebarMenuButton (as a span) correctly receives these and handles its own styling/content.
-              const linkElement = (
+              let linkElement = (
                 <Link href={item.href} legacyBehavior passHref>
-                  <SidebarMenuButton isActive={isActive} variant="default" size="default">
-                    {menuButtonContent}
-                  </SidebarMenuButton>
+                  {menuButton}
                 </Link>
               );
-
+              
               let finalElement = linkElement;
 
-              // Conditionally wrap with Tooltip.
-              // `isMobile` is now consistently false on server and initial client render,
-              // then updates post-mount. This avoids structural changes causing hydration errors.
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
-                finalElement = (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      {/* TooltipTrigger wraps the <a> rendered by Link */}
-                      {linkElement}
-                    </TooltipTrigger>
-                    <TooltipContent side="right" align="center">
-                      <p>{item.label}</p> {/* Ensure TooltipContent has valid children like <p> */}
-                    </TooltipContent>
-                  </Tooltip>
+                 finalElement = (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        {linkElement}
+                      </TooltipTrigger>
+                      <TooltipContent side="right" align="center">
+                        <p>{item.label}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 );
               }
-
+              
               return (
                 <SidebarMenuItem key={item.label}>
                   {finalElement}
@@ -134,26 +173,28 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <Button variant="ghost" className="w-full justify-start gap-2 px-2">
                 <Avatar className="h-8 w-8">
                   <AvatarImage src="https://placehold.co/100x100.png" alt="User" data-ai-hint="user avatar"/>
-                  <AvatarFallback>U</AvatarFallback>
+                  <AvatarFallback>{isLoadingUser ? 'L' : currentUser?.username?.[0]?.toUpperCase() ?? 'U'}</AvatarFallback>
                 </Avatar>
                 <span className={cn(
                   {"hidden": sidebarState === 'collapsed' && !isMobile}
-                )}>Admin User</span>
+                )}>
+                  {isLoadingUser ? "Loading..." : currentUser?.username ?? "Not Logged In"}
+                </span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="right" align="start" className="w-56">
               <DropdownMenuLabel>My Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>
+              <DropdownMenuItem disabled={!currentUser}>
                 <UserCircle className="mr-2 h-4 w-4" />
                 <span>Profile</span>
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem disabled={!currentUser} onClick={() => router.push('/settings')}>
                 <Settings className="mr-2 h-4 w-4" />
                 <span>Settings</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={handleLogout} disabled={!currentUser && !isLoadingUser}>
                 <LogOut className="mr-2 h-4 w-4" />
                 <span>Log out</span>
               </DropdownMenuItem>

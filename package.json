@@ -44,6 +44,7 @@
     "firebase": "^11.7.3",
     "framer-motion": "^11.2.10",
     "genkit": "^1.8.0",
+    "iron-session": "^8.0.2",
     "lucide-react": "^0.475.0",
     "next": "15.2.3",
     "next-themes": "^0.3.0",
