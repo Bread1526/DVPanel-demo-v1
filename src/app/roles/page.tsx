@@ -1,3 +1,4 @@
+
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,11 +8,12 @@ import { Badge } from "@/components/ui/badge";
 import { MoreHorizontal, PlusCircle, UserPlus, Edit, Trash2, ShieldQuestion } from "lucide-react";
 import AddUserRoleDialog from "./components/add-user-role-dialog";
 
+// Mock data - in a real app, this would come from an API or state management
 const users = [
-  { id: '1', username: 'root_owner', email: 'owner@dvpanel.local', role: 'Owner', status: 'Active', lastLogin: '2023-10-26 10:00 AM' },
-  { id: '2', username: 'sys_admin', email: 'admin@dvpanel.local', role: 'Administrator', status: 'Active', lastLogin: '2023-10-25 03:15 PM' },
-  { id: '3', username: 'project_manager_jane', email: 'jane.doe@example.com', role: 'Admin', status: 'Active', projects: ['E-commerce API', 'Blog Platform'], lastLogin: '2023-10-26 09:30 AM' },
-  { id: '4', username: 'dev_john', email: 'john.smith@example.com', role: 'Custom (DevOps)', status: 'Inactive', projects: ['Data Processing Worker'], lastLogin: '2023-10-20 11:00 AM' },
+  { id: '1', username: 'root_owner', email: 'owner@dvpanel.local', role: 'Owner', status: 'Active', lastLogin: '2023-10-26 10:00 AM', projects: [] },
+  { id: '2', username: 'sys_admin', email: 'admin@dvpanel.local', role: 'Administrator', status: 'Active', lastLogin: '2023-10-25 03:15 PM', projects: [] },
+  { id: '3', username: 'project_manager_jane', email: 'jane.doe@example.com', role: 'Admin', status: 'Active', projects: ['1', '4'], lastLogin: '2023-10-26 09:30 AM' }, // Assuming project IDs
+  { id: '4', username: 'dev_john', email: 'john.smith@example.com', role: 'Custom', status: 'Inactive', projects: ['3'], lastLogin: '2023-10-20 11:00 AM' },
 ];
 
 const roles = [
@@ -27,7 +29,7 @@ export default function RolesPage() {
       <PageHeader 
         title="User Roles & Permissions" 
         description="Manage users and their access levels within DVPanel."
-        actions={<AddUserRoleDialog />}
+        actions={<AddUserRoleDialog />} // For adding a new user
       />
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -70,7 +72,19 @@ export default function RolesPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem><Edit className="mr-2 h-4 w-4" /> Edit User / Role</DropdownMenuItem>
+                          {user.role !== 'Owner' && ( // Owner role cannot be edited in the same way
+                            <AddUserRoleDialog isEditing={true} userData={user} triggerButton={
+                              <DropdownMenuItem onSelect={(e) => e.preventDefault()}> 
+                                {/* onSelect preventDefault is important here to stop DropdownMenu from closing immediately */}
+                                <Edit className="mr-2 h-4 w-4" /> Edit User / Role
+                              </DropdownMenuItem>
+                            }/>
+                          )}
+                           {user.role === 'Owner' && (
+                             <DropdownMenuItem disabled>
+                                <Edit className="mr-2 h-4 w-4" /> Owner (No Edit)
+                              </DropdownMenuItem>
+                           )}
                           <DropdownMenuItem><ShieldQuestion className="mr-2 h-4 w-4" /> View Permissions</DropdownMenuItem>
                           {user.role !== 'Owner' && (
                              <DropdownMenuItem className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground">
