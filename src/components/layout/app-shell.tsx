@@ -72,7 +72,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               const menuButton = (
                 <SidebarMenuButton
                   isActive={isActive}
-                  // href and asChild are handled by Link or ignored by SidebarMenuButton
                 >
                   <item.icon />
                   <span>{item.label}</span>
@@ -90,7 +89,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       <TooltipTrigger asChild>
                         <Link href={item.href} legacyBehavior passHref>
                           {/* Link renders <a>, TooltipTrigger targets this <a>.
-                              SidebarMenuButton (span) is a child of Link's <a> */}
+                              SidebarMenuButton (span or button) is a child of Link's <a> */}
                           {menuButton}
                         </Link>
                       </TooltipTrigger>
@@ -103,14 +102,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               } else {
                 navElement = (
                   <Link href={item.href} legacyBehavior passHref>
-                    {/* Link renders <a>. SidebarMenuButton (span) is a child. */}
+                    {/* Link renders <a>. SidebarMenuButton (span or button) is a child. */}
                     {menuButton}
                   </Link>
                 );
               }
 
               return (
-                <SidebarMenuItem key={item.label}>
+                <SidebarMenuItem key={item.label} suppressHydrationWarning={true}>
                   {navElement}
                 </SidebarMenuItem>
               );
@@ -157,5 +156,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </>
   );
 }
+    
 
     
