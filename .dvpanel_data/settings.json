@@ -1,12 +1,1 @@
-{
-  "panelPort": "27407",
-  "panelIp": "0.0.0.0",
-  "debugMode": true,
-  "popup": {
-    "notificationDuration": 5,
-    "disableAllNotifications": false,
-    "disableAutoClose": false,
-    "enableCopyError": true,
-    "showConsoleErrorsInNotifications": true
-  }
-}
+53032a0e075806685a4a533c:5b901c55529d69b7d4685e54be0f890f:3d3b56dfbff5bf96c8dfda97baa371815a1cd0eaa14c6b9eb108b2928bd026f453ce2172ec10cbf42f6436ab67bf67baea994040523c68d331ba532a696e9c6b3de7b8a899ba3f4ec85d656b5ae077ee2517d954bf1f64ec6a9b76d82008742d3391f9aebd147ec2d2fca7718b71d86fe7000bdddf6983de067ad9d7d4db1cb80bc90ab27e155b33343a2dc054851a5eab106a36a492df86915ead73b7ced47f772bfaf030058ef0c702e7f77f88bea4c7e866457908dc6e34fb5ae2d29c3513971bfe121e05fe02ee396cbab4c1f4312bf4316c870bb4

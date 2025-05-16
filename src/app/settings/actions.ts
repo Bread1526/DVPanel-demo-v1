@@ -23,7 +23,7 @@ const panelSettingsSchema = z.object({
       const portNum = parseInt(val, 10);
       return portNum >= 1 && portNum <= 65535;
     }, "Panel Port must be between 1 and 65535.")
-    .default("27407"), // Added default
+    .default("27407"),
   panelIp: z
     .string()
     .refine(
@@ -35,14 +35,14 @@ const panelSettingsSchema = z.object({
         message:
           "Must be a valid IPv4 address, domain name, or empty (interpreted as 0.0.0.0).",
       }
-    ).default(""), // Added default
+    ).default(""),
   debugMode: z.boolean().optional().default(false),
-  popup: popupSettingsSchema.default({ // Ensure popup has defaults if not in file
+  popup: popupSettingsSchema.default({
     notificationDuration: 5,
     disableAllNotifications: false,
     disableAutoClose: false,
-    enableCopyError: false, // Defaulted to false as per schema definition
-    showConsoleErrorsInNotifications: false, // Defaulted to false
+    enableCopyError: false,
+    showConsoleErrorsInNotifications: false,
   }),
 });
 
@@ -73,7 +73,22 @@ export interface LoadPanelSettingsState {
   data?: PanelSettingsData;
 }
 
-const SETTINGS_FILENAME = "settings.json"; // Removed dot prefix to match PRD example if settings file is visible
+const SETTINGS_FILENAME = "settings.json";
+
+// Define the explicit default values for the entire panel settings
+const explicitDefaultPanelSettings: PanelSettingsData = {
+  panelPort: "27407",
+  panelIp: "",
+  debugMode: false,
+  popup: {
+    notificationDuration: 5,
+    disableAllNotifications: false,
+    disableAutoClose: false,
+    enableCopyError: false,
+    showConsoleErrorsInNotifications: false,
+  },
+};
+
 
 export async function savePanelSettings(
   prevState: SavePanelSettingsState,
@@ -81,7 +96,7 @@ export async function savePanelSettings(
 ): Promise<SavePanelSettingsState> {
   const rawFormData = {
     panelPort: String(formData.get("panel-port") ?? ""),
-    panelIp: String(formData.get("panel-ip") ?? ""), // Ensure panelIp is a string
+    panelIp: String(formData.get("panel-ip") ?? ""),
     debugMode: formData.get("debug-mode") === "on",
     popup: {
       notificationDuration: parseInt(String(formData.get("popup-duration") ?? "5"), 10),
@@ -106,7 +121,7 @@ export async function savePanelSettings(
 
   try {
     await saveEncryptedData(SETTINGS_FILENAME, dataToSave);
-    const dataPath = getDataPath();
+    const dataPath = getDataPath(); // Correctly call the function
     const fullPath = path.join(dataPath, SETTINGS_FILENAME);
     
     return {
@@ -133,11 +148,11 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
     if (loadedData) {
       const parsedData = panelSettingsSchema.safeParse(loadedData);
       if (parsedData.success) {
-        // Ensure panelIp is a string, even if loadedData.panelIp was null/undefined
-        // and schema parsing fixed it.
         const dataWithEnsuredStringIp = {
           ...parsedData.data,
-          panelIp: parsedData.data.panelIp || "", 
+          panelIp: parsedData.data.panelIp || "",
+          // Ensure popup exists with defaults if somehow missing from loaded valid data
+          popup: parsedData.data.popup || explicitDefaultPanelSettings.popup,
         };
         return {
           status: "success",
@@ -145,17 +160,17 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
         };
       } else {
         console.warn("Loaded settings file has incorrect format or missing fields. Applying full defaults:", parsedData.error.flatten().fieldErrors);
-        // If parsing fails, fall back to complete defaults from the schema
-        const defaults = panelSettingsSchema.parse({}); // This should now work with defaults in schema
+        // If parsing fails, fall back to complete defaults by parsing our explicit default object
+        const defaults = panelSettingsSchema.parse(explicitDefaultPanelSettings);
         return {
-          status: "success", // Consider this a success with defaults, rather than error state for UI
+          status: "success",
           message: "Settings file has an invalid format or missing fields. Full defaults applied.",
           data: defaults,
         };
       }
     } else {
-      // If no file found, use complete defaults from the schema
-      const defaults = panelSettingsSchema.parse({}); // This should now work
+      // If no file found, use complete defaults by parsing our explicit default object
+      const defaults = panelSettingsSchema.parse(explicitDefaultPanelSettings);
       return {
         status: "not_found",
         message: "No existing settings file found. Defaults will be used.",
@@ -165,8 +180,8 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
   } catch (error) {
     console.error("Error loading panel settings:", error);
     const errorMessage = error instanceof Error ? error.message : "An unknown error occurred while loading settings.";
-    // If any other error occurs during load, use complete defaults
-    const defaults = panelSettingsSchema.parse({}); // This should now work
+    // If any other error occurs during load, use complete defaults by parsing our explicit default object
+    const defaults = panelSettingsSchema.parse(explicitDefaultPanelSettings);
     return {
       status: "error",
       message: `Failed to load settings: ${errorMessage}. Defaults will be used.`,
