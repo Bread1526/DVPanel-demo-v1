@@ -39,8 +39,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'; 
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'; 
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -53,7 +54,8 @@ const navItems = [
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { state: sidebarState, isMobile } = useSidebar();
+  const { state: sidebarState } = useSidebar(); 
+  const isMobile = useIsMobile(); 
 
   return (
     <>
@@ -72,50 +74,55 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               const menuButtonContent = (
                 <>
                   <item.icon />
-                  <span>{item.label}</span>
+                  <span className={cn(
+                    // Hide label text when sidebar is collapsed and not on mobile
+                    {"group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile }
+                  )}>
+                    {item.label}
+                  </span>
                   {item.count && (
-                    <SidebarMenuBadge>{item.count}</SidebarMenuBadge>
+                     <SidebarMenuBadge className={cn(
+                       // Hide badge when sidebar is collapsed and not on mobile
+                       {"group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile}
+                     )}>
+                       {item.count}
+                     </SidebarMenuBadge>
                   )}
                 </>
               );
 
-              let navElement;
+              // Link uses legacyBehavior to render its own <a>, passing href and onClick to SidebarMenuButton.
+              // SidebarMenuButton (as a span) correctly receives these and handles its own styling/content.
+              const linkElement = (
+                <Link href={item.href} legacyBehavior passHref>
+                  <SidebarMenuButton isActive={isActive} variant="default" size="default">
+                    {menuButtonContent}
+                  </SidebarMenuButton>
+                </Link>
+              );
 
-              // Link with legacyBehavior renders its own <a>.
-              // SidebarMenuButton (as a span) is a child of that <a>.
-              // TooltipTrigger wraps the <a> rendered by Link.
+              let finalElement = linkElement;
+
+              // Conditionally wrap with Tooltip.
+              // `isMobile` is now consistently false on server and initial client render,
+              // then updates post-mount. This avoids structural changes causing hydration errors.
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
-                navElement = (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Link href={item.href} legacyBehavior passHref>
-                          {/* Link renders an <a>, SidebarMenuButton is its child. */}
-                          <SidebarMenuButton isActive={isActive} variant="default" size="default">
-                            {menuButtonContent}
-                          </SidebarMenuButton>
-                        </Link>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" align="center">
-                        {item.label}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                );
-              } else {
-                navElement = (
-                  <Link href={item.href} legacyBehavior passHref>
-                     {/* Link renders an <a>, SidebarMenuButton is its child. */}
-                    <SidebarMenuButton isActive={isActive} variant="default" size="default">
-                      {menuButtonContent}
-                    </SidebarMenuButton>
-                  </Link>
+                finalElement = (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      {/* TooltipTrigger wraps the <a> rendered by Link */}
+                      {linkElement}
+                    </TooltipTrigger>
+                    <TooltipContent side="right" align="center">
+                      <p>{item.label}</p> {/* Ensure TooltipContent has valid children like <p> */}
+                    </TooltipContent>
+                  </Tooltip>
                 );
               }
 
               return (
                 <SidebarMenuItem key={item.label}>
-                  {navElement}
+                  {finalElement}
                 </SidebarMenuItem>
               );
             })}
@@ -129,7 +136,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <AvatarImage src="https://placehold.co/100x100.png" alt="User" data-ai-hint="user avatar"/>
                   <AvatarFallback>U</AvatarFallback>
                 </Avatar>
-                <span className="group-data-[collapsible=icon]:hidden">Admin User</span>
+                <span className={cn(
+                  {"hidden": sidebarState === 'collapsed' && !isMobile}
+                )}>Admin User</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="right" align="start" className="w-56">
@@ -161,5 +170,3 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </>
   );
 }
-
-    

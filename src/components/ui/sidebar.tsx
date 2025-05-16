@@ -31,8 +31,7 @@ type SidebarContext = {
   setOpen: (open: boolean) => void
   openMobile: boolean
   setOpenMobile: (open: boolean) => void
-  isMobile: boolean
-  toggleSidebar: () => void
+  isMobile: boolean 
 }
 
 const SidebarContext = React.createContext<SidebarContext | null>(null)
@@ -66,8 +65,8 @@ const SidebarProvider = React.forwardRef<
     },
     ref
   ) => {
-    const isMobile = useIsMobile()
-    const [openMobile, setOpenMobile] = React.useState(false)
+    const clientIsMobile = useIsMobile(); 
+
 
     const [_open, _setOpen] = React.useState(() => {
       if (typeof window === "undefined") return defaultOpen;
@@ -77,6 +76,9 @@ const SidebarProvider = React.forwardRef<
         ?.split("=")[1];
       return cookieValue ? cookieValue === "true" : defaultOpen;
     });
+    
+    const [openMobile, setOpenMobile] = React.useState(false)
+
 
     const open = openProp ?? _open
     const setOpen = React.useCallback(
@@ -88,16 +90,18 @@ const SidebarProvider = React.forwardRef<
           _setOpen(openState)
         }
 
-        document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+        if (typeof window !== 'undefined') {
+          document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+        }
       },
-      [setOpenProp, open]
+      [setOpenProp, open, _setOpen]
     )
 
     const toggleSidebar = React.useCallback(() => {
-      return isMobile
-        ? setOpenMobile((open) => !open)
-        : setOpen((open) => !open)
-    }, [isMobile, setOpen, setOpenMobile])
+      return clientIsMobile
+        ? setOpenMobile((current) => !current)
+        : setOpen((current) => !current)
+    }, [clientIsMobile, setOpen, setOpenMobile])
 
     React.useEffect(() => {
       const handleKeyDown = (event: KeyboardEvent) => {
@@ -109,9 +113,10 @@ const SidebarProvider = React.forwardRef<
           toggleSidebar()
         }
       }
-
-      window.addEventListener("keydown", handleKeyDown)
-      return () => window.removeEventListener("keydown", handleKeyDown)
+      if (typeof window !== 'undefined') {
+        window.addEventListener("keydown", handleKeyDown)
+        return () => window.removeEventListener("keydown", handleKeyDown)
+      }
     }, [toggleSidebar])
 
     const state = open ? "expanded" : "collapsed"
@@ -121,12 +126,12 @@ const SidebarProvider = React.forwardRef<
         state,
         open,
         setOpen,
-        isMobile,
+        isMobile: clientIsMobile, 
         openMobile,
         setOpenMobile,
         toggleSidebar,
       }),
-      [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar]
+      [state, open, setOpen, clientIsMobile, openMobile, setOpenMobile, toggleSidebar]
     )
 
     return (
@@ -531,15 +536,15 @@ const sidebarMenuButtonVariants = cva(
 )
 
 interface SidebarMenuButtonProps
-  extends React.HTMLAttributes<HTMLSpanElement>, // Use HTMLSpanElement for a span
+  extends React.ComponentPropsWithoutRef<'span'>, 
     VariantProps<typeof sidebarMenuButtonVariants> {
   isActive?: boolean;
-  href?: string; // Keep for type consistency if Link passes it, but we'll ignore it
-  asChild?: boolean; // Keep for type consistency, but we'll ignore it
+  href?: string;      // To capture and ignore from Link passHref
+  asChild?: boolean;  // To capture and ignore from potential TooltipTrigger asChild
 }
 
 const SidebarMenuButton = React.forwardRef<
-  HTMLSpanElement, // Ref type is HTMLSpanElement
+  HTMLSpanElement, 
   SidebarMenuButtonProps
 >(
   (
@@ -549,23 +554,23 @@ const SidebarMenuButton = React.forwardRef<
       size,
       isActive,
       children,
-      href: _ignoredHref, // Explicitly destructure and ignore href
-      asChild: _ignoredAsChild, // Explicitly destructure and ignore asChild
-      ...otherProps 
+      // Explicitly capture and ignore href and asChild to prevent them from being spread
+      href: _ignoredHref,      
+      asChild: _ignoredAsChild, 
+      ...otherProps // These are props valid for a <span> or passed by Link's <a> (like onClick)
     },
     ref
   ) => {
-    // Render a span, styled like a button. The parent <a> from Link handles navigation.
     return (
       <span 
         ref={ref}
         data-sidebar="menu-button"
         data-size={size}
         data-active={String(isActive)}
-        className={cn(sidebarMenuButtonVariants({ variant, size, className }), "cursor-pointer")}
-        role="button" 
-        tabIndex={0} 
-        {...otherProps} 
+        className={cn(sidebarMenuButtonVariants({ variant, size, className }))}
+        role="button" // Retain for accessibility if styled like a button
+        tabIndex={0}  // Retain for focusability
+        {...otherProps} // Spread only the remaining valid props
       >
         {children}
       </span>
@@ -742,5 +747,3 @@ export {
   SidebarTrigger,
   useSidebar,
 }
-
-    
