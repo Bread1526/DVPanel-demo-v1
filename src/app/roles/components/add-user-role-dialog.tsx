@@ -181,7 +181,10 @@ export default function AddUserRoleDialog({
       <DialogTrigger asChild>
         {TriggerComponent}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-5xl rounded-2xl backdrop-blur-sm">
+      <DialogContent 
+        className="sm:max-w-3xl md:max-w-4xl lg:max-w-5xl rounded-2xl backdrop-blur-sm flex flex-col" // Added flex flex-col
+        style={{ height: 'calc(90vh - 80px)', maxHeight: '700px' }} // Adjusted height, maxHeight ensures it doesn't get too tall
+      >
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit User" : "Add New User"}</DialogTitle>
           <DialogDescription>
@@ -189,7 +192,7 @@ export default function AddUserRoleDialog({
           </DialogDescription>
         </DialogHeader>
         
-        <div className="flex flex-col md:flex-row gap-6 py-4" style={{ maxHeight: 'calc(80vh - 120px)' }}> {/* Adjusted for header/footer */}
+        <div className="flex flex-col md:flex-row gap-6 py-4 flex-grow overflow-hidden"> {/* flex-grow + overflow-hidden */}
           {/* Left Panel: User Details */}
           <ScrollArea className="md:w-2/5 w-full flex-shrink-0 pr-3 md:border-r md:border-border">
             <div className="space-y-4 ">
@@ -293,7 +296,7 @@ export default function AddUserRoleDialog({
                 {selectedRole === "Custom" && (
                   <div>
                     <h4 className="font-semibold text-muted-foreground mb-2">Page Access</h4>
-                    <div className="space-y-2 border p-3 rounded-md max-h-48 overflow-y-auto">
+                    <div className="space-y-2 border p-3 rounded-md">
                       {availableAppPages.map(page => (
                           <div key={`page-${page.id}-${userData?.id || 'new'}`} className="flex items-center space-x-2">
                               <Checkbox 
@@ -323,7 +326,7 @@ export default function AddUserRoleDialog({
                         </TooltipProvider>
                       )}
                     </h4>
-                    <div className={`space-y-2 border p-3 rounded-md max-h-48 overflow-y-auto ${projectAssignmentLocked ? 'opacity-50 cursor-not-allowed bg-muted/50' : ''}`}>
+                    <div className={`space-y-2 border p-3 rounded-md ${projectAssignmentLocked ? 'opacity-50 cursor-not-allowed bg-muted/50' : ''}`}>
                       {availableProjects.map(project => (
                           <div key={`project-${project.id}-${userData?.id || 'new'}`} className="flex items-center space-x-2">
                               <Checkbox 
@@ -341,12 +344,11 @@ export default function AddUserRoleDialog({
                   </div>
                 )}
                 
-                {/* Settings Access - Show for Admin, Administrator, Custom */}
                 {!isOwnerEditing && (selectedRole === "Administrator" || selectedRole === "Admin" || selectedRole === "Custom") && (
                   <div>
                     <Separator className="my-4" />
                     <h4 className="font-semibold text-muted-foreground mb-2">Settings Module Access</h4>
-                    <div className="space-y-2 border p-3 rounded-md max-h-48 overflow-y-auto">
+                    <div className="space-y-2 border p-3 rounded-md">
                       {availableSettingsPages.map(settingPage => (
                           <div key={`setting-${settingPage.id}-${userData?.id || 'new'}`} className="flex items-center space-x-2">
                               <Checkbox 
@@ -365,16 +367,13 @@ export default function AddUserRoleDialog({
               </div>
             </ScrollArea>
           )}
-           {/* Placeholder for roles that don't have specific right-panel customizations other than settings */}
            {selectedRole && !showCustomizationPanel && !isOwnerEditing && (
              <div className="md:w-3/5 w-full flex-grow pl-3 flex items-center justify-center">
                 <p className="text-muted-foreground text-center">This role has standard access. <br/>No specific page or project customization is applicable.</p>
              </div>
            )}
-
-
         </div>
-        <DialogFooter>
+        <DialogFooter className="mt-auto pt-4 border-t"> {/* Ensure footer is at the bottom */}
           <Button variant="outline" onClick={() => setOpen(false)} disabled={isTransitionPending || formState.status === 'validating'}>Cancel</Button>
           <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" onClick={handleSubmit} disabled={isTransitionPending || formState.status === 'validating' || isOwnerEditing}>
             {(isTransitionPending || formState.status === 'validating') ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
@@ -386,3 +385,5 @@ export default function AddUserRoleDialog({
   );
 }
 
+
+    
