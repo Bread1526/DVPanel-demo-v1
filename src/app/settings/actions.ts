@@ -22,9 +22,10 @@ const panelSettingsSchema = z.object({
     .refine((val) => {
       const portNum = parseInt(val, 10);
       return portNum >= 1 && portNum <= 65535;
-    }, "Panel Port must be between 1 and 65535."),
+    }, "Panel Port must be between 1 and 65535.")
+    .default("27407"), // Added default
   panelIp: z
-    .string() // Will be an empty string if user leaves it blank
+    .string()
     .refine(
       (val) =>
         val === "" || // Allow empty string
@@ -34,14 +35,14 @@ const panelSettingsSchema = z.object({
         message:
           "Must be a valid IPv4 address, domain name, or empty (interpreted as 0.0.0.0).",
       }
-    ).default(""), // Default to empty string if not provided
+    ).default(""), // Added default
   debugMode: z.boolean().optional().default(false),
   popup: popupSettingsSchema.default({ // Ensure popup has defaults if not in file
     notificationDuration: 5,
     disableAllNotifications: false,
     disableAutoClose: false,
-    enableCopyError: false,
-    showConsoleErrorsInNotifications: false,
+    enableCopyError: false, // Defaulted to false as per schema definition
+    showConsoleErrorsInNotifications: false, // Defaulted to false
   }),
 });
 
@@ -72,7 +73,7 @@ export interface LoadPanelSettingsState {
   data?: PanelSettingsData;
 }
 
-const SETTINGS_FILENAME = ".settings.json"; // Prepending dot for hidden file convention
+const SETTINGS_FILENAME = "settings.json"; // Removed dot prefix to match PRD example if settings file is visible
 
 export async function savePanelSettings(
   prevState: SavePanelSettingsState,
@@ -80,7 +81,7 @@ export async function savePanelSettings(
 ): Promise<SavePanelSettingsState> {
   const rawFormData = {
     panelPort: String(formData.get("panel-port") ?? ""),
-    panelIp: String(formData.get("panel-ip") ?? ""),
+    panelIp: String(formData.get("panel-ip") ?? ""), // Ensure panelIp is a string
     debugMode: formData.get("debug-mode") === "on",
     popup: {
       notificationDuration: parseInt(String(formData.get("popup-duration") ?? "5"), 10),
@@ -132,23 +133,29 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
     if (loadedData) {
       const parsedData = panelSettingsSchema.safeParse(loadedData);
       if (parsedData.success) {
+        // Ensure panelIp is a string, even if loadedData.panelIp was null/undefined
+        // and schema parsing fixed it.
+        const dataWithEnsuredStringIp = {
+          ...parsedData.data,
+          panelIp: parsedData.data.panelIp || "", 
+        };
         return {
           status: "success",
-          data: parsedData.data, // panelIp and popup will have their correct types from schema
+          data: dataWithEnsuredStringIp,
         };
       } else {
         console.warn("Loaded settings file has incorrect format or missing fields. Applying full defaults:", parsedData.error.flatten().fieldErrors);
         // If parsing fails, fall back to complete defaults from the schema
-        const defaults = panelSettingsSchema.parse({});
+        const defaults = panelSettingsSchema.parse({}); // This should now work with defaults in schema
         return {
-          status: "success", 
+          status: "success", // Consider this a success with defaults, rather than error state for UI
           message: "Settings file has an invalid format or missing fields. Full defaults applied.",
           data: defaults,
         };
       }
     } else {
       // If no file found, use complete defaults from the schema
-      const defaults = panelSettingsSchema.parse({});
+      const defaults = panelSettingsSchema.parse({}); // This should now work
       return {
         status: "not_found",
         message: "No existing settings file found. Defaults will be used.",
@@ -159,7 +166,7 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
     console.error("Error loading panel settings:", error);
     const errorMessage = error instanceof Error ? error.message : "An unknown error occurred while loading settings.";
     // If any other error occurs during load, use complete defaults
-    const defaults = panelSettingsSchema.parse({});
+    const defaults = panelSettingsSchema.parse({}); // This should now work
     return {
       status: "error",
       message: `Failed to load settings: ${errorMessage}. Defaults will be used.`,
