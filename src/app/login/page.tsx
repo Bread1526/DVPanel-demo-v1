@@ -2,7 +2,6 @@
 "use client";
 
 import React, { useEffect } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
 import { useActionState } from 'react';
 import { login, type LoginState } from './actions';
 import { Button } from '@/components/ui/button';
@@ -10,8 +9,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Replace, AlertCircle, Loader2 } from 'lucide-react'; // Assuming Replace is your logo icon
+import { Replace, AlertCircle, Loader2 } from 'lucide-react'; 
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useSearchParams, useRouter } from 'next/navigation'; // Added useSearchParams here
 
 const initialLoginState: LoginState = { message: "", status: "idle" };
 
@@ -25,8 +25,8 @@ export default function LoginPage() {
   useEffect(() => {
     if (formState.status === "success") {
       toast({ title: "Login Success", description: formState.message });
-      // Redirection is now handled by the server action itself.
-      // If server action redirect fails or isn't used, this client-side redirect can be a fallback.
+      // Redirection is now handled by the server action itself using `redirect()`.
+      // If client-side redirect were needed as a fallback, it would be:
       // router.push(redirectUrl || '/'); 
     } else if (formState.status === "error" && formState.message) {
       toast({
@@ -88,3 +88,4 @@ export default function LoginPage() {
     </Card>
   );
 }
+
