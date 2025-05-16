@@ -2,7 +2,7 @@
 // src/middleware.ts
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getIronSession } from 'iron-session/edge';
+import { getIronSession } from 'iron-session'; // Changed this line
 import { sessionOptions, type SessionData } from '@/lib/session';
 
 export async function middleware(request: NextRequest) {
@@ -23,7 +23,12 @@ export async function middleware(request: NextRequest) {
 
   // If user is not logged in and trying to access a protected path, redirect to login
   if (!session.isLoggedIn) {
-    return NextResponse.redirect(new URL('/login', request.url));
+    // Preserve the originally requested path in a query parameter for redirection after login
+    const loginUrl = new URL('/login', request.url);
+    if (pathname !== '/') { // Don't add redirect for the root path itself if it was the target
+        loginUrl.searchParams.set('redirect', pathname + request.nextUrl.search);
+    }
+    return NextResponse.redirect(loginUrl);
   }
   
   // User is logged in and accessing a protected path, allow access
