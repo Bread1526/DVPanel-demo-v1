@@ -21,25 +21,48 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { UserPlus, Check, Loader2 } from "lucide-react";
+import { UserPlus, Check, Loader2, Lock } from "lucide-react";
 import React, { useState, useEffect, useTransition } from "react";
-import { useActionState } from "react"; // Changed from react-dom
+import { useActionState } from "react";
 import { type UserData, type UserInput, addUser, updateUser, type UserActionState } from "../actions";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Separator } from "@/components/ui/separator";
 
-const availableProjects = [ // This should ideally come from a service or props
+const availableProjects = [ 
   { id: 'project_ecommerce_api', name: 'E-commerce API'},
   { id: 'project_company_website', name: 'Company Website'},
   { id: 'project_data_worker', name: 'Data Processing Worker'},
   { id: 'project_blog_platform', name: 'Blog Platform'},
 ];
 
+const availableAppPages = [
+  { id: 'dashboard', name: 'Dashboard (/)' },
+  { id: 'projects_page', name: 'Projects Page (/projects)' }, // Changed ID for clarity
+  { id: 'files', name: 'File Manager (/files)' },
+  { id: 'ports', name: 'Port Manager (/ports)' },
+  // { id: 'roles', name: 'User Roles (/roles)' }, // Custom roles typically don't manage other roles
+  { id: 'settings_area', name: 'Settings Area (/settings)' }, // Access to the overall /settings section
+];
+
+const availableSettingsPages = [
+  { id: 'settings_general', name: 'General' },
+  { id: 'settings_panel', name: 'Panel' },
+  { id: 'settings_daemon', name: 'Daemon' },
+  { id: 'settings_security', name: 'Security' },
+  { id: 'settings_popups', name: 'Popups' },
+  { id: 'settings_debug', name: 'Debug' },
+  { id: 'settings_license', name: 'License' },
+  { id: 'settings_info', name: 'Info' },
+];
+
+
 interface AddUserRoleDialogProps {
   isEditing?: boolean;
-  userData?: UserData; // Full UserData for editing
+  userData?: UserData;
   triggerButton?: React.ReactNode;
-  onUserChange?: () => void; // Callback to refresh user list
+  onUserChange?: () => void;
 }
 
 const initialFormState: UserActionState = { message: "", status: "idle" };
@@ -54,11 +77,13 @@ export default function AddUserRoleDialog({
   const { toast } = useToast();
   
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
+  // Email removed
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [selectedRole, setSelectedRole] = useState<UserData["role"] | "">("");
   const [assignedProjects, setAssignedProjects] = useState<string[]>([]);
+  const [assignedPages, setAssignedPages] = useState<string[]>([]);
+  const [allowedSettingsPages, setAllowedSettingsPages] = useState<string[]>([]);
   const [status, setStatus] = useState<UserData["status"]>("Active");
 
   const actionToCall = isEditing ? updateUser : addUser;
@@ -69,40 +94,32 @@ export default function AddUserRoleDialog({
     if (open) {
       if (isEditing && userData) {
         setUsername(userData.username);
-        setEmail(userData.email);
         setSelectedRole(userData.role);
         setAssignedProjects(userData.projects || []);
+        setAssignedPages(userData.assignedPages || []);
+        setAllowedSettingsPages(userData.allowedSettingsPages || []);
         setStatus(userData.status || "Active");
         setPassword(""); 
         setConfirmPassword("");
       } else {
-        // Reset for new user
         setUsername("");
-        setEmail("");
         setPassword("");
         setConfirmPassword("");
         setSelectedRole("");
         setAssignedProjects([]);
+        setAssignedPages([]);
+        setAllowedSettingsPages([]);
         setStatus("Active");
       }
-       // Reset formState when dialog opens
-      if (formState.status !== 'idle') {
-        // This is a bit of a hack to reset formState if it's not idle.
-        // A better approach might involve a dedicated reset action or keying the form.
-        // Directly calling the action to reset its internal state if it holds any.
-        // Note: formAction itself does not clear its previous state.
-        // The `key` prop on the form or dialog might be a cleaner way for full reset.
-        // For now, we rely on `formState` being reset by `useActionState` on re-render or new action.
-      }
     }
-  }, [open, isEditing, userData, formState.status]);
+  }, [open, isEditing, userData]);
 
 
   useEffect(() => {
     if (formState.status === "success") {
       toast({ title: isEditing ? "User Updated" : "User Added", description: formState.message, duration: 5000 });
       setOpen(false);
-      onUserChange?.(); // Trigger refresh
+      onUserChange?.(); 
     } else if (formState.status === "error" && formState.message) {
       toast({ title: "Error", description: formState.message, variant: "destructive", duration: 5000 });
     }
@@ -111,6 +128,18 @@ export default function AddUserRoleDialog({
   const handleProjectToggle = (projectId: string) => {
     setAssignedProjects(prev => 
       prev.includes(projectId) ? prev.filter(id => id !== projectId) : [...prev, projectId]
+    );
+  };
+
+  const handlePageToggle = (pageId: string) => {
+    setAssignedPages(prev =>
+      prev.includes(pageId) ? prev.filter(id => id !== pageId) : [...prev, pageId]
+    );
+  };
+
+  const handleSettingsPageToggle = (pageId: string) => {
+    setAllowedSettingsPages(prev =>
+      prev.includes(pageId) ? prev.filter(id => id !== pageId) : [...prev, pageId]
     );
   };
 
@@ -123,12 +152,13 @@ export default function AddUserRoleDialog({
     const submissionData: UserInput = {
       id: isEditing ? userData?.id : undefined,
       username,
-      email,
-      role: selectedRole as UserData["role"], // Assuming selectedRole is validated by this point or by Zod
+      role: selectedRole as UserData["role"], 
       projects: assignedProjects,
+      assignedPages: assignedPages,
+      allowedSettingsPages: allowedSettingsPages,
       status: status,
     };
-    if (password) { // Only include password if it's set (for new user or if changing)
+    if (password && (!isEditing || (isEditing && password))) {
       submissionData.password = password;
     }
     
@@ -143,21 +173,23 @@ export default function AddUserRoleDialog({
     </Button>
   );
 
-  const isOwnerEditing = isEditing && userData?.username === 'root_owner'; // Example 'root_owner' check
+  const isOwnerEditing = isEditing && userData?.username === 'root_owner'; 
+  const canAssignProjects = selectedRole === "Admin" || (selectedRole === "Custom" && assignedPages.includes('projects_page'));
+  const projectAssignmentLocked = selectedRole === "Custom" && !assignedPages.includes('projects_page');
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {TriggerComponent}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[525px] rounded-2xl backdrop-blur-sm">
+      <DialogContent className="sm:max-w-[600px] rounded-2xl backdrop-blur-sm">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit User" : "Add New User"}</DialogTitle>
           <DialogDescription>
             {isEditing ? "Update user details and role assignments." : "Fill in the details to add a new user and assign their role."}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
+        <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
           {formState.status === "error" && formState.errors?._form && (
             <Alert variant="destructive">
               <AlertTitle>Form Error</AlertTitle>
@@ -179,20 +211,7 @@ export default function AddUserRoleDialog({
           </div>
           {formState.errors?.username && <p className="col-span-4 text-xs text-destructive text-right -mt-2">{formState.errors.username.join(', ')}</p>}
 
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="email" className="text-right">
-              Email
-            </Label>
-            <Input 
-              id="email" 
-              type="email" 
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="user@example.com" 
-              className="col-span-3" 
-            />
-          </div>
-          {formState.errors?.email && <p className="col-span-4 text-xs text-destructive text-right -mt-2">{formState.errors.email.join(', ')}</p>}
+          {/* Email field removed */}
 
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="password" className="text-right">
@@ -240,27 +259,57 @@ export default function AddUserRoleDialog({
               <SelectContent>
                 <SelectItem value="Administrator">Administrator</SelectItem>
                 <SelectItem value="Admin">Admin (Project-specific)</SelectItem>
-                <SelectItem value="Custom">Custom (Project-specific)</SelectItem>
+                <SelectItem value="Custom">Custom (Granular)</SelectItem>
               </SelectContent>
             </Select>
           </div>
            {formState.errors?.role && <p className="col-span-4 text-xs text-destructive text-right -mt-2">{formState.errors.role.join(', ')}</p>}
 
+          {selectedRole === "Custom" && (
+            <div className="grid grid-cols-4 items-start gap-4 pt-2">
+              <Label className="text-right pt-2 font-semibold text-muted-foreground">
+                Page Access
+              </Label>
+              <div className="col-span-3 space-y-2 border p-3 rounded-md max-h-40 overflow-y-auto">
+                {availableAppPages.map(page => (
+                    <div key={`page-${page.id}-${userData?.id || 'new'}`} className="flex items-center space-x-2">
+                        <Checkbox 
+                            id={`page-${page.id}-${userData?.id || 'new'}`}
+                            checked={assignedPages.includes(page.id)}
+                            onCheckedChange={() => handlePageToggle(page.id)}
+                        />
+                        <Label htmlFor={`page-${page.id}-${userData?.id || 'new'}`} className="font-normal cursor-pointer">{page.name}</Label>
+                    </div>
+                ))}
+                 {availableAppPages.length === 0 && <p className="text-xs text-muted-foreground">No application pages defined for assignment.</p>}
+              </div>
+            </div>
+          )}
+          {formState.errors?.assignedPages && <p className="col-span-4 text-xs text-destructive text-right -mt-2">{formState.errors.assignedPages.join(', ')}</p>}
 
           {(selectedRole === "Admin" || selectedRole === "Custom") && (
-            <div className="grid grid-cols-4 items-start gap-4">
-              <Label className="text-right pt-2">
+            <div className="grid grid-cols-4 items-start gap-4 pt-2">
+              <Label className="text-right pt-2 font-semibold text-muted-foreground flex items-center gap-1">
                 Projects
+                {projectAssignmentLocked && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild><Lock className="h-3 w-3 text-destructive" /></TooltipTrigger>
+                      <TooltipContent><p>Assign "Projects Page" access to enable project assignments.</p></TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
               </Label>
-              <div className="col-span-3 space-y-2 border p-3 rounded-md max-h-32 overflow-y-auto">
+              <div className={`col-span-3 space-y-2 border p-3 rounded-md max-h-40 overflow-y-auto ${projectAssignmentLocked ? 'opacity-50 cursor-not-allowed bg-muted/50' : ''}`}>
                 {availableProjects.map(project => (
-                    <div key={project.id} className="flex items-center space-x-2">
+                    <div key={`project-${project.id}-${userData?.id || 'new'}`} className="flex items-center space-x-2">
                         <Checkbox 
                             id={`project-${project.id}-${userData?.id || 'new'}`}
                             checked={assignedProjects.includes(project.id)}
                             onCheckedChange={() => handleProjectToggle(project.id)}
+                            disabled={projectAssignmentLocked}
                         />
-                        <Label htmlFor={`project-${project.id}-${userData?.id || 'new'}`} className="font-normal cursor-pointer">{project.name}</Label>
+                        <Label htmlFor={`project-${project.id}-${userData?.id || 'new'}`} className={`font-normal ${projectAssignmentLocked ? 'cursor-not-allowed' : 'cursor-pointer'}`}>{project.name}</Label>
                     </div>
                 ))}
                  {availableProjects.length === 0 && <p className="text-xs text-muted-foreground">No projects available for assignment.</p>}
@@ -269,9 +318,33 @@ export default function AddUserRoleDialog({
           )}
           {formState.errors?.projects && <p className="col-span-4 text-xs text-destructive text-right -mt-2">{formState.errors.projects.join(', ')}</p>}
 
+          {!isOwnerEditing && (selectedRole === "Administrator" || selectedRole === "Admin" || selectedRole === "Custom") && (
+            <>
+              <Separator className="col-span-4 my-2" />
+              <div className="grid grid-cols-4 items-start gap-4 pt-2">
+                <Label className="text-right pt-2 font-semibold text-muted-foreground">
+                  Settings Access
+                </Label>
+                <div className="col-span-3 space-y-2 border p-3 rounded-md max-h-48 overflow-y-auto">
+                  {availableSettingsPages.map(settingPage => (
+                      <div key={`setting-${settingPage.id}-${userData?.id || 'new'}`} className="flex items-center space-x-2">
+                          <Checkbox 
+                              id={`setting-${settingPage.id}-${userData?.id || 'new'}`}
+                              checked={allowedSettingsPages.includes(settingPage.id)}
+                              onCheckedChange={() => handleSettingsPageToggle(settingPage.id)}
+                          />
+                          <Label htmlFor={`setting-${settingPage.id}-${userData?.id || 'new'}`} className="font-normal cursor-pointer">{settingPage.name}</Label>
+                      </div>
+                  ))}
+                  {availableSettingsPages.length === 0 && <p className="text-xs text-muted-foreground">No settings pages defined for assignment.</p>}
+                </div>
+              </div>
+              {formState.errors?.allowedSettingsPages && <p className="col-span-4 text-xs text-destructive text-right -mt-2">{formState.errors.allowedSettingsPages.join(', ')}</p>}
+            </>
+          )}
 
            {isEditing && !isOwnerEditing && (
-            <div className="grid grid-cols-4 items-center gap-4">
+            <div className="grid grid-cols-4 items-center gap-4 pt-2">
               <Label htmlFor="status" className="text-right">
                 Status
               </Label>
@@ -292,7 +365,7 @@ export default function AddUserRoleDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)} disabled={isTransitionPending || formState.status === 'validating'}>Cancel</Button>
-          <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" onClick={handleSubmit} disabled={isTransitionPending || formState.status === 'validating'}>
+          <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" onClick={handleSubmit} disabled={isTransitionPending || formState.status === 'validating' || isOwnerEditing}>
             {(isTransitionPending || formState.status === 'validating') ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
             {isEditing ? "Save Changes" : "Add User"}
           </Button>
@@ -301,4 +374,3 @@ export default function AddUserRoleDialog({
     </Dialog>
   );
 }
-

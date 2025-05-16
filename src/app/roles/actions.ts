@@ -7,7 +7,6 @@ import { v4 as uuidv4 } from "uuid";
 import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storageService";
 import { type PanelSettingsData, loadPanelSettings as loadGeneralPanelSettings } from "@/app/settings/actions";
 
-
 const USERS_FILENAME = "users.json";
 
 // Schemas
@@ -22,12 +21,13 @@ export type UserPermissions = z.infer<typeof userPermissionsSchema>;
 const userSchema = z.object({
   id: z.string().uuid(),
   username: z.string().min(3, "Username must be at least 3 characters long."),
-  email: z.string().email("Invalid email address."),
+  // email: z.string().email("Invalid email address."), // Email removed
   hashedPassword: z.string(),
   salt: z.string(),
   role: z.enum(["Administrator", "Admin", "Custom"]), // "Owner" is not managed here
   projects: z.array(z.string()).optional().default([]), // For Admin/Custom roles
-  // permissions: userPermissionsSchema.optional(), // More granular permissions can be added later
+  assignedPages: z.array(z.string()).optional().default([]), // For Custom role page/module access
+  allowedSettingsPages: z.array(z.string()).optional().default([]), // For settings page access
   lastLogin: z.string().optional(),
   status: z.enum(["Active", "Inactive"]).default("Active"),
   createdAt: z.string().datetime(),
@@ -94,8 +94,6 @@ export async function loadUsers(): Promise<LoadUsersState> {
 
     if (!parsedData.success) {
       console.error("[RolesActions] Failed to parse users.json:", parsedData.error.flatten().fieldErrors);
-      // If parsing fails, it might mean the file is corrupt or in an old format.
-      // Returning empty or attempting a migration could be options. For now, return empty.
       return { users: [], status: "success", error: "User data file is corrupt or in an old format. Displaying no users." };
     }
     console.log(`[RolesActions] Successfully loaded ${parsedData.data.length} users.`);
@@ -113,13 +111,14 @@ export async function addUser(prevState: UserActionState, formData: UserInput): 
 
   const rawData = {
     username: formData.username,
-    email: formData.email,
     password: formData.password,
     role: formData.role,
     projects: formData.projects || [],
+    assignedPages: formData.assignedPages || [],
+    allowedSettingsPages: formData.allowedSettingsPages || [],
   };
 
-  const validationSchema = userSchema.pick({ username: true, email: true, role: true, projects: true })
+  const validationSchema = userSchema.pick({ username: true, role: true, projects: true, assignedPages: true, allowedSettingsPages: true })
     .extend({ password: z.string().min(8, "Password must be at least 8 characters long.") });
 
   const validatedFields = validationSchema.safeParse(rawData);
@@ -144,9 +143,6 @@ export async function addUser(prevState: UserActionState, formData: UserInput): 
     if (users.some(u => u.username === userData.username)) {
       return { message: "Username already exists.", status: "error", errors: { username: ["Username already taken"] } };
     }
-    if (users.some(u => u.email === userData.email)) {
-      return { message: "Email already in use.", status: "error", errors: { email: ["Email already registered"] } };
-    }
     
     const { hash, salt } = await hashPassword(password);
     const newUser: UserData = {
@@ -162,8 +158,8 @@ export async function addUser(prevState: UserActionState, formData: UserInput): 
     const updatedUsers = [...users, newUser];
     await saveEncryptedData(USERS_FILENAME, updatedUsers);
     
-    const panelSettings = await loadGeneralPanelSettings();
-    const successMessage = panelSettings.data?.debugMode 
+    const panelSettings = await getPanelSettingsForDebug();
+    const successMessage = panelSettings?.debugMode 
         ? `User "${newUser.username}" added successfully to ${USERS_FILENAME}.`
         : `User "${newUser.username}" added successfully.`;
 
@@ -187,15 +183,15 @@ export async function updateUser(prevState: UserActionState, formData: UserInput
   const rawData = {
     id: formData.id,
     username: formData.username,
-    email: formData.email,
     password: formData.password, // Optional
     role: formData.role,
     projects: formData.projects || [],
+    assignedPages: formData.assignedPages || [],
+    allowedSettingsPages: formData.allowedSettingsPages || [],
     status: formData.status || "Active",
   };
 
-  // For updates, password is optional
-  const updateValidationSchema = userSchema.pick({ id:true, username: true, email: true, role: true, projects: true, status:true })
+  const updateValidationSchema = userSchema.pick({ id:true, username: true, role: true, projects: true, status:true, assignedPages: true, allowedSettingsPages: true })
     .extend({ password: z.string().min(8, "Password must be at least 8 characters long.").optional().or(z.literal('')) });
 
   const validatedFields = updateValidationSchema.safeParse(rawData);
@@ -224,18 +220,14 @@ export async function updateUser(prevState: UserActionState, formData: UserInput
 
     const existingUser = users[userIndex];
     
-    // Check for username/email conflicts if they are being changed
     if (userDataToUpdate.username !== existingUser.username && users.some(u => u.id !== userId && u.username === userDataToUpdate.username)) {
       return { message: "Username already exists.", status: "error", errors: { username: ["Username already taken by another user"] } };
-    }
-    if (userDataToUpdate.email !== existingUser.email && users.some(u => u.id !== userId && u.email === userDataToUpdate.email)) {
-      return { message: "Email already in use.", status: "error", errors: { email: ["Email already registered by another user"] } };
     }
 
     let newHashedPassword = existingUser.hashedPassword;
     let newSalt = existingUser.salt;
 
-    if (password) { // Only hash and update if a new password was provided
+    if (password) { 
       const { hash, salt } = await hashPassword(password);
       newHashedPassword = hash;
       newSalt = salt;
@@ -253,8 +245,8 @@ export async function updateUser(prevState: UserActionState, formData: UserInput
     updatedUsersList[userIndex] = updatedUser;
     await saveEncryptedData(USERS_FILENAME, updatedUsersList);
 
-    const panelSettings = await loadGeneralPanelSettings();
-    const successMessage = panelSettings.data?.debugMode 
+    const panelSettings = await getPanelSettingsForDebug();
+    const successMessage = panelSettings?.debugMode 
         ? `User "${updatedUser.username}" updated successfully in ${USERS_FILENAME}.`
         : `User "${updatedUser.username}" updated successfully.`;
 
@@ -288,8 +280,8 @@ export async function deleteUser(userId: string): Promise<UserActionState> {
 
     await saveEncryptedData(USERS_FILENAME, updatedUsers);
     
-    const panelSettings = await loadGeneralPanelSettings();
-    const successMessage = panelSettings.data?.debugMode
+    const panelSettings = await getPanelSettingsForDebug();
+    const successMessage = panelSettings?.debugMode
         ? `User ID "${userId}" deleted successfully from ${USERS_FILENAME}.`
         : `User deleted successfully.`;
         
@@ -301,7 +293,6 @@ export async function deleteUser(userId: string): Promise<UserActionState> {
   }
 }
 
-// Utility to get panel settings for debug messages
 async function getPanelSettingsForDebug(): Promise<PanelSettingsData | undefined> {
     try {
         const settings = await loadGeneralPanelSettings();
