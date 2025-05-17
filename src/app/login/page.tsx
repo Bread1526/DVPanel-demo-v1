@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useEffect, useState } from 'react'; // Added useState
+import React, { useEffect, useState, useTransition } from 'react';
 import { useActionState } from 'react';
 import { login, type LoginState } from './actions';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,8 @@ import { useSearchParams, useRouter } from 'next/navigation';
 const initialLoginState: LoginState = { message: "", status: "idle", errors: {} };
 
 export default function LoginPage() {
-  const [formState, formAction, isPending] = useActionState(login, initialLoginState);
+  const [formState, formAction, isActionPending] = useActionState(login, initialLoginState);
+  const [isTransitionPending, startTransition] = useTransition();
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -25,7 +26,6 @@ export default function LoginPage() {
   const [reasonMessage, setReasonMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    // Handle redirect reasons from URL
     const reason = searchParams.get('reason');
     if (reason) {
         if (reason === 'inactive') {
@@ -35,38 +35,44 @@ export default function LoginPage() {
         } else if (reason === 'settings_changed') {
             setReasonMessage("Settings updated. Please log in again.");
         }
-        // Clean the reason from URL to prevent re-showing on refresh/re-render without a new redirect
+        // Clean the reason from URL
         const newUrl = new URL(window.location.href);
         newUrl.searchParams.delete('reason');
         router.replace(newUrl.toString(), { scroll: false });
     }
   }, [searchParams, router]);
 
-
   useEffect(() => {
-    if (formState.status === "success" && formState.sessionInfo) {
-      toast({
-        title: "Login Successful",
-        description: formState.message,
-      });
-      // Store session info in localStorage
-      localStorage.setItem('dvpanel-session', JSON.stringify(formState.sessionInfo));
-      
-      const redirectUrlParam = searchParams.get('redirect'); // Get redirect from current searchParams
-      const destination = redirectUrlParam || '/'; // Default to dashboard
-      router.push(destination);
-
-    } else if ((formState.status === "error" || formState.status === "validation_failed") && formState.message) {
-      // Display field-specific errors if available, otherwise the general message
-      if (!formState.errors?.username && !formState.errors?.password && !formState.errors?._form) {
+    console.log('Login formState changed:', formState); // Log the entire formState
+    if (formState.status === "success") {
+      // Server action now handles redirect, client-side redirect is a fallback
+      // or if the action doesn't redirect (which it should)
+      // router.push(formState.redirectUrl || '/'); // redirectUrl is part of rawFormData, not LoginState
+    } else if ((formState.status === "error" || formState.status === "validation_failed")) {
+      // Show general _form errors in the alert, or as a toast if no specific field errors.
+      // Field-specific errors (username, password) are displayed below inputs.
+      if (formState.errors?._form && formState.errors._form.length > 0) {
+        // Already handled by the Alert component below
+      } else if (formState.message && !formState.errors?.username && !formState.errors?.password) {
+        // Only show toast if no specific field errors are present and _form error isn't being shown by Alert
         toast({
-          title: "Login Failed",
+          title: "Login Problem",
           description: formState.message,
           variant: "destructive",
         });
       }
     }
-  }, [formState, toast, router, searchParams]);
+  }, [formState, toast, router]);
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    startTransition(() => {
+      formAction(formData);
+    });
+  };
+  
+  const isPending = isActionPending || isTransitionPending;
 
   return (
     <Card className="w-full max-w-md shadow-2xl rounded-xl">
@@ -77,7 +83,7 @@ export default function LoginPage() {
         <CardTitle className="text-3xl font-bold">Welcome to DVPanel</CardTitle>
         <CardDescription>Enter your credentials to access your dashboard.</CardDescription>
       </CardHeader>
-      <form action={formAction}>
+      <form onSubmit={handleSubmit}>
         <CardContent className="space-y-6">
           {reasonMessage && (
             <Alert variant="default" className="bg-primary/10 border-primary/30">
@@ -90,7 +96,7 @@ export default function LoginPage() {
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertTitle>Login Error</AlertTitle>
-              <AlertDescription>{formState.errors._form.join(', ')}</AlertDescription>
+              <AlertDescription>{formState.errors._form.join('; ')}</AlertDescription>
             </Alert>
           )}
           <div className="space-y-2">
@@ -127,7 +133,7 @@ export default function LoginPage() {
               htmlFor="keepLoggedIn"
               className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
             >
-              Keep me logged in (Not functional with file-based sessions)
+              Keep me logged in
             </Label>
           </div>
           {searchParams.get('redirect') && <input type="hidden" name="redirectUrl" value={searchParams.get('redirect')!} />}
@@ -141,3 +147,5 @@ export default function LoginPage() {
     </Card>
   );
 }
+
+    
