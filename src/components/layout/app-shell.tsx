@@ -1,7 +1,7 @@
 
 "use client";
 
-import type React from 'react';
+import React from 'react'; // Added React import
 import {
   Sidebar,
   SidebarHeader,
@@ -30,7 +30,7 @@ import {
   EyeOff,
   AlertTriangle,
   ShieldCheck,
-  Eye, // Added for "View Role Details"
+  Eye,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -45,11 +45,11 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useEffect, useState, useTransition, useCallback } from 'react';
-import { logout } from '@/app/(app)/logout/actions'; 
+import { logout } from '@/app/(app)/logout/actions';
 import { useActivityTracker } from '@/hooks/useActivityTracker';
 import { stopImpersonation, type FullUserData } from '@/app/(app)/roles/actions';
 import { useToast } from '@/hooks/use-toast';
-import AccessDeniedOverlay from './access-denied-overlay'; // Import the new component
+import AccessDeniedOverlay from './access-denied-overlay';
 
 const navItemsBase = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, requiredPage: 'dashboard' },
@@ -86,14 +86,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const fetchUserCallback = useCallback(async () => {
     setIsLoadingUser(true);
-    setIsPageAccessGranted(null); // Reset while loading
+    setIsPageAccessGranted(null);
     try {
       const res = await fetch('/api/auth/user');
       if (res.ok) {
         const data: AuthApiResponse = await res.json();
         setCurrentUserData(data);
+        // console.log('[AppShell] User data fetched:', data);
       } else {
         setCurrentUserData({ user: null, isLoggedIn: false, isImpersonating: false });
+        // console.log('[AppShell] Failed to fetch user, status:', res.status);
       }
     } catch (error) {
       console.error("[AppShell] Error fetching user:", error);
@@ -108,6 +110,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [fetchUserCallback, pathname]);
 
   const effectiveUser = currentUserData.user;
+  // console.log('[AppShell] Effective user for permission check:', effectiveUser);
+  // console.log('[AppShell] Current pathname:', pathname);
+
 
   useEffect(() => {
     if (!isLoadingUser && effectiveUser && currentUserData.isLoggedIn) {
@@ -115,20 +120,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') {
         hasAccess = true;
       } else if (effectiveUser.role === 'Admin') {
-        // Admins have access to core pages by default (Dashboard, Projects, Files, Ports, Settings Area, Roles)
+        // Admins have access to main pages, but specific logic for settings might be needed
+        // For now, treat like Administrator for base pages, but can be refined
         const adminAllowedBasePaths = ['/', '/projects', '/files', '/ports', '/roles', '/settings'];
         hasAccess = adminAllowedBasePaths.some(basePath => pathname === basePath || pathname.startsWith(basePath + '/'));
       } else if (effectiveUser.role === 'Custom' && effectiveUser.assignedPages) {
-        const currentNavItem = navItemsBase.find(item => pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href + '/')));
+        const currentNavItem = navItemsBase.find(item => 
+          item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)
+        );
         if (currentNavItem && currentNavItem.requiredPage) {
           hasAccess = effectiveUser.assignedPages.includes(currentNavItem.requiredPage);
-        } else if (pathname === '/') { // Special case for dashboard if not explicitly in navItems with requiredPage
-             hasAccess = effectiveUser.assignedPages.includes('dashboard');
+        } else if (pathname === '/') {
+           hasAccess = effectiveUser.assignedPages.includes('dashboard');
         }
       }
+      // console.log(`[AppShell] Access check for ${pathname}: ${hasAccess}`);
       setIsPageAccessGranted(hasAccess);
     } else if (!isLoadingUser && !currentUserData.isLoggedIn) {
-      // If not logged in, middleware handles redirection. Client-side, assume no access.
       setIsPageAccessGranted(false); 
     }
   }, [isLoadingUser, effectiveUser, currentUserData.isLoggedIn, pathname]);
@@ -138,15 +146,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (!effectiveUser) return false;
     if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') return true;
     if (effectiveUser.role === 'Admin') {
-        // More specific page access for Admins if needed, for now same as Administrator for core pages
         const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'settings_area', 'roles'];
         return item.requiredPage ? adminAllowedPages.includes(item.requiredPage) : true;
     }
     if (effectiveUser.role === 'Custom' && item.requiredPage) {
       return effectiveUser.assignedPages?.includes(item.requiredPage) ?? false;
     }
-    return false;
+    return false; // Default deny for custom if no page assigned
   });
+  // console.log('[AppShell] Filtered navItems for role', effectiveUser?.role, ':', navItems.map(i => i.label));
+
 
   const handleLogout = async () => {
     await logout();
@@ -163,7 +172,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     });
   };
   
-  const menuButtonRef = React.useRef<HTMLSpanElement>(null); // Changed ref type for span
+  const menuButtonRef = React.useRef<HTMLSpanElement>(null);
 
   return (
     <>
@@ -183,11 +192,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
               const menuButton = (
                 <SidebarMenuButton
-                  ref={menuButtonRef} 
                   isActive={isActive}
                   variant="default"
                   size="default"
-                  // href prop is handled by Link passHref
                 >
                   <item.icon />
                   <span className={cn(
@@ -206,33 +213,32 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 </SidebarMenuButton>
               );
 
-              let finalElement;
-              if (sidebarState === 'collapsed' && !isMobile && item.label) {
-                finalElement = (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Link href={item.href} legacyBehavior passHref>
-                           {menuButton}
-                        </Link>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" align="center">
-                        <p>{item.label}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                );
-              } else {
-                finalElement = (
-                  <Link href={item.href} legacyBehavior passHref>
-                    {menuButton}
-                  </Link>
-                );
-              }
+              let linkWrappedButton = (
+                 <Link href={item.href} asChild>
+                   {menuButton}
+                 </Link>
+               );
+ 
+               if (sidebarState === 'collapsed' && !isMobile && item.label) {
+                 return (
+                   <SidebarMenuItem key={item.label}>
+                     <TooltipProvider>
+                       <Tooltip>
+                         <TooltipTrigger asChild>
+                           {linkWrappedButton}
+                         </TooltipTrigger>
+                         <TooltipContent side="right" align="center">
+                           <p>{item.label}</p>
+                         </TooltipContent>
+                       </Tooltip>
+                     </TooltipProvider>
+                   </SidebarMenuItem>
+                 );
+               }
 
               return (
                 <SidebarMenuItem key={item.label}>
-                  {finalElement}
+                  {linkWrappedButton}
                 </SidebarMenuItem>
               );
             })}
