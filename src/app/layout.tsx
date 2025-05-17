@@ -5,7 +5,7 @@ import './globals.css';
 import { cn } from '@/lib/utils';
 import { Toaster } from '@/components/ui/toaster';
 import { ThemeProvider } from '@/components/theme-provider';
-// AppShell and SidebarProvider are NO LONGER imported or used here directly.
+// SidebarProvider and AppShell are NOT imported or used here directly.
 // They are managed by src/app/(app)/layout.tsx for authenticated routes.
 
 const inter = Inter({
@@ -41,7 +41,7 @@ export default function RootLayout({
           enableSystem={false}
           disableTransitionOnChange
         >
-          {children} {/* Children will be either LoginLayout content or (app)/layout content */}
+          {children} {/* Children will be (app)/layout.tsx content or login/layout.tsx content */}
           <Toaster />
         </ThemeProvider>
       </body>
