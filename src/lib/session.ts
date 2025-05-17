@@ -2,16 +2,23 @@
 import type { IronSessionOptions } from 'iron-session';
 import type { UserData } from '@/app/(app)/roles/actions';
 
+// Define a type for the user object stored in the session
+export type SessionUser = {
+  id: string;
+  username: string;
+  role: UserData['role'] | 'Owner'; // Allow 'Owner' role from .env
+};
+
 export interface SessionData {
-  user?: {
-    id: string;
-    username: string;
-    role: UserData['role'] | 'Owner'; // Allow 'Owner' role
-  };
+  user?: SessionUser;
   isLoggedIn: boolean;
   lastActivity?: number; // Timestamp of last recorded activity
   sessionInactivityTimeoutMinutes?: number; // User's specific timeout setting for this session
   disableAutoLogoutOnInactivity?: boolean; // User's specific auto-logout setting for this session
+  
+  // Impersonation state
+  originalUser?: SessionUser; // Stores the original admin user during impersonation
+  impersonatingUserId?: string; // ID of the user being impersonated
 }
 
 export const sessionOptions: IronSessionOptions = {

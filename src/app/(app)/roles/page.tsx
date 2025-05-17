@@ -6,14 +6,14 @@ import dynamic from 'next/dynamic';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye, ArrowLeft, ShieldQuestion } from "lucide-react";
-// import AddUserRoleDialog from "./components/add-user-role-dialog"; // Dynamic import below
-import { loadUsers, deleteUser, type UserData, type UserActionState } from "./actions";
+import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye, ShieldQuestion, UserCog } from "lucide-react"; // Removed ArrowLeft
+import { loadUsers, deleteUser, type UserData, type UserActionState, startImpersonation, type ImpersonationActionState } from "./actions";
 import { useToast } from "@/hooks/use-toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Dialog, DialogClose, DialogFooter as DialogCoreFooter, DialogContent as DialogCoreContent, DialogHeader as DialogCoreHeader, DialogTitle as DialogCoreTitle, DialogDescription as DialogCoreDescription} from "@/components/ui/dialog"; 
 
 const AddUserRoleDialog = dynamic(() => import('./components/add-user-role-dialog'), {
   loading: () => <p>Loading dialog...</p>,
@@ -22,13 +22,11 @@ const AddUserRoleDialog = dynamic(() => import('./components/add-user-role-dialo
 
 
 const rolesDefinitions = [
-  { name: "Owner", description: "Full system access. Cannot be modified or managed here." },
-  { name: "Administrator", description: "Access to all projects and system features, except user management." },
-  { name: "Admin", description: "Assigned to specific projects with full control over them." },
-  { name: "Custom", description: "Granular permissions assigned per module or page." },
+  { name: "Owner", description: "Full system access. Managed via .env.local, not listed here." },
+  { name: "Administrator", description: "Access to all projects and most system features. Cannot manage users." },
+  { name: "Admin", description: "Assigned to specific projects with full control over them. Customizable page/settings access." },
+  { name: "Custom", description: "Granular permissions assigned per module, page, or project." },
 ];
-
-const OWNER_USERNAME = "root_owner"; 
 
 const availableProjects = [ 
   { id: 'project_ecommerce_api', name: 'E-commerce API'},
@@ -43,6 +41,7 @@ const availableAppPages = [
   { id: 'files', name: 'File Manager (/files)' },
   { id: 'ports', name: 'Port Manager (/ports)' },
   { id: 'settings_area', name: 'Settings Area (/settings)' }, 
+  { id: 'roles', name: 'User Roles (/roles)'},
 ];
 
 const availableSettingsPages = [
@@ -62,8 +61,9 @@ export default function RolesPage() {
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   const [isPendingDelete, startDeleteTransition] = useTransition();
+  const [isPendingImpersonate, startImpersonateTransition] = useTransition();
   const [userToDelete, setUserToDelete] = useState<UserData | null>(null);
-  const [viewingUserAsRole, setViewingUserAsRole] = useState<UserData | null>(null);
+  const [userToViewDetails, setUserToViewDetails] = useState<UserData | null>(null); // For the View Role Details Dialog
 
   const fetchUsers = useCallback(async () => {
     setIsLoading(true);
@@ -71,7 +71,7 @@ export default function RolesPage() {
     try {
       const result = await loadUsers();
       if (result.status === "success" && result.users) {
-        setUsers(result.users.filter(u => u.username !== OWNER_USERNAME && u.id !== 'owner_root'));
+        setUsers(result.users);
       } else {
         setError(result.error || "Failed to load users.");
         setUsers([]);
@@ -86,14 +86,11 @@ export default function RolesPage() {
   }, []);
 
   useEffect(() => {
-    if (!viewingUserAsRole) { 
-      fetchUsers();
-    }
-  }, [fetchUsers, viewingUserAsRole]);
+    fetchUsers();
+  }, [fetchUsers]);
 
   const handleDeleteUser = async () => {
     if (!userToDelete) return;
-
     startDeleteTransition(async () => {
       const result: UserActionState = await deleteUser(userToDelete.id);
       if (result.status === "success") {
@@ -108,100 +105,30 @@ export default function RolesPage() {
 
   const handleUserChange = useCallback(async () => { 
     await fetchUsers();
-    if (viewingUserAsRole) { 
-        // If we were viewing a user that just got updated, we need to find their updated data
-        // This relies on users state being updated by fetchUsers before this check
-        // A slight delay or a more direct way to get the updated user might be needed for complex scenarios
-        // For now, we refetch all and then try to find by ID.
-        const updatedUser = users.find(u => u.id === viewingUserAsRole.id);
+    if (userToViewDetails) { 
+        const updatedUser = (await loadUsers()).users?.find(u => u.id === userToViewDetails.id);
         if (updatedUser) {
-            setViewingUserAsRole(updatedUser);
+            setUserToViewDetails(updatedUser);
         } else { 
-            // User might have been deleted or ID changed, so exit view mode
-            setViewingUserAsRole(null); 
+            setUserToViewDetails(null); 
         }
     }
-  }, [fetchUsers, viewingUserAsRole, users]); // added users to dependency array
+  }, [fetchUsers, userToViewDetails]);
 
-  if (viewingUserAsRole) {
-    const findNameById = (id: string, list: {id: string, name: string}[]) => list.find(item => item.id === id)?.name || id;
+  const handleStartImpersonation = (userId: string) => {
+    startImpersonateTransition(async () => {
+      try {
+        await startImpersonation(userId);
+        // The action itself handles redirection.
+        // Toast for success might not be visible due to immediate redirect.
+      } catch (error) {
+        const err = error instanceof Error ? error.message : "Failed to start impersonation.";
+        toast({ title: "Impersonation Error", description: err, variant: "destructive" });
+      }
+    });
+  };
 
-    return (
-      <div>
-        <PageHeader 
-          title={`Viewing Role: ${viewingUserAsRole.username}`}
-          description={`Details for role: ${viewingUserAsRole.role}`}
-          actions={
-            <div className="flex gap-2">
-              <Button onClick={() => setViewingUserAsRole(null)} variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                <ArrowLeft className="mr-2 h-4 w-4" /> Go Back
-              </Button>
-              {AddUserRoleDialog && <AddUserRoleDialog
-                isEditing={true}
-                userData={viewingUserAsRole}
-                onUserChange={handleUserChange}
-                triggerButton={
-                  <Button variant="default" className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                    <Edit className="mr-2 h-4 w-4" /> Edit Role
-                  </Button>
-                }
-              />}
-            </div>
-          }
-        />
-        <Card>
-          <CardHeader>
-            <CardTitle>Role Information & Permissions</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <h4 className="font-semibold mb-1">User Details</h4>
-                <p><span className="font-semibold text-muted-foreground">Username:</span> {viewingUserAsRole.username}</p>
-                <p><span className="font-semibold text-muted-foreground">Role:</span> <Badge variant={viewingUserAsRole.role === 'Administrator' ? 'secondary' : 'outline'}>{viewingUserAsRole.role}</Badge></p>
-                <p><span className="font-semibold text-muted-foreground">Status:</span> <Badge variant={viewingUserAsRole.status === 'Active' ? 'default' : 'destructive'} className={viewingUserAsRole.status === 'Active' ? 'bg-green-500/20 text-green-700 dark:bg-green-500/10 dark:text-green-400 border-green-500/30' : ''}>{viewingUserAsRole.status}</Badge></p>
-              </div>
-
-              <div className="space-y-4">
-                { (viewingUserAsRole.role === 'Admin' || viewingUserAsRole.role === 'Custom') && viewingUserAsRole.projects && viewingUserAsRole.projects.length > 0 && (
-                  <div>
-                    <h4 className="font-semibold mb-1">Assigned Projects:</h4>
-                    <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
-                      {viewingUserAsRole.projects.map(pId => <li key={pId}>{findNameById(pId, availableProjects)}</li>)}
-                    </ul>
-                  </div>
-                )}
-
-                { viewingUserAsRole.role === 'Custom' && viewingUserAsRole.assignedPages && viewingUserAsRole.assignedPages.length > 0 && (
-                  <div>
-                    <h4 className="font-semibold mb-1">Accessible Application Pages:</h4>
-                    <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
-                      {viewingUserAsRole.assignedPages.map(pageId => <li key={pageId}>{findNameById(pageId, availableAppPages)}</li>)}
-                    </ul>
-                  </div>
-                )}
-                
-                { (viewingUserAsRole.role === 'Administrator' || viewingUserAsRole.role === 'Admin' || viewingUserAsRole.role === 'Custom') && viewingUserAsRole.allowedSettingsPages && viewingUserAsRole.allowedSettingsPages.length > 0 && (
-                  <div>
-                    <h4 className="font-semibold mb-1">Accessible Settings Modules:</h4>
-                    <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
-                      {viewingUserAsRole.allowedSettingsPages.map(settingId => <li key={settingId}>{findNameById(settingId, availableSettingsPages)}</li>)}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            </div>
-             {(viewingUserAsRole.projects?.length === 0 && viewingUserAsRole.assignedPages?.length === 0 && viewingUserAsRole.allowedSettingsPages?.length === 0 && (viewingUserAsRole.role === 'Admin' || viewingUserAsRole.role === 'Custom') ) && (
-                 <p className="text-sm text-muted-foreground text-center col-span-full pt-4">No specific project, page, or settings permissions assigned.</p>
-             )}
-             {viewingUserAsRole.role === 'Administrator' && viewingUserAsRole.allowedSettingsPages?.length === 0 && (
-                 <p className="text-sm text-muted-foreground text-center col-span-full pt-4">No specific settings module permissions assigned. Administrator has implicit access to all application pages and projects.</p>
-             )}
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const findNameById = (id: string, list: {id: string, name: string}[]) => list.find(item => item.id === id)?.name || id;
 
   return (
     <div>
@@ -222,7 +149,7 @@ export default function RolesPage() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>User List</CardTitle>
-            <CardDescription>All registered users (excluding Owner) and their assigned roles.</CardDescription>
+            <CardDescription>All registered users and their assigned roles.</CardDescription>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -266,8 +193,8 @@ export default function RolesPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setViewingUserAsRole(user); }}>
-                              <Eye className="mr-2 h-4 w-4" /> View Role Details
+                            <DropdownMenuItem onSelect={() => setUserToViewDetails(user)}>
+                              <Eye className="mr-2 h-4 w-4" /> View Details
                             </DropdownMenuItem>
                              
                             {AddUserRoleDialog && <AddUserRoleDialog 
@@ -280,10 +207,17 @@ export default function RolesPage() {
                                 </DropdownMenuItem>
                               }
                             />}
+                            
+                            <DropdownMenuItem onSelect={() => handleStartImpersonation(user.id)} disabled={isPendingImpersonate || user.id === 'owner_root'}>
+                              <UserCog className="mr-2 h-4 w-4" /> 
+                              {isPendingImpersonate ? "Starting..." : "Impersonate User"}
+                            </DropdownMenuItem>
                              
+                            <DropdownMenuSeparator />
                             <DropdownMenuItem 
                               className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground"
                               onSelect={(e) => { e.preventDefault(); setUserToDelete(user); }}
+                              disabled={user.id === 'owner_root'} // Owner cannot be deleted
                             >
                               <Trash2 className="mr-2 h-4 w-4" /> Delete User
                             </DropdownMenuItem>
@@ -314,6 +248,80 @@ export default function RolesPage() {
         </Card>
       </div>
       
+      {/* View Role Details Dialog */}
+      <Dialog open={!!userToViewDetails} onOpenChange={(isOpen) => !isOpen && setUserToViewDetails(null)}>
+        <DialogCoreContent className="sm:max-w-lg md:max-w-xl lg:max-w-2xl rounded-2xl backdrop-blur-sm">
+          {userToViewDetails && (
+            <>
+              <DialogCoreHeader>
+                <DialogCoreTitle>Role Details: {userToViewDetails.username}</DialogCoreTitle>
+                <DialogCoreDescription>
+                  Viewing permissions and information for role: {userToViewDetails.role}.
+                </DialogCoreDescription>
+              </DialogCoreHeader>
+              <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                <p><span className="font-semibold text-muted-foreground">Username:</span> {userToViewDetails.username}</p>
+                <p><span className="font-semibold text-muted-foreground">Role:</span> <Badge variant={userToViewDetails.role === 'Administrator' ? 'secondary' : 'outline'}>{userToViewDetails.role}</Badge></p>
+                <p><span className="font-semibold text-muted-foreground">Status:</span> <Badge variant={userToViewDetails.status === 'Active' ? 'default' : 'destructive'} className={userToViewDetails.status === 'Active' ? 'bg-green-500/20 text-green-700 dark:bg-green-500/10 dark:text-green-400 border-green-500/30' : ''}>{userToViewDetails.status}</Badge></p>
+                
+                {(userToViewDetails.role === 'Admin' || userToViewDetails.role === 'Custom') && userToViewDetails.projects && userToViewDetails.projects.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold mb-1">Assigned Projects:</h4>
+                    <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
+                      {userToViewDetails.projects.map(pId => <li key={`view-proj-${pId}`}>{findNameById(pId, availableProjects)}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {userToViewDetails.role === 'Custom' && userToViewDetails.assignedPages && userToViewDetails.assignedPages.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold mb-1">Accessible Application Pages:</h4>
+                    <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
+                      {userToViewDetails.assignedPages.map(pageId => <li key={`view-page-${pageId}`}>{findNameById(pageId, availableAppPages)}</li>)}
+                    </ul>
+                  </div>
+                )}
+                
+                {(userToViewDetails.role === 'Administrator' || userToViewDetails.role === 'Admin' || userToViewDetails.role === 'Custom') && userToViewDetails.allowedSettingsPages && userToViewDetails.allowedSettingsPages.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold mb-1">Accessible Settings Modules:</h4>
+                    <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
+                      {userToViewDetails.allowedSettingsPages.map(settingId => <li key={`view-setting-${settingId}`}>{findNameById(settingId, availableSettingsPages)}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {((userToViewDetails.role === 'Admin' || userToViewDetails.role === 'Custom') && userToViewDetails.projects?.length === 0 && userToViewDetails.assignedPages?.length === 0 && userToViewDetails.allowedSettingsPages?.length === 0) && (
+                  <p className="text-sm text-muted-foreground text-center pt-2">No specific project, page, or settings permissions assigned.</p>
+                )}
+                {userToViewDetails.role === 'Administrator' && userToViewDetails.allowedSettingsPages?.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center pt-2">No specific settings module permissions assigned. Administrator has implicit access to all application pages and projects.</p>
+                )}
+
+              </div>
+              <DialogCoreFooter className="sm:justify-between gap-2 pt-4 border-t">
+                {AddUserRoleDialog && <AddUserRoleDialog 
+                    isEditing={true} 
+                    userData={userToViewDetails} 
+                    onUserChange={() => {
+                        handleUserChange(); 
+                    }}
+                    triggerButton={
+                        <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                            <Edit className="mr-2 h-4 w-4" /> Edit This Role
+                        </Button>
+                    }
+                />}
+                <DialogClose asChild>
+                  <Button type="button" variant="secondary" className="shadow-md hover:scale-105 transform transition-transform duration-150">Close</Button>
+                </DialogClose>
+              </DialogCoreFooter>
+            </>
+          )}
+        </DialogCoreContent>
+      </Dialog>
+
+      {/* Delete User Confirmation Dialog */}
       <AlertDialog 
         open={!!userToDelete} 
         onOpenChange={(isOpen) => { 
