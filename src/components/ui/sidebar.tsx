@@ -541,39 +541,29 @@ const sidebarMenuButtonVariants = cva(
 )
 
 interface SidebarMenuButtonProps
-  extends React.AnchorHTMLAttributes<HTMLAnchorElement>, // Changed to AnchorHTMLAttributes
+  extends React.AnchorHTMLAttributes<HTMLAnchorElement>, // Ensures props like href, onClick are typed correctly
     VariantProps<typeof sidebarMenuButtonVariants> {
   isActive?: boolean;
-  // The `asChild` prop is implicitly handled by React.forwardRef when used with Slot,
-  // but we explicitly destructure it to prevent it from being passed to the DOM <a> element.
-  asChild?: boolean;
+  asChild?: boolean; // To consume asChild from TooltipTrigger or other wrappers
 }
 
 const SidebarMenuButton = React.memo(React.forwardRef<
-  HTMLAnchorElement, // Changed to HTMLAnchorElement
+  HTMLAnchorElement, // The ref will be for an <a> tag
   SidebarMenuButtonProps
 >(
   (
-    {
-      className,
-      variant,
-      size,
-      isActive,
-      children,
-      asChild: _asChildIgnored, // Destructure and ignore asChild
-      ...otherProps 
-    },
+    { className, variant, size, isActive, children, asChild: _asChild, ...props }, // Destructure and ignore _asChild
     ref
   ) => {
-    // Renders an <a> tag, designed to work with Link asChild
+    // Renders an <a> tag. All props from Link (href, onClick) and TooltipTrigger are in `...props`.
     return (
-      <a 
+      <a
         ref={ref}
         data-sidebar="menu-button"
         data-size={size}
         data-active={String(isActive)}
         className={cn(sidebarMenuButtonVariants({ variant, size, className }))}
-        {...otherProps} // href, onClick, etc., will be passed from Link (via asChild)
+        {...props} 
       >
         {children}
       </a>
