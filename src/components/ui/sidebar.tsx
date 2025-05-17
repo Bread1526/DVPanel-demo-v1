@@ -541,15 +541,16 @@ const sidebarMenuButtonVariants = cva(
 )
 
 interface SidebarMenuButtonProps
-  extends React.HTMLAttributes<HTMLSpanElement>, // Changed from HTMLAnchorElement
+  extends React.AnchorHTMLAttributes<HTMLAnchorElement>, // Changed to AnchorHTMLAttributes
     VariantProps<typeof sidebarMenuButtonVariants> {
   isActive?: boolean;
-  // href and asChild are explicitly not part of this component's direct props
-  // as they are handled by the parent Link component.
+  // The `asChild` prop is implicitly handled by React.forwardRef when used with Slot,
+  // but we explicitly destructure it to prevent it from being passed to the DOM <a> element.
+  asChild?: boolean;
 }
 
-const SidebarMenuButton = React.forwardRef<
-  HTMLSpanElement, // Changed from HTMLAnchorElement
+const SidebarMenuButton = React.memo(React.forwardRef<
+  HTMLAnchorElement, // Changed to HTMLAnchorElement
   SidebarMenuButtonProps
 >(
   (
@@ -559,31 +560,26 @@ const SidebarMenuButton = React.forwardRef<
       size,
       isActive,
       children,
-      ...otherProps // href and asChild (if passed) are now in otherProps
+      asChild: _asChildIgnored, // Destructure and ignore asChild
+      ...otherProps 
     },
     ref
   ) => {
-    // Explicitly remove href and asChild if they somehow make it into otherProps
-    // This is a safeguard, they should be handled by the parent Link.
-    const { href: _href, asChild: _asChild, ...buttonSpecificProps } = otherProps as any;
-
-    // Render a span, styled like a button. The parent <a> from Link handles navigation.
+    // Renders an <a> tag, designed to work with Link asChild
     return (
-      <span // Changed to span
+      <a 
         ref={ref}
         data-sidebar="menu-button"
         data-size={size}
         data-active={String(isActive)}
         className={cn(sidebarMenuButtonVariants({ variant, size, className }))}
-        role="button" // Add role for accessibility
-        tabIndex={0}  // Add tabIndex for accessibility
-        {...buttonSpecificProps} 
+        {...otherProps} // href, onClick, etc., will be passed from Link (via asChild)
       >
         {children}
-      </span>
+      </a>
     );
   }
-);
+));
 SidebarMenuButton.displayName = "SidebarMenuButton"
 
 
@@ -754,5 +750,3 @@ export {
   SidebarTrigger,
   useSidebar,
 }
-
-    

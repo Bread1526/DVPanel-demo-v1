@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useTransition, useCallback } from "react";
+import dynamic from 'next/dynamic';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,10 +10,16 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye, ArrowLeft, ShieldQuestion } from "lucide-react";
-import AddUserRoleDialog from "./components/add-user-role-dialog";
+// import AddUserRoleDialog from "./components/add-user-role-dialog"; // Dynamic import below
 import { loadUsers, deleteUser, type UserData, type UserActionState } from "./actions";
 import { useToast } from "@/hooks/use-toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+
+const AddUserRoleDialog = dynamic(() => import('./components/add-user-role-dialog'), {
+  loading: () => <p>Loading dialog...</p>,
+  ssr: false
+});
+
 
 const rolesDefinitions = [
   { name: "Owner", description: "Full system access. Cannot be modified or managed here." },
@@ -64,7 +71,7 @@ export default function RolesPage() {
     try {
       const result = await loadUsers();
       if (result.status === "success" && result.users) {
-        setUsers(result.users.filter(u => u.username !== OWNER_USERNAME));
+        setUsers(result.users.filter(u => u.username !== OWNER_USERNAME && u.id !== 'owner_root'));
       } else {
         setError(result.error || "Failed to load users.");
         setUsers([]);
@@ -99,17 +106,22 @@ export default function RolesPage() {
     });
   };
 
-  const handleUserChange = async () => { 
+  const handleUserChange = useCallback(async () => { 
     await fetchUsers();
     if (viewingUserAsRole) { 
+        // If we were viewing a user that just got updated, we need to find their updated data
+        // This relies on users state being updated by fetchUsers before this check
+        // A slight delay or a more direct way to get the updated user might be needed for complex scenarios
+        // For now, we refetch all and then try to find by ID.
         const updatedUser = users.find(u => u.id === viewingUserAsRole.id);
         if (updatedUser) {
             setViewingUserAsRole(updatedUser);
         } else { 
+            // User might have been deleted or ID changed, so exit view mode
             setViewingUserAsRole(null); 
         }
     }
-  };
+  }, [fetchUsers, viewingUserAsRole, users]); // added users to dependency array
 
   if (viewingUserAsRole) {
     const findNameById = (id: string, list: {id: string, name: string}[]) => list.find(item => item.id === id)?.name || id;
@@ -124,7 +136,7 @@ export default function RolesPage() {
               <Button onClick={() => setViewingUserAsRole(null)} variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
                 <ArrowLeft className="mr-2 h-4 w-4" /> Go Back
               </Button>
-              <AddUserRoleDialog
+              {AddUserRoleDialog && <AddUserRoleDialog
                 isEditing={true}
                 userData={viewingUserAsRole}
                 onUserChange={handleUserChange}
@@ -133,7 +145,7 @@ export default function RolesPage() {
                     <Edit className="mr-2 h-4 w-4" /> Edit Role
                   </Button>
                 }
-              />
+              />}
             </div>
           }
         />
@@ -196,7 +208,7 @@ export default function RolesPage() {
       <PageHeader 
         title="User Roles & Permissions" 
         description="Manage users and their access levels within DVPanel."
-        actions={<AddUserRoleDialog onUserChange={handleUserChange} />}
+        actions={AddUserRoleDialog && <AddUserRoleDialog onUserChange={handleUserChange} />}
       />
 
       {error && (
@@ -257,10 +269,8 @@ export default function RolesPage() {
                             <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setViewingUserAsRole(user); }}>
                               <Eye className="mr-2 h-4 w-4" /> View Role Details
                             </DropdownMenuItem>
-                             <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
-                                <ShieldQuestion className="mr-2 h-4 w-4" /> View Permissions
-                            </DropdownMenuItem>
-                            <AddUserRoleDialog 
+                             
+                            {AddUserRoleDialog && <AddUserRoleDialog 
                               isEditing={true} 
                               userData={user} 
                               onUserChange={handleUserChange}
@@ -269,18 +279,14 @@ export default function RolesPage() {
                                   <Edit className="mr-2 h-4 w-4" /> Edit User / Role
                                 </DropdownMenuItem>
                               }
-                            />
-                             <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <DropdownMenuItem 
-                                    className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground"
-                                    onSelect={(e) => { e.preventDefault(); setUserToDelete(user); }}
-                                  >
-                                    <Trash2 className="mr-2 h-4 w-4" /> Delete User
-                                  </DropdownMenuItem>
-                                </AlertDialogTrigger>
-                                {/* AlertDialogContent is rendered globally at the bottom */}
-                             </AlertDialog>
+                            />}
+                             
+                            <DropdownMenuItem 
+                              className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground"
+                              onSelect={(e) => { e.preventDefault(); setUserToDelete(user); }}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" /> Delete User
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>

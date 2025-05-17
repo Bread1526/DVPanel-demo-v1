@@ -1,3 +1,8 @@
+
+"use client";
+
+import React from 'react'; // Added React import
+import dynamic from 'next/dynamic';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -5,8 +10,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { MoreHorizontal, PlusCircle, PlayCircle, Terminal, FolderOpen, Trash2 } from "lucide-react";
-import Link from "next/link";
-import CreateProjectDialog from "./components/create-project-dialog";
+// import CreateProjectDialog from "./components/create-project-dialog"; // Dynamic import below
+
+const CreateProjectDialog = dynamic(() => import('./components/create-project-dialog'), {
+  loading: () => <Button disabled><PlusCircle className="mr-2 h-4 w-4" /> Create Project (Loading...)</Button>,
+  ssr: false
+});
+
 
 const projects = [
   { id: '1', name: 'E-commerce API', directory: '/srv/ecommerce-api', status: 'Running', cpu: '15%', ram: '512MB', storage: '2GB/5GB', template: 'NodeJS Express', bootOnStart: true },
@@ -21,7 +31,7 @@ export default function ProjectsPage() {
       <PageHeader 
         title="Projects" 
         description="Manage your application projects and their environments."
-        actions={<CreateProjectDialog />}
+        actions={CreateProjectDialog && <CreateProjectDialog />}
       />
 
       <Card>
