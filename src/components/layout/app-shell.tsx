@@ -11,7 +11,7 @@ import {
   SidebarTrigger,
   SidebarMenu,
   SidebarMenuItem,
-  SidebarMenuItemLayout, // Keep this if used by SidebarMenuButton/custom layout
+  SidebarMenuItemLayout,
   SidebarMenuBadge,
   useSidebar,
 } from '@/components/ui/sidebar';
@@ -24,17 +24,15 @@ import {
   Network,
   Users,
   Settings,
-  UserCircle,
   LogOut,
   Replace,
   AlertTriangle,
   Loader2,
   PanelLeft,
-  Crown, 
-  ShieldCheck, 
-  UserCog, 
+  Crown,
+  ShieldCheck,
+  UserCog,
   SlidersHorizontal,
-  Info as InfoIconLucide // Renamed to avoid conflict with Settings Info tab
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -53,10 +51,9 @@ import { useActivityTracker } from '@/hooks/useActivityTracker';
 import type { AuthenticatedUser } from '@/lib/session';
 import AccessDeniedOverlay from './access-denied-overlay';
 import { useToast } from "@/hooks/use-toast";
-// import { loadPanelSettings } from '@/app/(app)/settings/actions'; // Global settings not used for debug mode here
 import { cva } from 'class-variance-authority';
-import ProfileDialog from '@/app/(app)/profile/components/profile-dialog'; // Import ProfileDialog
-
+import ProfileDialog from '@/app/(app)/profile/components/profile-dialog';
+import { loadPanelSettings } from '@/app/(app)/settings/actions'; // For global debug mode on initial load
 
 const navItemsBase = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, requiredPage: 'dashboard' },
@@ -97,18 +94,17 @@ const linkAsButtonVariants = cva(
   }
 );
 
-
 export default function AppShell({ children }: { children: React.ReactNode }) {
   useActivityTracker();
   const pathname = usePathname();
-  const { state: sidebarState, isMobile } = useSidebar();
+  const { state: sidebarState, isMobile, setOpen: setSidebarOpen } = useSidebar();
   const router = useRouter();
   const { toast } = useToast();
 
   const [currentUserData, setCurrentUserData] = useState<AuthenticatedUser | null>(null);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [isPageAccessGranted, setIsPageAccessGranted] = useState<boolean | null>(null);
-  const [userDebugMode, setUserDebugMode] = useState(false); // User-specific debug mode
+  const [userDebugMode, setUserDebugMode] = useState(false);
   const [isPendingLogout, startLogoutTransition] = useTransition();
   const [hasMounted, setHasMounted] = useState(false);
 
@@ -120,11 +116,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (userDebugMode) console.log('[AppShell] performLogout initiated.', { reason });
     startLogoutTransition(async () => {
       try {
-        const usernameToLogout = currentUserData?.username; 
-        const roleToLogout = currentUserData?.role;
-        
-        if (userDebugMode) console.log(`[AppShell] Calling serverLogoutAction for user: ${usernameToLogout}, role: ${roleToLogout}`);
-        await serverLogoutAction(usernameToLogout, roleToLogout); 
+        await serverLogoutAction(); 
         if (userDebugMode) console.log('[AppShell] Server logout action completed.');
         
         setCurrentUserData(null);
@@ -143,25 +135,31 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         router.push(`/login${reason ? `?reason=${reason}_server_error` : '?reason=server_error'}`);
       }
     });
-  }, [router, userDebugMode, toast, currentUserData?.username, currentUserData?.role]);
-
+  }, [router, userDebugMode, toast]);
 
   const fetchUserAndCheckAccess = useCallback(async () => {
-    if(!hasMounted) return; // Don't run on server or before mount
+    if (!hasMounted) return;
 
     setIsLoadingUser(true);
     setIsPageAccessGranted(null); 
     
+    let currentDebugMode = false;
     try {
-      if (userDebugMode) console.log('[AppShell] Fetching /api/auth/user');
-      const response = await fetch('/api/auth/user');
-      const responseStatus = response.status; // Capture status before parsing JSON
+        const globalSettings = await loadPanelSettings();
+        currentDebugMode = globalSettings.data?.debugMode ?? false;
+    } catch { /* ignore, use default false */ }
 
-      if (userDebugMode) console.log('[AppShell] /api/auth/user response status:', responseStatus);
+    if (currentDebugMode) console.log('[AppShell] Attempting to fetch /api/auth/user');
+
+    try {
+      const response = await fetch('/api/auth/user');
+      const responseStatus = response.status;
+
+      if (currentDebugMode) console.log('[AppShell] /api/auth/user response status:', responseStatus);
 
       if (!response.ok) {
-        const errorText = await response.text();
-        if (userDebugMode) console.warn(`[AppShell] /api/auth/user NOK. Status: ${responseStatus}. Response text:`, errorText);
+        const errorText = await response.text().catch(() => "Could not read error response text.");
+        if (currentDebugMode) console.warn(`[AppShell] /api/auth/user call failed. Status: ${responseStatus}. Response text:`, errorText);
         if (pathname !== '/login') {
            performLogout(responseStatus === 401 ? 'unauthorized' : 'session_error_api');
         } else {
@@ -171,19 +169,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       }
 
       const data: ApiAuthUserResponse = await response.json();
-      if (userDebugMode && data.user) {
-        console.log('[AppShell] Data from /api/auth/user:', { id: data.user.id, username: data.user.username, role: data.user.role, status: data.user.status, userSettings: data.user.userSettings });
-      } else if (userDebugMode) {
-         console.log('[AppShell] No user data in response from /api/auth/user or user object is null.');
-      }
-      
       if (data.user && data.user.status === 'Active') {
+        if (currentDebugMode) console.log('[AppShell] User data fetched successfully:', { id: data.user.id, username: data.user.username, role: data.user.role, status: data.user.status, userSettings: data.user.userSettings });
         setCurrentUserData(data.user);
-        setUserDebugMode(data.user.userSettings?.debugMode ?? false); // Set user-specific debug mode
+        setUserDebugMode(data.user.userSettings?.debugMode ?? currentDebugMode); 
       } else {
-        if (userDebugMode && data.user) console.warn(`[AppShell] User status is not Active: ${data.user.status}. Logging out.`);
-        else if (userDebugMode) console.warn('[AppShell] No user object or inactive user in successful /api/auth/user response. Performing logout.');
-        
+        if (currentDebugMode) console.warn('[AppShell] No active user data in response from /api/auth/user. User object:', data.user);
         if (pathname !== '/login') {
            performLogout(data.user?.status === 'Inactive' ? 'account_inactive' : 'unauthorized_no_user_data');
         } else {
@@ -193,7 +184,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
     } catch (error) {
       const e = error instanceof Error ? error : new Error(String(error));
-      console.error("[AppShell] Error in fetchUserAndCheckAccess during API call:", e.message, e.stack);
+      if (currentDebugMode) console.error("[AppShell] Error in fetchUserAndCheckAccess during API call:", e.message, e.stack);
       if (pathname !== '/login') {
         performLogout('session_error_catch');
       } else {
@@ -201,16 +192,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       }
     } finally {
       setIsLoadingUser(false);
-       if (userDebugMode) console.log('[AppShell] fetchUserAndCheckAccess finished. isLoadingUser:', false);
+       if (currentDebugMode) console.log('[AppShell] fetchUserAndCheckAccess finished. isLoadingUser:', false);
     }
-  }, [pathname, userDebugMode, performLogout, hasMounted, toast]); // Added toast to deps
+  }, [pathname, performLogout, hasMounted]); 
 
 
   useEffect(() => {
     if (hasMounted) {
       fetchUserAndCheckAccess();
     }
-  }, [pathname, hasMounted, fetchUserAndCheckAccess]); // fetchUserAndCheckAccess is now stable due to useCallback
+  }, [pathname, hasMounted, fetchUserAndCheckAccess]);
 
   const effectiveUser = currentUserData;
 
@@ -277,7 +268,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   
   }, [isLoadingUser, effectiveUser, pathname, userDebugMode, hasMounted]);
 
-
   const getIsActive = useCallback((itemHref: string) => {
     if (!hasMounted) return false;
     if (itemHref === '/') return pathname === '/';
@@ -301,11 +291,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return false;
   });
 
-  if (userDebugMode && hasMounted && !isLoadingUser) {
-    console.log("[AppShell] Effective User for navItems filter:", effectiveUser ? {role: effectiveUser.role, assignedPages: effectiveUser.assignedPages, allowedSettingsPages: effectiveUser.allowedSettingsPages} : null);
-    console.log("[AppShell] Filtered navItems count:", navItems.length, navItems.map(i => i.label));
-  }
-
   let pageContent;
   if (!hasMounted || isLoadingUser || (effectiveUser && isPageAccessGranted === null)) {
     pageContent = hasMounted ? (
@@ -319,9 +304,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     pageContent = <AccessDeniedOverlay />;
   } else if (!effectiveUser && !isLoadingUser && hasMounted && pathname !== '/login') {
      pageContent = (
-      <div className="flex justify-center items-center h-64">
-        <AlertTriangle className="h-8 w-8 text-destructive mr-2" />
-        <p>Session invalid or expired. Redirecting to login...</p>
+      <div className="flex flex-col justify-center items-center h-64">
+        <AlertTriangle className="h-8 w-8 text-destructive mb-2" />
+        <p>Session invalid or expired.</p>
+        <p className="text-sm text-muted-foreground">Redirecting to login...</p>
       </div>
     );
   } else if (pathname === '/login' && !isLoadingUser && !effectiveUser) {
@@ -329,9 +315,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
   else {
      pageContent = hasMounted ? (
-      <div className="flex justify-center items-center h-64">
+      <div className="flex flex-col justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="ml-2">Loading panel...</p>
+        <p className="ml-2 mt-2">Loading panel data...</p>
       </div>
     ) : null;
   }
@@ -349,9 +335,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   
   const handleSettingsUpdated = useCallback(() => {
     if (userDebugMode) console.log("[AppShell] Profile settings updated, refetching user data.");
-    fetchUserAndCheckAccess(); // Refetch user data which includes updated userSettings
+    fetchUserAndCheckAccess();
   }, [fetchUserAndCheckAccess, userDebugMode]);
-
 
   return (
     <>
@@ -369,41 +354,38 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               const showTextForLayout = hasMounted && (!isMobile && sidebarState === 'expanded' || isMobile);
               const showTooltip = hasMounted && sidebarState === 'collapsed' && !isMobile;
 
-              const menuItemContent = (
-                 <SidebarMenuItemLayout
-                    icon={item.icon}
-                    label={item.label}
-                    badgeContent={item.count && item.count > 0 ? <SidebarMenuBadge>{item.count}</SidebarMenuBadge> : undefined}
-                    showText={showTextForLayout}
-                  />
+              const menuButton = (
+                <SidebarMenuItemLayout
+                  icon={item.icon}
+                  label={item.label}
+                  badgeContent={item.count && item.count > 0 ? <SidebarMenuBadge>{item.count}</SidebarMenuBadge> : undefined}
+                  showText={showTextForLayout}
+                />
               );
 
-              const linkElement = (
-                <Link
-                  href={item.href}
-                  className={cn(linkAsButtonVariants({ isActive, variant: "default", size: "default" }))}
-                  data-active={isActive ? 'true' : undefined}
-                >
-                  {menuItemContent}
-                </Link>
-              );
+              let linkWrappedButton = (
+                 <Link href={item.href} className={cn(linkAsButtonVariants({ isActive }))} >
+                   {menuButton}
+                 </Link>
+               );
 
+              if (showTooltip) {
+                linkWrappedButton = (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        {linkWrappedButton}
+                      </TooltipTrigger>
+                      <TooltipContent side="right" align="center">
+                        <p>{item.label}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                );
+              }
               return (
                 <SidebarMenuItem key={item.label}>
-                  {showTooltip ? (
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          {linkElement}
-                        </TooltipTrigger>
-                        <TooltipContent side="right" align="center">
-                          <p>{item.label}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  ) : (
-                    linkElement
-                  )}
+                  {linkWrappedButton}
                 </SidebarMenuItem>
               );
             })}
@@ -414,7 +396,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="w-full justify-start gap-2 px-2">
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src="https://cdn.dvpanel.com/role.png" alt={(!hasMounted || isLoadingUser || !effectiveUser) ? 'L' : effectiveUser.username?.[0]?.toUpperCase() ?? 'U'} data-ai-hint="user avatar"/>
+                  <AvatarImage
+                    src={currentUserData?.userSettings?.profilePictureUrl || "https://cdn.dvpanel.com/role.png"}
+                    alt={(!hasMounted || isLoadingUser || !effectiveUser) ? 'L' : effectiveUser.username?.[0]?.toUpperCase() ?? 'U'}
+                    data-ai-hint="user avatar"
+                    className="h-full w-full object-cover" 
+                  />
                   <AvatarFallback>
                     {(!hasMounted || isLoadingUser || !effectiveUser) ? 'L' : effectiveUser.username?.[0]?.toUpperCase() ?? 'U'}
                   </AvatarFallback>
@@ -433,7 +420,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <DropdownMenuLabel>My Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {ProfileDialog && <ProfileDialog currentUser={currentUserData} onSettingsUpdate={handleSettingsUpdated} />}
-              <DropdownMenuItem disabled={!hasMounted || isLoadingUser || !effectiveUser || isPendingLogout} onClick={() => router.push('/settings')}>
+              <DropdownMenuItem onClick={() => router.push('/settings')}>
                 <Settings className="mr-2 h-4 w-4" />
                 <span>Panel Settings</span>
               </DropdownMenuItem>
@@ -445,7 +432,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </DropdownMenuContent>
           </DropdownMenu>
           {(hasMounted && (!isMobile && sidebarState === 'expanded' || isMobile)) && (
-             <Button variant="outline" size="sm" onClick={() => document.cookie = `sidebar_state=${sidebarState === 'expanded' ? 'collapsed' : 'expanded'}; path=/; max-age=${60*60*24*7}`} className="md:hidden">
+             <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setSidebarOpen(sidebarState === 'expanded' ? false : true)} 
+                className="md:hidden"
+              >
               <PanelLeft className="mr-2 h-4 w-4" /> Collapse
             </Button>
           )}
@@ -454,10 +446,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <SidebarInset>
         <header className={cn(
             "sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background/80 px-4 backdrop-blur-sm sm:h-16 sm:px-6 md:px-8",
-            "group-data-[variant=inset]/sidebar-wrapper:md:hidden" 
+            "md:hidden group-data-[variant=inset]/sidebar-wrapper:md:flex group-data-[variant=inset]/sidebar-wrapper:md:items-center" 
             )}>
           <SidebarTrigger className="md:hidden" /> 
            <div className="md:hidden group-data-[variant=inset]/sidebar-wrapper:md:flex group-data-[variant=inset]/sidebar-wrapper:md:items-center">
+           {/* Placeholder for potential future header content specific to inset variant */}
           </div>
         </header>
         <main className="flex-1 p-4 sm:p-6 md:p-8">
