@@ -35,7 +35,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'; // Removed AvatarImage
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,7 +53,7 @@ import AccessDeniedOverlay from './access-denied-overlay';
 import { useToast } from "@/hooks/use-toast";
 import { cva } from 'class-variance-authority';
 import ProfileDialog from '@/app/(app)/profile/components/profile-dialog';
-import { loadPanelSettings } from '@/app/(app)/settings/actions'; // For global debug mode on initial load
+import { loadPanelSettings } from '@/app/(app)/settings/actions';
 
 const navItemsBase = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, requiredPage: 'dashboard' },
@@ -104,7 +104,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [currentUserData, setCurrentUserData] = useState<AuthenticatedUser | null>(null);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [isPageAccessGranted, setIsPageAccessGranted] = useState<boolean | null>(null);
-  const [userDebugMode, setUserDebugMode] = useState(false);
+  const [userDebugMode, setUserDebugMode] = useState(false); // For AppShell specific debug logs, defaults to false
   const [isPendingLogout, startLogoutTransition] = useTransition();
   const [hasMounted, setHasMounted] = useState(false);
 
@@ -116,7 +116,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (userDebugMode) console.log('[AppShell] performLogout initiated.', { reason });
     startLogoutTransition(async () => {
       try {
-        await serverLogoutAction(); 
+        // Pass username and role if available, for server-side session file deletion
+        const usernameToLogout = currentUserData?.username;
+        const roleToLogout = currentUserData?.role;
+        await serverLogoutAction(usernameToLogout, roleToLogout);
         if (userDebugMode) console.log('[AppShell] Server logout action completed.');
         
         setCurrentUserData(null);
@@ -129,37 +132,41 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       } catch (e) {
         const error = e instanceof Error ? e.message : String(e);
         console.error("[AppShell] Error calling server logout action:", error);
-        toast({ title: "Logout Error", description: `Failed to logout on server: ${error}`, variant: "destructive" });
+        toast({ title: "Logout Error", description: `Failed to logout: ${error}`, variant: "destructive" });
+        // Still attempt to clear client state and redirect
         setCurrentUserData(null);
         setIsPageAccessGranted(false);
         router.push(`/login${reason ? `?reason=${reason}_server_error` : '?reason=server_error'}`);
       }
     });
-  }, [router, userDebugMode, toast]);
+  }, [router, userDebugMode, toast, currentUserData?.username, currentUserData?.role]);
 
   const fetchUserAndCheckAccess = useCallback(async () => {
     if (!hasMounted) return;
 
     setIsLoadingUser(true);
-    setIsPageAccessGranted(null); 
+    setIsPageAccessGranted(null);
     
-    let currentDebugMode = false;
+    let initialDebugMode = false;
     try {
-        const globalSettings = await loadPanelSettings();
-        currentDebugMode = globalSettings.data?.debugMode ?? false;
-    } catch { /* ignore, use default false */ }
+      const globalSettings = await loadPanelSettings();
+      if (globalSettings.status === 'success' && globalSettings.data) {
+        // Global debug mode is no longer stored in panel settings directly.
+        // User-specific debug mode will be fetched with user data.
+      }
+    } catch { /* ignore, use default false for initial logging */ }
 
-    if (currentDebugMode) console.log('[AppShell] Attempting to fetch /api/auth/user');
+    if (initialDebugMode) console.log('[AppShell] Attempting to fetch /api/auth/user');
 
     try {
       const response = await fetch('/api/auth/user');
       const responseStatus = response.status;
 
-      if (currentDebugMode) console.log('[AppShell] /api/auth/user response status:', responseStatus);
+      if (initialDebugMode) console.log('[AppShell] /api/auth/user response status:', responseStatus);
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => "Could not read error response text.");
-        if (currentDebugMode) console.warn(`[AppShell] /api/auth/user call failed. Status: ${responseStatus}. Response text:`, errorText);
+        if (initialDebugMode) console.warn(`[AppShell] /api/auth/user call failed. Status: ${responseStatus}. Response text:`, errorText);
         if (pathname !== '/login') {
            performLogout(responseStatus === 401 ? 'unauthorized' : 'session_error_api');
         } else {
@@ -170,11 +177,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       const data: ApiAuthUserResponse = await response.json();
       if (data.user && data.user.status === 'Active') {
-        if (currentDebugMode) console.log('[AppShell] User data fetched successfully:', { id: data.user.id, username: data.user.username, role: data.user.role, status: data.user.status, userSettings: data.user.userSettings });
         setCurrentUserData(data.user);
-        setUserDebugMode(data.user.userSettings?.debugMode ?? currentDebugMode); 
+        // Set AppShell's userDebugMode based on fetched user settings
+        const fetchedUserDebugMode = data.user.userSettings?.debugMode ?? initialDebugMode;
+        setUserDebugMode(fetchedUserDebugMode); 
+        if (fetchedUserDebugMode || initialDebugMode) {
+          console.log('[AppShell] User data fetched successfully:', { 
+            id: data.user.id, 
+            username: data.user.username, 
+            role: data.user.role, 
+            status: data.user.status, 
+            userSettingsDebug: data.user.userSettings?.debugMode 
+          });
+        }
       } else {
-        if (currentDebugMode) console.warn('[AppShell] No active user data in response from /api/auth/user. User object:', data.user);
+        if (initialDebugMode) console.warn('[AppShell] No active user data in response from /api/auth/user. User object:', data.user);
         if (pathname !== '/login') {
            performLogout(data.user?.status === 'Inactive' ? 'account_inactive' : 'unauthorized_no_user_data');
         } else {
@@ -184,7 +201,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
     } catch (error) {
       const e = error instanceof Error ? error : new Error(String(error));
-      if (currentDebugMode) console.error("[AppShell] Error in fetchUserAndCheckAccess during API call:", e.message, e.stack);
+      if (initialDebugMode) console.error("[AppShell] Error in fetchUserAndCheckAccess during API call:", e.message, e.stack);
       if (pathname !== '/login') {
         performLogout('session_error_catch');
       } else {
@@ -192,7 +209,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       }
     } finally {
       setIsLoadingUser(false);
-       if (currentDebugMode) console.log('[AppShell] fetchUserAndCheckAccess finished. isLoadingUser:', false);
+      if (initialDebugMode) console.log('[AppShell] fetchUserAndCheckAccess finished. isLoadingUser:', false);
     }
   }, [pathname, performLogout, hasMounted]); 
 
@@ -311,6 +328,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
     );
   } else if (pathname === '/login' && !isLoadingUser && !effectiveUser) {
+    // This case might not be reached if middleware redirects already
     pageContent = children;
   }
   else {
@@ -322,7 +340,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     ) : null;
   }
 
-  const UserRoleIcon = () => {
+  const UserRoleIcon = React.memo(() => {
     if (!hasMounted || isLoadingUser || !effectiveUser) return null;
     switch (effectiveUser.role) {
       case 'Owner': return <Crown className="mr-1.5 h-4 w-4 text-yellow-400" />;
@@ -331,12 +349,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       case 'Custom': return <SlidersHorizontal className="mr-1.5 h-4 w-4 text-purple-500" />;
       default: return null;
     }
-  };
+  });
+  UserRoleIcon.displayName = 'UserRoleIcon';
   
   const handleSettingsUpdated = useCallback(() => {
     if (userDebugMode) console.log("[AppShell] Profile settings updated, refetching user data.");
     fetchUserAndCheckAccess();
   }, [fetchUserAndCheckAccess, userDebugMode]);
+
+  const menuButtonRef = React.useRef<HTMLAnchorElement>(null);
 
   return (
     <>
@@ -364,7 +385,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               );
 
               let linkWrappedButton = (
-                 <Link href={item.href} className={cn(linkAsButtonVariants({ isActive }))} >
+                 <Link href={item.href} className={cn(linkAsButtonVariants({ isActive }))} ref={menuButtonRef}>
                    {menuButton}
                  </Link>
                );
@@ -396,12 +417,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="w-full justify-start gap-2 px-2">
                 <Avatar className="h-8 w-8">
-                  <AvatarImage
-                    src={currentUserData?.userSettings?.profilePictureUrl || "https://cdn.dvpanel.com/role.png"}
-                    alt={(!hasMounted || isLoadingUser || !effectiveUser) ? 'L' : effectiveUser.username?.[0]?.toUpperCase() ?? 'U'}
-                    data-ai-hint="user avatar"
-                    className="h-full w-full object-cover" 
-                  />
+                  {/* AvatarImage removed to always show Fallback */}
                   <AvatarFallback>
                     {(!hasMounted || isLoadingUser || !effectiveUser) ? 'L' : effectiveUser.username?.[0]?.toUpperCase() ?? 'U'}
                   </AvatarFallback>
