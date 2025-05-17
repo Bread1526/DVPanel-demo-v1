@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import { Toaster } from '@/components/ui/toaster';
 import { ThemeProvider } from '@/components/theme-provider';
 // AppShell and SidebarProvider are NO LONGER imported or used here directly.
-// They will be in src/app/(app)/layout.tsx
+// They are managed by src/app/(app)/layout.tsx for authenticated routes.
 
 const inter = Inter({
   subsets: ['latin'],
