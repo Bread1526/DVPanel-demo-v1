@@ -7,6 +7,7 @@ import { login, type LoginState } from './actions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from "@/components/ui/checkbox"; // Added Checkbox import
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Replace, AlertCircle, Loader2 } from 'lucide-react';
@@ -21,12 +22,12 @@ export default function LoginPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const redirectUrl = searchParams.get('redirect');
+  const reason = searchParams.get('reason');
 
   useEffect(() => {
     // Successful login is handled by server-side redirect in the action.
-    // This useEffect primarily handles displaying error toasts from the action state.
+    // This useEffect primarily handles displaying error toasts or messages.
     if (formState.status === "error" && formState.message) {
-      // Only show a generic toast if there are no specific field errors or form-level errors displayed directly
       if (!formState.errors?.username && !formState.errors?.password && !formState.errors?._form) {
         toast({
           title: "Login Failed",
@@ -35,7 +36,19 @@ export default function LoginPage() {
         });
       }
     }
-  }, [formState, toast]);
+    if (reason === 'inactive' && !formState.message) { // Show inactive message only once
+        toast({
+            title: "Session Expired",
+            description: "You have been logged out due to inactivity.",
+            variant: "default",
+            duration: 7000,
+        });
+        // Clean the reason from URL to prevent re-showing on refresh
+        const newUrl = new URL(window.location.href);
+        newUrl.searchParams.delete('reason');
+        router.replace(newUrl.toString(), { scroll: false });
+    }
+  }, [formState, toast, reason, router]);
 
   return (
     <Card className="w-full max-w-md shadow-2xl rounded-xl">
@@ -82,6 +95,15 @@ export default function LoginPage() {
             />
             {formState.errors?.password && <p id="password-error" className="text-xs text-destructive pt-1">{formState.errors.password.join(', ')}</p>}
           </div>
+          <div className="flex items-center space-x-2">
+            <Checkbox id="keepLoggedIn" name="keepLoggedIn" />
+            <Label
+              htmlFor="keepLoggedIn"
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+            >
+              Keep me logged in
+            </Label>
+          </div>
           {redirectUrl && <input type="hidden" name="redirectUrl" value={redirectUrl} />}
         </CardContent>
         <CardFooter className="flex flex-col">
@@ -93,4 +115,3 @@ export default function LoginPage() {
     </Card>
   );
 }
-

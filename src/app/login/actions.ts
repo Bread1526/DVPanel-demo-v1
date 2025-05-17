@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 import crypto from "crypto";
-import { getIronSession } from 'iron-session';
+import { getIronSession, type IronSessionCookieOptions } from 'iron-session';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { sessionOptions, type SessionData } from '@/lib/session';
@@ -18,6 +18,7 @@ const LoginSchema = z.object({
   username: z.string().min(1, "Username is required."),
   password: z.string().min(1, "Password is required."),
   redirectUrl: z.string().optional(),
+  keepLoggedIn: z.boolean().optional(), // Added keepLoggedIn
 });
 
 export interface LoginState {
@@ -85,7 +86,7 @@ async function ensureOwnerFileOnLogin(ownerUsernameEnv: string, ownerPasswordEnv
       status: "Active",
       createdAt: createdAt,
       updatedAt: now,
-      // lastLogin will be updated by the main login logic after session save
+      lastLogin: now, // Set lastLogin on owner file creation/update
     };
     
     if (debugMode) {
@@ -109,7 +110,6 @@ async function ensureOwnerFileOnLogin(ownerUsernameEnv: string, ownerPasswordEnv
   }
 }
 
-
 export async function login(prevState: LoginState, formData: FormData): Promise<LoginState> {
   const panelSettings = await getPanelSettingsForDebug();
   const debugMode = panelSettings?.debugMode ?? false;
@@ -132,7 +132,8 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
   const rawFormData = {
     username: String(formData.get("username") ?? ""),
     password: String(formData.get("password") ?? ""),
-    redirectUrl: String(formData.get("redirectUrl") ?? "/"), // Default to '/' if not provided
+    redirectUrl: String(formData.get("redirectUrl") ?? "/"),
+    keepLoggedIn: formData.get("keepLoggedIn") === "on", // Checkbox value is "on" if checked
   };
 
   if (debugMode) console.log("[LoginAction] Raw form data extracted for Zod:", rawFormData);
@@ -147,7 +148,10 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     let message = "Please check the form for errors.";
     if (formErrors.length > 0 && !Object.keys(fieldErrors).length) {
       message = formErrors.join(', ');
+    } else if (Object.keys(fieldErrors).length > 0) {
+       message = "Please correct the highlighted fields.";
     }
+
 
     return {
       message: message,
@@ -156,12 +160,12 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     };
   }
 
-  const { username, password, redirectUrl } = validatedFields.data;
+  const { username, password, redirectUrl, keepLoggedIn } = validatedFields.data;
   let userSessionData: SessionData['user'];
-  let sessionInactivityTimeoutMinutes: number = 30; // Default
-  let disableAutoLogoutOnInactivity: boolean = false; // Default
+  let sessionInactivityTimeoutMinutes: number = 30; 
+  let disableAutoLogoutOnInactivity: boolean = false; 
+  const now = new Date().toISOString();
 
-  // Attempt to load panel settings to get session timeout preferences
   try {
     const loadedSettings = await loadGeneralPanelSettings();
     if (loadedSettings.data) {
@@ -175,10 +179,15 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     if (debugMode) console.warn("[LoginAction] Error loading panel settings for session timeout, using defaults:", e);
   }
 
+  const session = await getIronSession<SessionData>(cookies(), sessionOptions);
+  const sessionCookieOptions: IronSessionCookieOptions = {};
+  if (keepLoggedIn) {
+    sessionCookieOptions.maxAge = 30 * 24 * 60 * 60; // 30 days in seconds
+    if (debugMode) console.log(`[LoginAction] "Keep me logged in" is true. Setting cookie maxAge to 30 days.`);
+  }
+
 
   try {
-    const session = await getIronSession<SessionData>(cookies(), sessionOptions);
-
     if (ownerUsernameEnv && ownerPasswordEnv) {
       if (username === ownerUsernameEnv && password === ownerPasswordEnv) {
         if (debugMode) console.log(`[LoginAction] Matched .env.local owner: ${ownerUsernameEnv}. Proceeding to ensure owner file.`);
@@ -194,7 +203,7 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
         session.lastActivity = Date.now();
         session.sessionInactivityTimeoutMinutes = sessionInactivityTimeoutMinutes;
         session.disableAutoLogoutOnInactivity = disableAutoLogoutOnInactivity;
-        await session.save();
+        await session.save(sessionCookieOptions);
         if (debugMode) console.log("[LoginAction] Owner session saved successfully.");
         
         const destination = redirectUrl || '/';
@@ -215,7 +224,7 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
       return { message: usersResult.error || "System error: Could not load user data.", status: "error", errors: { _form: [usersResult.error || "System error: Could not load user data."] } };
     }
     
-    const user = usersResult.users.find(u => u.username === username); // id !== 'owner_root' check is now done in loadUsers
+    const user = usersResult.users.find(u => u.username === username);
 
     if (!user) {
       if (debugMode) console.log("[LoginAction] Regular user not found:", username);
@@ -233,6 +242,13 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
       return { message: "Invalid username or password.", status: "error", errors: { _form: ["Invalid username or password."] } };
     }
 
+    // Update lastLogin for regular user
+    user.lastLogin = now;
+    const userFilename = `${user.username}-${user.role}.json`;
+    await saveEncryptedData(userFilename, user);
+    if (debugMode) console.log(`[LoginAction] Updated lastLogin for user ${user.username} in file ${userFilename}`);
+
+
     if (debugMode) console.log(`[LoginAction] Regular user login successful for: ${username}`);
     userSessionData = {
       id: user.id,
@@ -244,7 +260,7 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     session.lastActivity = Date.now();
     session.sessionInactivityTimeoutMinutes = sessionInactivityTimeoutMinutes;
     session.disableAutoLogoutOnInactivity = disableAutoLogoutOnInactivity;
-    await session.save();
+    await session.save(sessionCookieOptions);
     if (debugMode) console.log("[LoginAction] Regular user session saved successfully.");
     
     const destination = redirectUrl || '/';
@@ -252,7 +268,7 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     redirect(destination);
 
   } catch (error: any) {
-    if (error.message?.includes('NEXT_REDIRECT')) { // Check for redirect error message
+    if (error.message?.includes('NEXT_REDIRECT')) { 
       throw error; 
     }
     console.error("[LoginAction] Unexpected login error:", error.message, error.stack);
