@@ -9,23 +9,23 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
-import { Save, Loader2 } from "lucide-react";
-import { savePanelSettings, loadPanelSettings, type SavePanelSettingsState, type PanelSettingsData } from '../actions';
+import { Save, Loader2, AlertCircle } from "lucide-react";
+import { savePanelSettings, loadPanelSettings } from '../actions';
+import type { SavePanelSettingsState, PanelSettingsData } from '../types';
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription as AlertDialogCoreDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle as AlertDialogCoreTitle } from "@/components/ui/alert-dialog";
 import { useRouter } from 'next/navigation';
 import { logout as serverLogoutAction } from '@/app/(app)/logout/actions'; 
-// Removed: import { useSession } from '@/context/session-context'; 
 
 const initialSaveState: SavePanelSettingsState = {
   message: "",
   status: "idle",
   errors: {},
   data: undefined,
+  isPending: false,
 };
 
-// Default structure matching PanelSettingsData from actions.ts
 const defaultGlobalSettingsData: PanelSettingsData = {
   panelPort: "27407",
   panelIp: "",
@@ -34,10 +34,8 @@ const defaultGlobalSettingsData: PanelSettingsData = {
 };
 
 export default function SecuritySettingsPage() {
-  // This state holds ALL global settings loaded, even if this page only edits a subset
   const [allLoadedSettings, setAllLoadedSettings] = useState<PanelSettingsData>(defaultGlobalSettingsData);
   
-  // Local state for fields managed by this page
   const [currentSessionInactivityTimeout, setCurrentSessionInactivityTimeout] = useState(defaultGlobalSettingsData.sessionInactivityTimeout);
   const [currentDisableAutoLogout, setCurrentDisableAutoLogout] = useState(defaultGlobalSettingsData.disableAutoLogoutOnInactivity);
   
@@ -45,27 +43,26 @@ export default function SecuritySettingsPage() {
 
   const { toast } = useToast();
   const router = useRouter();
-  // Removed: const { currentUser } = useSession(); 
   const [isTransitionPendingForAction, startTransitionForAction] = useTransition();
   const [formState, formAction] = useActionState(
-    (prevState: SavePanelSettingsState, data: PanelSettingsData) => savePanelSettings(prevState, data, undefined /* currentUser removed */), 
+    (prevState: SavePanelSettingsState, data: PanelSettingsData) => savePanelSettings(prevState, data, undefined), 
     initialSaveState
   );
 
+  const fetchSettings = useCallback(async () => {
+    const result = await loadPanelSettings();
+    if (result && result.data) {
+      setAllLoadedSettings(result.data); 
+      setCurrentSessionInactivityTimeout(result.data.sessionInactivityTimeout ?? defaultGlobalSettingsData.sessionInactivityTimeout);
+      setCurrentDisableAutoLogout(result.data.disableAutoLogoutOnInactivity ?? defaultGlobalSettingsData.disableAutoLogoutOnInactivity);
+    } else if (result && result.message && result.status !== 'success'){
+       toast({ title: "Error Loading Settings", description: result.message, variant: "destructive" });
+    }
+  }, [toast]);
 
   useEffect(() => {
-    const fetchSettings = async () => {
-      const result = await loadPanelSettings();
-      if (result && result.data) {
-        setAllLoadedSettings(result.data); 
-        setCurrentSessionInactivityTimeout(result.data.sessionInactivityTimeout ?? defaultGlobalSettingsData.sessionInactivityTimeout);
-        setCurrentDisableAutoLogout(result.data.disableAutoLogoutOnInactivity ?? defaultGlobalSettingsData.disableAutoLogoutOnInactivity);
-      } else if (result && result.message && result.status !== 'success'){
-         toast({ title: "Error Loading Settings", description: result.message, variant: "destructive" });
-      }
-    };
     fetchSettings();
-  }, [toast]);
+  }, [fetchSettings]);
 
   useEffect(() => {
     const toastDuration = 5000; 
@@ -73,7 +70,6 @@ export default function SecuritySettingsPage() {
     if (formState.status === "success" && formState.message) {
       let settingsChangedRequiresLogout = false;
       if (formState.data) {
-        
         if (formState.data.sessionInactivityTimeout !== allLoadedSettings.sessionInactivityTimeout ||
             formState.data.disableAutoLogoutOnInactivity !== allLoadedSettings.disableAutoLogoutOnInactivity) {
           settingsChangedRequiresLogout = true;
@@ -96,9 +92,9 @@ export default function SecuritySettingsPage() {
        if (formState.errors?.general?.length) {
           description = formState.errors.general.join('; ');
       } else if (formState.errors?.sessionInactivityTimeout?.length) {
-          description = formState.errors.sessionInactivityTimeout.join('; ');
+          description = (formState.errors.sessionInactivityTimeout as string[]).join('; ');
       } else if (formState.errors?.disableAutoLogoutOnInactivity?.length) {
-          description = formState.errors.disableAutoLogoutOnInactivity.join('; ');
+          description = (formState.errors.disableAutoLogoutOnInactivity as string[]).join('; ');
       }
       toast({
         title: "Error Saving Settings",
@@ -111,32 +107,25 @@ export default function SecuritySettingsPage() {
 
   const handleFormSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    
-    
     const submittedData: PanelSettingsData = {
       ...allLoadedSettings, 
       sessionInactivityTimeout: currentSessionInactivityTimeout, 
       disableAutoLogoutOnInactivity: currentDisableAutoLogout,
     };
-    
     startTransitionForAction(() => {
-      // Pass undefined for currentUser, or adapt savePanelSettings to not require it for global settings
       formAction(submittedData); 
     });
   }, [allLoadedSettings, currentSessionInactivityTimeout, currentDisableAutoLogout, startTransitionForAction, formAction]);
 
   const handleLogoutForSettingsChange = useCallback(async () => {
     setShowLogoutConfirmDialog(false);
-    // const usernameToLogout = currentUser?.username; // currentUser is removed
-    // const roleToLogout = currentUser?.role; // currentUser is removed
     try {
-        // Logout action might need to get user from server session if it needs username/role
         await serverLogoutAction(undefined, undefined); 
     } catch(e){
         console.error("Error during server logout action:", e);
     }
     router.push('/login?reason=settings_changed');
-  }, [router]); // Removed currentUser from dependencies
+  }, [router]); 
   
   const isPending = formState.isPending || isTransitionPendingForAction;
 
@@ -150,22 +139,31 @@ export default function SecuritySettingsPage() {
             <CardDescription>Control how user sessions are handled for inactivity. Changes may require a re-login to fully apply to your current session.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            {formState.status === "error" && formState.errors?._form && (
+                <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Error</AlertTitle>
+                    <AlertDescription>{formState.errors._form.join('; ')}</AlertDescription>
+                </Alert>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-3 items-center gap-4">
               <Label htmlFor="session-timeout">Session Inactivity Timeout (minutes)</Label>
               <Input 
                 id="session-timeout" 
+                name="sessionInactivityTimeout"
                 type="number" 
                 value={currentSessionInactivityTimeout}
                 onChange={(e) => setCurrentSessionInactivityTimeout(parseInt(e.target.value, 10) || 1)} 
                 className="md:col-span-2" 
                 min="1"
                 disabled={currentDisableAutoLogout}
+                required
               />
             </div>
             {formState.errors?.sessionInactivityTimeout && (
               <Alert variant="destructive" className="md:col-span-3 md:ml-[calc(33.33%+1rem)]">
                  <AlertTitle>Validation Error</AlertTitle>
-                <AlertDescription>{formState.errors.sessionInactivityTimeout.join(', ')}</AlertDescription>
+                <AlertDescription>{(formState.errors.sessionInactivityTimeout as string[]).join(', ')}</AlertDescription>
               </Alert>
             )}
 
@@ -178,6 +176,7 @@ export default function SecuritySettingsPage() {
               </div>
               <Switch 
                 id="disable-auto-logout"
+                name="disableAutoLogoutOnInactivity"
                 checked={currentDisableAutoLogout}
                 onCheckedChange={setCurrentDisableAutoLogout}
               />
@@ -185,11 +184,11 @@ export default function SecuritySettingsPage() {
             {formState.errors?.disableAutoLogoutOnInactivity && (
               <Alert variant="destructive">
                 <AlertTitle>Validation Error</AlertTitle>
-                <AlertDescription>{formState.errors.disableAutoLogoutOnInactivity.join(', ')}</AlertDescription>
+                <AlertDescription>{(formState.errors.disableAutoLogoutOnInactivity as string[]).join(', ')}</AlertDescription>
               </Alert>
             )}
              {formState.errors?.general && (
-                <Alert variant="destructive" className="mt-4">
+                <Alert variant="destructive" className="mt-4 md:col-span-3">
                     <AlertTitle>Form Error</AlertTitle>
                     <AlertDescription>{formState.errors.general.join('; ')}</AlertDescription>
                 </Alert>
@@ -242,7 +241,6 @@ export default function SecuritySettingsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
     </div>
   );
 }

@@ -9,26 +9,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye } from "lucide-react";
-import { loadUsers, deleteUser, type UserData, type UserActionState } from "./actions";
+import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye, UserPlus, ArrowLeft } from "lucide-react";
+import { loadUsers, deleteUser } from "./actions";
+import type { UserData, UserActionState } from "./types";
 import { useToast } from "@/hooks/use-toast";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle as AlertDialogCoreTitle } from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription as AlertDialogCoreDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle as AlertDialogCoreTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogClose, DialogFooter as DialogCoreFooter, DialogContent as DialogCoreContent, DialogHeader as DialogCoreHeader, DialogTitle as DialogCoreTitle, DialogDescription as DialogCoreDescription} from "@/components/ui/dialog"; 
 
 const AddUserRoleDialog = dynamic(() => import('./components/add-user-role-dialog'), {
-  loading: () => <p>Loading dialog...</p>,
+  loading: () => <Button variant="outline" disabled><UserPlus className="mr-2 h-4 w-4" /> Add User (Loading...)</Button>,
   ssr: false
 });
 
-
 const rolesDefinitions = [
   { name: "Owner", description: "Full system access. Managed via .env.local, not listed here." },
-  { name: "Administrator", description: "Access to all projects and most system features. Cannot manage users." },
+  { name: "Administrator", description: "Access to all projects and most system features. Can manage users, and most settings." },
   { name: "Admin", description: "Assigned to specific projects with full control over them. Customizable page/settings access." },
   { name: "Custom", description: "Granular permissions assigned per module, page, or project." },
 ];
 
-// These should ideally come from a shared config or backend
 const availableProjects = [ 
   { id: 'project_ecommerce_api', name: 'E-commerce API'},
   { id: 'project_company_website', name: 'Company Website'},
@@ -41,19 +40,18 @@ const availableAppPages = [
   { id: 'projects_page', name: 'Projects Page (/projects)' },
   { id: 'files', name: 'File Manager (/files)' },
   { id: 'ports', name: 'Port Manager (/ports)' },
-  { id: 'settings_area', name: 'Settings Area (/settings)' }, 
   { id: 'roles', name: 'User Roles (/roles)'},
+  { id: 'logs_page', name: 'Panel Logs (via profile)'},
+  { id: 'settings_area', name: 'Settings Area (/settings)' }, 
 ];
 
 const availableSettingsPages = [
-  { id: 'settings_general', name: 'General' },
-  { id: 'settings_panel', name: 'Panel' },
-  { id: 'settings_daemon', name: 'Daemon' },
-  { id: 'settings_security', name: 'Security' },
-  { id: 'settings_popups', name: 'Popups' },
-  { id: 'settings_debug', name: 'Debug' },
-  { id: 'settings_license', name: 'License' },
-  { id: 'settings_info', name: 'Info' },
+  { id: 'settings_general', name: 'General Settings' },
+  { id: 'settings_panel', name: 'Panel Settings' }, 
+  { id: 'settings_daemon', name: 'Daemon Settings' },
+  { id: 'settings_security', name: 'Security Settings' },
+  { id: 'settings_license', name: 'License Settings' },
+  { id: 'settings_info', name: 'Info Page' },
 ];
 
 export default function RolesPage() {
@@ -64,6 +62,7 @@ export default function RolesPage() {
   const [isPendingDelete, startDeleteTransition] = useTransition();
   const [userToDelete, setUserToDelete] = useState<UserData | null>(null);
   const [userToViewDetails, setUserToViewDetails] = useState<UserData | null>(null); 
+  const [viewingUserAsRole, setViewingUserAsRole] = useState<UserData | null>(null);
 
   const fetchUsers = useCallback(async () => {
     setIsLoading(true);
@@ -71,7 +70,7 @@ export default function RolesPage() {
     try {
       const result = await loadUsers();
       if (result.status === "success" && result.users) {
-        setUsers(result.users);
+        setUsers(result.users.filter(u => u.id !== 'owner_root')); // Ensure owner is not in the manageable list
       } else {
         setError(result.error || "Failed to load users.");
         setUsers([]);
@@ -105,18 +104,89 @@ export default function RolesPage() {
 
   const handleUserChange = useCallback(async () => { 
     await fetchUsers();
-    if (userToViewDetails) { 
+    if (viewingUserAsRole) { 
         const usersResult = await loadUsers();
-        const updatedUser = usersResult.users?.find(u => u.id === userToViewDetails.id);
+        const updatedUser = usersResult.users?.find(u => u.id === viewingUserAsRole.id);
         if (updatedUser) {
-            setUserToViewDetails(updatedUser);
+            setViewingUserAsRole(updatedUser);
         } else { 
-            setUserToViewDetails(null); 
+            setViewingUserAsRole(null); // User might have been deleted
         }
     }
-  }, [fetchUsers, userToViewDetails]);
+  }, [fetchUsers, viewingUserAsRole]);
 
   const findNameById = (id: string, list: {id: string, name: string}[]) => list.find(item => item.id === id)?.name || id;
+
+  if (viewingUserAsRole) {
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-6">
+          <PageHeader 
+            title={`Viewing Role: ${viewingUserAsRole.username}`}
+            description={`Details for role: ${viewingUserAsRole.role}`}
+          />
+          <div className="flex gap-2">
+             {AddUserRoleDialog && (
+                <AddUserRoleDialog
+                    isEditing={true}
+                    userData={viewingUserAsRole}
+                    onUserChange={handleUserChange}
+                    triggerButton={
+                        <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                            <Edit className="mr-2 h-4 w-4" /> Edit Role
+                        </Button>
+                    }
+                />
+            )}
+            <Button onClick={() => setViewingUserAsRole(null)} variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
+              <ArrowLeft className="mr-2 h-4 w-4" /> Go Back to List
+            </Button>
+          </div>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Role Information & Permissions</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p><span className="font-semibold text-muted-foreground">Username:</span> {viewingUserAsRole.username}</p>
+            <p><span className="font-semibold text-muted-foreground">Role:</span> <Badge variant={viewingUserAsRole.role === 'Administrator' ? 'secondary' : 'outline'}>{viewingUserAsRole.role}</Badge></p>
+            <p><span className="font-semibold text-muted-foreground">Status:</span> <Badge variant={viewingUserAsRole.status === 'Active' ? 'default' : 'destructive'} className={viewingUserAsRole.status === 'Active' ? 'bg-green-500/20 text-green-700 dark:bg-green-500/10 dark:text-green-400 border-green-500/30' : ''}>{viewingUserAsRole.status}</Badge></p>
+            
+            {viewingUserAsRole.projects && viewingUserAsRole.projects.length > 0 && (
+              <div>
+                <h4 className="font-semibold mb-1">Assigned Projects:</h4>
+                <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
+                  {viewingUserAsRole.projects.map(pId => <li key={`view-proj-${pId}`}>{findNameById(pId, availableProjects)}</li>)}
+                </ul>
+              </div>
+            )}
+            {viewingUserAsRole.assignedPages && viewingUserAsRole.assignedPages.length > 0 && (
+              <div>
+                <h4 className="font-semibold mb-1">Accessible Application Pages:</h4>
+                <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
+                  {viewingUserAsRole.assignedPages.map(pageId => <li key={`view-page-${pageId}`}>{findNameById(pageId, availableAppPages)}</li>)}
+                </ul>
+              </div>
+            )}
+            {viewingUserAsRole.allowedSettingsPages && viewingUserAsRole.allowedSettingsPages.length > 0 && (
+              <div>
+                <h4 className="font-semibold mb-1">Accessible Settings Modules:</h4>
+                <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
+                  {viewingUserAsRole.allowedSettingsPages.map(settingId => <li key={`view-setting-${settingId}`}>{findNameById(settingId, availableSettingsPages)}</li>)}
+                </ul>
+              </div>
+            )}
+            {(viewingUserAsRole.projects?.length === 0 && viewingUserAsRole.assignedPages?.length === 0 && viewingUserAsRole.allowedSettingsPages?.length === 0 && viewingUserAsRole.role !== 'Administrator') && (
+              <p className="text-sm text-muted-foreground text-center pt-2">No specific project, page, or settings permissions assigned to this {viewingUserAsRole.role} role.</p>
+            )}
+            {viewingUserAsRole.role === 'Administrator' && viewingUserAsRole.allowedSettingsPages?.length === 0 && (
+                <p className="text-sm text-muted-foreground pt-2">Administrator has implicit access to all application pages and projects. No specific settings module permissions are assigned by default.</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -161,7 +231,7 @@ export default function RolesPage() {
                     <TableRow key={user.id}>
                       <TableCell className="font-medium">{user.username}</TableCell>
                       <TableCell>
-                        <Badge variant={user.role === 'Administrator' ? 'secondary' : user.role === 'Owner' ? 'default' : 'outline'}>
+                        <Badge variant={user.role === 'Administrator' ? 'secondary' : 'outline'}>
                           {user.role}
                         </Badge>
                       </TableCell>
@@ -176,7 +246,7 @@ export default function RolesPage() {
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={user.id === 'owner_root'}>
+                            <Button variant="ghost" size="icon" className="shadow-md hover:scale-105 transform transition-transform duration-150">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
@@ -190,7 +260,7 @@ export default function RolesPage() {
                               userData={user} 
                               onUserChange={handleUserChange}
                               triggerButton={
-                                <DropdownMenuItem onSelect={(e) => e.preventDefault()} disabled={user.id === 'owner_root'}> 
+                                <DropdownMenuItem onSelect={(e) => e.preventDefault()}> 
                                   <Edit className="mr-2 h-4 w-4" /> Edit User / Role
                                 </DropdownMenuItem>
                               }
@@ -200,7 +270,6 @@ export default function RolesPage() {
                             <DropdownMenuItem 
                               className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground"
                               onSelect={(e) => { e.preventDefault(); setUserToDelete(user); }}
-                              disabled={user.id === 'owner_root'}
                             >
                               <Trash2 className="mr-2 h-4 w-4" /> Delete User
                             </DropdownMenuItem>
@@ -243,10 +312,10 @@ export default function RolesPage() {
               </DialogCoreHeader>
               <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto pr-2">
                 <p><span className="font-semibold text-muted-foreground">Username:</span> {userToViewDetails.username}</p>
-                <p><span className="font-semibold text-muted-foreground">Role:</span> <Badge variant={userToViewDetails.role === 'Administrator' ? 'secondary' : userToViewDetails.role === 'Owner' ? 'default' : 'outline'}>{userToViewDetails.role}</Badge></p>
+                <p><span className="font-semibold text-muted-foreground">Role:</span> <Badge variant={userToViewDetails.role === 'Administrator' ? 'secondary' : 'outline'}>{userToViewDetails.role}</Badge></p>
                 <p><span className="font-semibold text-muted-foreground">Status:</span> <Badge variant={userToViewDetails.status === 'Active' ? 'default' : 'destructive'} className={userToViewDetails.status === 'Active' ? 'bg-green-500/20 text-green-700 dark:bg-green-500/10 dark:text-green-400 border-green-500/30' : ''}>{userToViewDetails.status}</Badge></p>
                 
-                {(userToViewDetails.role === 'Admin' || userToViewDetails.role === 'Custom') && userToViewDetails.projects && userToViewDetails.projects.length > 0 && (
+                {userToViewDetails.projects && userToViewDetails.projects.length > 0 && (
                   <div>
                     <h4 className="font-semibold mb-1">Assigned Projects:</h4>
                     <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
@@ -255,7 +324,7 @@ export default function RolesPage() {
                   </div>
                 )}
 
-                {userToViewDetails.role === 'Custom' && userToViewDetails.assignedPages && userToViewDetails.assignedPages.length > 0 && (
+                {userToViewDetails.assignedPages && userToViewDetails.assignedPages.length > 0 && (
                   <div>
                     <h4 className="font-semibold mb-1">Accessible Application Pages:</h4>
                     <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
@@ -264,7 +333,7 @@ export default function RolesPage() {
                   </div>
                 )}
                 
-                {(userToViewDetails.role === 'Administrator' || userToViewDetails.role === 'Admin' || userToViewDetails.role === 'Custom') && userToViewDetails.allowedSettingsPages && userToViewDetails.allowedSettingsPages.length > 0 && (
+                {userToViewDetails.allowedSettingsPages && userToViewDetails.allowedSettingsPages.length > 0 && (
                   <div>
                     <h4 className="font-semibold mb-1">Accessible Settings Modules:</h4>
                     <ul className="list-disc list-inside pl-4 text-sm text-muted-foreground">
@@ -272,17 +341,12 @@ export default function RolesPage() {
                     </ul>
                   </div>
                 )}
-
-                 {userToViewDetails.role === 'Owner' && (
-                    <p className="text-sm text-muted-foreground text-center pt-2">Owner has full system access. No specific permissions are listed here.</p>
-                 )}
-                 {(userToViewDetails.role !== 'Owner' && (userToViewDetails.role === 'Admin' || userToViewDetails.role === 'Custom') && userToViewDetails.projects?.length === 0 && userToViewDetails.assignedPages?.length === 0 && userToViewDetails.allowedSettingsPages?.length === 0) && (
-                  <p className="text-sm text-muted-foreground text-center pt-2">No specific project, page, or settings permissions assigned.</p>
+                 {(userToViewDetails.role !== 'Administrator' && userToViewDetails.projects?.length === 0 && userToViewDetails.assignedPages?.length === 0 && userToViewDetails.allowedSettingsPages?.length === 0) && (
+                  <p className="text-sm text-muted-foreground text-center pt-2">No specific project, page, or settings permissions assigned to this {userToViewDetails.role} role.</p>
                 )}
-                {userToViewDetails.role === 'Administrator' && userToViewDetails.allowedSettingsPages?.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center pt-2">No specific settings module permissions assigned. Administrator has implicit access to all application pages and projects.</p>
+                 {userToViewDetails.role === 'Administrator' && userToViewDetails.allowedSettingsPages?.length === 0 && (
+                  <p className="text-sm text-muted-foreground pt-2">Administrator has implicit access to all application pages and projects. No specific settings module permissions are assigned by default.</p>
                 )}
-
               </div>
               <DialogCoreFooter className="sm:justify-between gap-2 pt-4 border-t">
                 {AddUserRoleDialog && <AddUserRoleDialog 
@@ -292,7 +356,7 @@ export default function RolesPage() {
                         handleUserChange(); 
                     }}
                     triggerButton={
-                        <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={userToViewDetails.id === 'owner_root'}>
+                        <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
                             <Edit className="mr-2 h-4 w-4" /> Edit This Role
                         </Button>
                     }
@@ -316,14 +380,14 @@ export default function RolesPage() {
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogCoreTitle>Are you absolutely sure?</AlertDialogCoreTitle>
-                <AlertDialogDescription>
+                <AlertDialogCoreDescription>
                   This action cannot be undone. This will permanently delete the user account for 
                   <span className="font-semibold"> {userToDelete.username}</span>.
-                </AlertDialogDescription>
+                </AlertDialogCoreDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel onClick={() => setUserToDelete(null)} disabled={isPendingDelete}>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDeleteUser} disabled={isPendingDelete || userToDelete.id === 'owner_root'} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+                <AlertDialogAction onClick={handleDeleteUser} disabled={isPendingDelete} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
                   {isPendingDelete ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
                   Delete User
                 </AlertDialogAction>

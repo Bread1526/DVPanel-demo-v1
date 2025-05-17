@@ -10,7 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, XCircle, ShieldCheck, Loader2, KeyRound } from "lucide-react";
 import React, { useState, useCallback } from "react";
-import { verifyLicenseKey } from "./actions";
+import { verifyLicenseKey } from "./actions"; // Ensure this path is correct
 
 interface LicenseStatus {
   status: "valid" | "invalid" | "pending" | "error" | "idle";

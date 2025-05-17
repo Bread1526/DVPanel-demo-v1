@@ -1,11 +1,11 @@
 
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose, DialogDescription } from "@/components/ui/dialog";
 import Image from 'next/image';
 import { 
   Info as InfoIcon, 
@@ -14,19 +14,18 @@ import {
   Wifi, 
   ListTree,
   LayoutDashboard,
-  Settings,
+  Settings as SettingsIconLucide, // Renamed to avoid conflict
   SlidersHorizontal,
   HardDrive,
   Shield,
   MessageSquareMore,
   Bug,
-  Settings2, 
+  ShieldCheck, 
   Terminal,
   Layers,
   FileText,
   Network,
   Users,
-  ShieldCheck,
   FileDigit,
   KeyRound,
   BookUser
@@ -60,24 +59,23 @@ const sitemapContent = (
 
     <div className="p-4 border rounded-lg bg-card shadow-sm">
       <h3 className="text-lg font-semibold mb-3 text-primary flex items-center">
-        <Settings className="mr-2 h-5 w-5" /> Settings Pages
+        <SettingsIconLucide className="mr-2 h-5 w-5" /> Settings Pages
       </h3>
       <div className="space-y-3">
         <div className="p-3 border rounded-md bg-background hover:shadow-lg hover:scale-[1.02] transition-all duration-150 ease-in-out">
           <div className="flex items-center mb-1">
-            <Settings className="mr-2 h-4 w-4 text-muted-foreground" />
+            <SettingsIconLucide className="mr-2 h-4 w-4 text-muted-foreground" />
             <p className="font-medium text-foreground">Settings Entry</p>
           </div>
-          <p className="text-xs text-muted-foreground ml-6">/settings (Defaults to Panel)</p>
+          <p className="text-xs text-muted-foreground ml-6">/settings (Defaults to General)</p>
         </div>
         <div className="ml-4 pl-4 border-l-2 border-primary/30 space-y-2 py-2">
           {[
-            { name: 'General', path: '/settings/general', icon: Settings2 },
+            { name: 'General', path: '/settings/general', icon: SettingsIconLucide },
             { name: 'Panel', path: '/settings', icon: SlidersHorizontal }, 
             { name: 'Daemon', path: '/settings/daemon', icon: HardDrive },
             { name: 'Security', path: '/settings/security', icon: Shield },
-            { name: 'Popups', path: '/settings/popups', icon: MessageSquareMore },
-            { name: 'Debug', path: '/settings/debug', icon: Bug },
+            // Popups & Debug removed from global settings
             { name: 'License', path: '/settings/license', icon: ShieldCheck },
             { name: 'Info', path: '/settings/info', icon: InfoIcon },
           ].map(page => (
@@ -124,7 +122,7 @@ const sitemapContent = (
 const termsOfServiceContent = (
   <div className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground">
     <h2 className="text-xl font-semibold text-foreground">Terms of Service</h2>
-    <p className="text-xs">Effective Date: 5/16/2025</p>
+    <p className="text-xs">Effective Date: {new Date().toLocaleDateString()}</p>
     <p>Welcome to DVPanel. By using the DVPanel control panel (&quot;Service&quot;, &quot;Software&quot;), you agree to the following Terms of Service (&quot;Terms&quot;). If you do not agree with any of these Terms, you must not install, use, or access DVPanel.</p>
     
     <h3 className="text-lg font-semibold text-foreground mt-4">1. License and Usage</h3>
@@ -200,7 +198,7 @@ const termsOfServiceContent = (
 const licenseAgreementContent = (
   <div className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground">
     <h2 className="text-xl font-semibold text-foreground">DVPanel Software License Agreement</h2>
-    <p className="text-xs">Effective Date: 5/16/2025</p>
+    <p className="text-xs">Effective Date: {new Date().toLocaleDateString()}</p>
     <p>Author: DVPanel Team</p>
     <p>Contact: admin@dvpanel.com</p>
     <p>Website: https://dvpanel.com</p>
@@ -287,7 +285,7 @@ const licenseAgreementContent = (
 const privacyPolicyContent = (
   <div className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground">
     <h2 className="text-xl font-semibold text-foreground">Privacy Policy</h2>
-    <p className="text-xs">Effective Date: 5/16/2025</p>
+    <p className="text-xs">Effective Date: {new Date().toLocaleDateString()}</p>
     <p>Maintained by: DVPanel Team</p>
     <p>Contact: admin@dvpanel.com</p>
     <p>Website: https://dvpanel.com</p>
@@ -323,13 +321,8 @@ const privacyPolicyContent = (
     <p>This information is stored entirely on your own server. DVPanel has no access to it.</p>
 
     <h3 className="text-lg font-semibold text-foreground mt-4">4. Cookies and Browser Storage</h3>
-    <p>DVPanel uses local storage (not cookies) to store:</p>
-    <ul className="list-disc pl-5 space-y-1">
-      <li>Last visited panel pages</li>
-      <li>Theme preferences (dark/light mode)</li>
-      <li>Local logs for session and owner activity</li>
-    </ul>
-    <p>This information is never transmitted externally and is only stored in your browser.</p>
+    <p>DVPanel uses HttpOnly cookies for session management (managed by iron-session). It does not use localStorage for session tokens. Minimal user preferences (like theme or sidebar state) might be stored in localStorage if implemented.</p>
+
 
     <h3 className="text-lg font-semibold text-foreground mt-4">5. Third-Party Services</h3>
     <p>DVPanel does not integrate with third-party analytics, tracking, or advertising platforms. The only external connection is made optionally to DVPanel’s secure backend for Pro license verification.</p>
@@ -364,7 +357,6 @@ const privacyPolicyContent = (
   </div>
 );
 
-
 const infoPageDialogs = [
   { label: "Sitemap", icon: ListTree, content: sitemapContent, title: "Application Sitemap" },
   { label: "Terms of Service", icon: FileDigit, content: termsOfServiceContent, title: "Terms of Service" },
@@ -375,10 +367,16 @@ const infoPageDialogs = [
 export default function InfoPage() {
   const [latency, setLatency] = useState<number | null>(null);
   const [isPinging, setIsPinging] = useState(false);
+  const [hasMounted, setHasMounted] = useState(false);
 
   useEffect(() => {
-    let intervalId: NodeJS.Timeout;
+    setHasMounted(true);
+  }, []);
 
+  useEffect(() => {
+    if (!hasMounted) return;
+
+    let intervalId: NodeJS.Timeout;
     const pingServer = async () => {
       if (!isPinging && latency === null) setIsPinging(true); 
       const startTime = Date.now();
@@ -393,9 +391,7 @@ export default function InfoPage() {
       } catch (error) {
         setLatency(null);
       } finally {
-        // Check if component is still mounted before setting state
-        // This simple check might not be enough if unmounting happens during fetch
-        if (document.getElementById('info-page-container')) { // Add an ID to the root div of InfoPage
+        if (document.getElementById('info-page-container')) { 
           setIsPinging(false);
         }
       }
@@ -407,10 +403,15 @@ export default function InfoPage() {
     return () => {
       clearInterval(intervalId);
     };
-  }, [latency, isPinging]); // Added dependencies
+  }, [hasMounted, latency, isPinging]); // Added dependencies
+
+  if (!hasMounted) {
+    // Render nothing or a placeholder during SSR and initial client render
+    return null; 
+  }
 
   return (
-    <div id="info-page-container"> {/* Added ID for useEffect cleanup check */}
+    <div id="info-page-container"> 
       <PageHeader title="Information" description="Details about DVPanel, resources, and credits." />
       <Card>
         <CardHeader>
@@ -431,7 +432,7 @@ export default function InfoPage() {
                   </DialogTrigger>
                   <DialogContent className={cn("rounded-2xl backdrop-blur-sm", 
                                               item.label === "Sitemap" ? 'sm:max-w-2xl md:max-w-3xl lg:max-w-4xl' : 
-                                              'sm:max-w-lg md:max-w-2xl lg:max-w-3xl' // Wider for ToS, License, Privacy
+                                              'sm:max-w-lg md:max-w-2xl lg:max-w-3xl' 
                                             )}>
                     <DialogHeader>
                       <DialogTitle>{item.title || item.label}</DialogTitle>
@@ -484,11 +485,11 @@ export default function InfoPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="flex flex-col items-center text-center p-4 border rounded-lg shadow-sm bg-card/50">
                 <Image
-                  src="data:image/png;base64,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"
+                  src="data:image/png;base64,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"
                   alt="Road.js"
                   width={80}
                   height={80}
-                  className="rounded-full mb-3"
+                  className="rounded-full mb-3 object-cover" // Added object-cover
                   data-ai-hint="male avatar"
                 />
                 <h4 className="font-semibold text-foreground">Road.js</h4>
@@ -496,12 +497,12 @@ export default function InfoPage() {
               </div>
               <div className="flex flex-col items-center text-center p-4 border rounded-lg shadow-sm bg-card/50">
                  <Image
-                  src="https://placehold.co/80x80.png" // Placeholder, replace with actual path if available
+                  src="https://placehold.co/80x80.png"
                   alt="Novasdad"
                   width={80}
                   height={80}
-                  className="rounded-full mb-3"
-                  data-ai-hint="male avatar" // If it's a different avatar style, adjust hint
+                  className="rounded-full mb-3 object-cover" // Added object-cover
+                  data-ai-hint="male avatar"
                 />
                 <h4 className="font-semibold text-foreground">Novasdad</h4>
                 <p className="text-sm text-muted-foreground">Co-Owner & Lead Designer</p>

@@ -6,63 +6,63 @@ import { useActionState } from 'react';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Save, Loader2 } from "lucide-react";
-import { savePanelSettings, loadPanelSettings, type SavePanelSettingsState, type PanelSettingsData } from '../actions';
+import { Save, Loader2, AlertCircle } from "lucide-react";
+import { savePanelSettings, loadPanelSettings } from '../actions';
+import type { SavePanelSettingsState, PanelSettingsData } from '../types';
 import { useToast } from "@/hooks/use-toast";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Added AlertTitle
 
 const initialSaveState: SavePanelSettingsState = {
   message: "",
   status: "idle",
   errors: {},
   data: undefined,
+  isPending: false,
 };
 
 const defaultSettingsData: PanelSettingsData = {
   panelPort: "27407",
   panelIp: "",
-  debugMode: false,
-  popup: {
-    notificationDuration: 5,
-    disableAllNotifications: false,
-    disableAutoClose: false,
-    enableCopyError: false,
-    showConsoleErrorsInNotifications: false,
-  },
   sessionInactivityTimeout: 30,
   disableAutoLogoutOnInactivity: false,
 };
 
 export default function GeneralSettingsPage() {
+  // This state holds ALL global settings loaded, even if this page doesn't edit all of them
   const [allSettings, setAllSettings] = useState<PanelSettingsData>(defaultSettingsData);
   
   const { toast } = useToast();
   const [isTransitionPendingForAction, startTransitionForAction] = useTransition();
+  // savePanelSettings currently handles panelPort, panelIp, and session settings.
+  // This page is a placeholder for now.
   const [formState, formAction] = useActionState(savePanelSettings, initialSaveState);
 
-  useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const result = await loadPanelSettings();
-        if (result && result.data) { // Added check for result itself
-          setAllSettings(result.data);
-        } else if (result && result.message && result.status !== 'success') {
-            toast({ title: "Error Loading Settings", description: result.message, variant: "destructive" });
-        }
-      } catch (e) {
-        toast({ title: "Error Loading Settings", description: "An unexpected error occurred.", variant: "destructive" });
-        console.error("Failed to load settings in General page:", e);
+
+  const fetchSettings = useCallback(async () => {
+    try {
+      const result = await loadPanelSettings();
+      if (result && result.data) { 
+        setAllSettings(result.data);
+      } else if (result && result.message && result.status !== 'success') {
+          toast({ title: "Error Loading Settings", description: result.message, variant: "destructive" });
       }
-    };
-    fetchSettings();
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      toast({ title: "Error Loading Settings", description: `An unexpected error occurred: ${error.message}`, variant: "destructive" });
+      console.error("Failed to load settings in General page:", e);
+    }
   }, [toast]);
 
   useEffect(() => {
-    const toastDurationSource = formState.data?.popup?.notificationDuration ?? allSettings.popup?.notificationDuration;
-    const effectiveDuration = (toastDurationSource || 5) * 1000;
+    fetchSettings();
+  }, [fetchSettings]);
+
+  useEffect(() => {
+    const effectiveDuration = 5000;
 
     if (formState.status === "success" && formState.message) {
       if (formState.data) {
-        setAllSettings(formState.data);
+        setAllSettings(formState.data); 
       }
       toast({
         title: "Settings Update",
@@ -77,11 +77,12 @@ export default function GeneralSettingsPage() {
         duration: effectiveDuration,
       });
     }
-  }, [formState, allSettings.popup?.notificationDuration, toast]);
+  }, [formState, toast]);
 
   const handleFormSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     
+    // Since this page has no specific inputs yet, submitting from here would just re-save existing settings.
     const submittedData: PanelSettingsData = {
       ...allSettings, 
     };
@@ -100,15 +101,30 @@ export default function GeneralSettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle>General Application Settings</CardTitle>
-            <CardDescription>(Functionality pending for changing owner credentials. Settings related to this (e.g., via an `info.json`) are not yet implemented.)</CardDescription>
+            <CardDescription>
+              (This section is a placeholder. Functionality like changing owner credentials will be added later.)
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+             {formState.status === "error" && formState.errors?._form && (
+                <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Error</AlertTitle>
+                    <AlertDescription>{formState.errors._form.join('; ')}</AlertDescription>
+                </Alert>
+            )}
+             {formState.errors?.general && (
+                <Alert variant="destructive" className="md:col-span-3">
+                    <AlertTitle>Form Error</AlertTitle>
+                    <AlertDescription>{formState.errors.general.join('; ')}</AlertDescription>
+                </Alert>
+            )}
             <p className="text-muted-foreground">
-              This section will allow management of core panel settings, including owner account credentials (stored encrypted). Currently, owner credentials are managed via `.env.local`.
+              This section will allow management of core panel settings. Currently, owner credentials are managed via `.env.local`.
             </p>
           </CardContent>
           <CardFooter className="border-t px-6 py-4">
-            <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled>
+            <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={isPending || true /* Disable until this page has editable fields */}>
               {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
               Save General Settings
             </Button>

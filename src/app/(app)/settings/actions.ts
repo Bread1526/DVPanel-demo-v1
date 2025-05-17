@@ -1,75 +1,47 @@
 
-"use server";
+'use server';
 
 import { z } from "zod";
 import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storageService";
 import { getDataPath } from "@/backend/lib/config";
 import path from "path";
-import { logEvent } from '@/lib/logger'; // Import logger
+import { logEvent } from '@/lib/logger';
+import { 
+  type PanelSettingsData, 
+  type SavePanelSettingsState, 
+  type LoadPanelSettingsState,
+  panelSettingsSchema,
+  explicitDefaultPanelSettings
+} from './types';
 
-// Panel settings schema WITHOUT popup and debugMode
-const panelSettingsSchema = z.object({
-  panelPort: z
-    .string()
-    .min(1, "Panel Port is required.")
-    .regex(/^\d+$/, "Panel Port must be a number.")
-    .refine((val) => {
-      const portNum = parseInt(val, 10);
-      return portNum >= 1 && portNum <= 65535;
-    }, "Panel Port must be between 1 and 65535.")
-    .default("27407"),
-  panelIp: z
-    .string()
-    .refine(
-      (val) =>
-        val === "" ||
-        /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(val) ||
-        /^[a-zA-Z0-9.-]+$/.test(val),
-      {
-        message:
-          "Must be a valid IPv4 address, domain name, or empty (interpreted as 0.0.0.0).",
-      }
-    ).default(""),
-  sessionInactivityTimeout: z.coerce.number().min(1).default(30).describe("Session inactivity timeout in minutes."),
-  disableAutoLogoutOnInactivity: z.boolean().default(false).describe("Disable automatic logout due to inactivity."),
-  // debugMode and popup settings are removed from here
-});
-
-export type PanelSettingsData = z.infer<typeof panelSettingsSchema>;
-
-export interface SavePanelSettingsState {
-  message: string;
-  status: "idle" | "success" | "error" | "validating";
-  errors?: Partial<Record<keyof PanelSettingsData | "general", string[]>>;
-  data?: PanelSettingsData;
-  isPending?: boolean;
-}
-
-export interface LoadPanelSettingsState {
-  message?: string;
-  status: "success" | "error" | "not_found";
-  data?: PanelSettingsData;
-}
 
 const SETTINGS_FILENAME = ".settings.json";
 
-// Explicit defaults WITHOUT popup and debugMode
-const explicitDefaultPanelSettings: PanelSettingsData = {
-  panelPort: "27407",
-  panelIp: "",
-  sessionInactivityTimeout: 30,
-  disableAutoLogoutOnInactivity: false,
-};
+async function getDebugModeFlag(): Promise<boolean> {
+  // This is a simplified way to get debugMode for logging within these actions themselves.
+  // It avoids circular dependencies if settings actions were to call loadPanelSettings recursively for its own debug flag.
+  try {
+    const loadedData = await loadEncryptedData(SETTINGS_FILENAME);
+    if (loadedData && typeof (loadedData as any).debugMode === 'boolean') { // Cast to any to check for old debugMode
+      return (loadedData as any).debugMode;
+    }
+    // Check if new schema might have it, though panelSettingsSchema no longer defines debugMode directly
+    if (loadedData && panelSettingsSchema.safeParse(loadedData).success) {
+        // This path is unlikely to find debugMode as it's user-specific now
+    }
+  } catch {
+    // Ignore error, default to false
+  }
+  return false; // Default if not found or error
+}
+
 
 export async function savePanelSettings(
   prevState: SavePanelSettingsState,
   submittedData: PanelSettingsData,
-  // Add current user for logging
   currentUser?: { username: string; role: string }
 ): Promise<SavePanelSettingsState> {
-  // Load current settings to get debugMode for logging this action itself
-  const currentSettingsForLogging = await loadPanelSettings();
-  const debugModeForThisAction = currentSettingsForLogging.data?.debugMode ?? false; // User debugMode would be better
+  const debugModeForThisAction = await getDebugModeFlag(); // Or better, pass from client if available
 
   if (debugModeForThisAction) {
     console.log("[SavePanelSettingsAction] Received data object for validation:", JSON.stringify(submittedData, null, 2));
@@ -79,20 +51,14 @@ export async function savePanelSettings(
 
   if (!validatedFields.success) {
     const flatErrors = validatedFields.error.flatten();
-    const errors: SavePanelSettingsState['errors'] = {};
-    if (flatErrors.fieldErrors.panelPort) errors.panelPort = flatErrors.fieldErrors.panelPort;
-    if (flatErrors.fieldErrors.panelIp) errors.panelIp = flatErrors.fieldErrors.panelIp;
-    if (flatErrors.fieldErrors.sessionInactivityTimeout) errors.sessionInactivityTimeout = flatErrors.fieldErrors.sessionInactivityTimeout;
-    if (flatErrors.fieldErrors.disableAutoLogoutOnInactivity) errors.disableAutoLogoutOnInactivity = flatErrors.fieldErrors.disableAutoLogoutOnInactivity;
-    
     if (debugModeForThisAction) {
       console.error("[SavePanelSettingsAction] Validation failed:", JSON.stringify(flatErrors, null, 2));
     }
-    
+    logEvent(currentUser?.username || 'System', currentUser?.role || 'Unknown', 'GLOBAL_SETTINGS_VALIDATION_FAILED', 'WARN', { errors: flatErrors.fieldErrors });
     return {
       message: "Validation failed. Please check your input.",
       status: "error",
-      errors: errors,
+      errors: flatErrors.fieldErrors as SavePanelSettingsState['errors'],
     };
   }
 
@@ -122,53 +88,36 @@ export async function savePanelSettings(
       data: dataToSave,
     };
   } catch (error) {
-    console.error("[SavePanelSettingsAction] Error saving panel settings:", error);
-    const errorMessage = error instanceof Error ? error.message : "An unknown error occurred while saving settings.";
+    const e = error instanceof Error ? error : new Error(String(error));
+    console.error("[SavePanelSettingsAction] Error saving panel settings:", e.message, e.stack);
     
     const logUsername = currentUser?.username || 'System';
     const logRole = currentUser?.role || 'Unknown';
-    logEvent(logUsername, logRole, 'GLOBAL_SETTINGS_UPDATE_FAILED', 'ERROR', { error: errorMessage });
+    logEvent(logUsername, logRole, 'GLOBAL_SETTINGS_UPDATE_FAILED', 'ERROR', { error: e.message });
 
+    const clientErrorMessage = debugModeForThisAction ? `Failed to save settings: ${e.message}` : `Failed to save settings. An unexpected error occurred.`;
     return {
-      message: `Failed to save settings: ${errorMessage}`,
+      message: clientErrorMessage,
       status: "error",
-      errors: { general: [`Storage Error: ${errorMessage}`] },
+      errors: { general: [clientErrorMessage] },
     };
   }
 }
 
 export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
-  // Try to load user-specific settings to get debugMode for logging this action
-  // This creates a slight chicken-and-egg, so we'll default debugMode to false for this specific function's internal logging
-  let debugModeForLoading = false; 
+  const debugModeForLoading = await getDebugModeFlag(); 
   
+  if (debugModeForLoading) {
+    console.log("[LoadPanelSettingsAction] Attempting to load global settings from", SETTINGS_FILENAME);
+  }
+
   try {
     const loadedData = await loadEncryptedData(SETTINGS_FILENAME);
     
-    // User-specific debug mode isn't available when loading GLOBAL settings easily,
-    // so we might have to rely on a general flag or keep logging minimal here.
-    // For now, let's assume if .settings.json has a debugMode field (even if it's moving), use it.
-    if (loadedData && typeof (loadedData as any).debugMode === 'boolean') {
-        // This is a bit of a hack, as global settings no longer store debugMode.
-        // This log line might need to be removed or made conditional on something else.
-        // debugModeForLoading = (loadedData as any).debugMode; 
-    }
-
-    if (debugModeForLoading) {
-      console.log("[LoadPanelSettingsAction] Attempting to load global settings from", SETTINGS_FILENAME);
-    }
-
     if (loadedData) {
-      // Validate against the schema that no longer includes popup/debug
       const parsedData = panelSettingsSchema.safeParse(loadedData);
       if (parsedData.success) {
-        // Merge with defaults to ensure all fields are present, even if old file had more
-        const mergedData = { 
-          ...explicitDefaultPanelSettings, 
-          ...parsedData.data, 
-        };
-        const finalData = panelSettingsSchema.parse(mergedData); // Re-parse to apply defaults and coerce
-        
+        const finalData = { ...explicitDefaultPanelSettings, ...parsedData.data }; // Ensure all defaults are applied if file is partial
         if (debugModeForLoading) {
           console.log("[LoadPanelSettingsAction] Successfully loaded and parsed global settings:", finalData);
         }
@@ -177,33 +126,37 @@ export async function loadPanelSettings(): Promise<LoadPanelSettingsState> {
           data: finalData,
         };
       } else {
-        console.warn("[LoadPanelSettingsAction] Loaded global settings file has incorrect format or missing fields. Applying full defaults:", parsedData.error.flatten().fieldErrors);
-        const defaults = panelSettingsSchema.parse(explicitDefaultPanelSettings); // Use explicit defaults
+        if (debugModeForLoading) {
+          console.warn("[LoadPanelSettingsAction] Loaded global settings file has incorrect format or missing fields. Applying full defaults:", parsedData.error.flatten().fieldErrors);
+        }
+        logEvent('System', 'System', 'GLOBAL_SETTINGS_LOAD_INVALID_FORMAT', 'WARN', { errors: parsedData.error.flatten().fieldErrors });
         return {
           status: "success", 
           message: "Global settings file has an invalid format or missing fields. Full defaults applied.",
-          data: defaults,
+          data: { ...explicitDefaultPanelSettings },
         };
       }
     } else {
       if (debugModeForLoading) {
-        console.log("[LoadPanelSettingsAction] No existing global settings file found. Applying full defaults.");
+        console.log("[LoadPanelSettingsAction] No existing global settings file found (.settings.json). Applying full defaults.");
       }
-      const defaults = panelSettingsSchema.parse(explicitDefaultPanelSettings); // Use explicit defaults
+      logEvent('System', 'System', 'GLOBAL_SETTINGS_FILE_NOT_FOUND', 'INFO');
       return {
         status: "not_found", 
         message: "No existing global settings file found. Defaults will be used.",
-        data: defaults, 
+        data: { ...explicitDefaultPanelSettings }, 
       };
     }
   } catch (error) {
-    console.error("[LoadPanelSettingsAction] Error loading global panel settings:", error);
-    const errorMessage = error instanceof Error ? error.message : "An unknown error occurred while loading settings.";
-    const defaults = panelSettingsSchema.parse(explicitDefaultPanelSettings); // Use explicit defaults
+    const e = error instanceof Error ? error : new Error(String(error));
+    if (debugModeForLoading) {
+        console.error("[LoadPanelSettingsAction] Error loading global panel settings:", e.message, e.stack);
+    }
+    logEvent('System', 'System', 'GLOBAL_SETTINGS_LOAD_EXCEPTION', 'ERROR', { error: e.message });
     return {
       status: "error",
-      message: `Failed to load global settings: ${errorMessage}. Defaults will be used.`,
-      data: defaults,
+      message: `Failed to load global settings: ${e.message}. Defaults will be used.`,
+      data: { ...explicitDefaultPanelSettings },
     };
   }
 }
