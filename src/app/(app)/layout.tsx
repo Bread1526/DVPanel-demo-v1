@@ -1,3 +1,4 @@
+
 // src/app/(app)/layout.tsx
 import type React from 'react';
 import AppShell from '@/components/layout/app-shell';

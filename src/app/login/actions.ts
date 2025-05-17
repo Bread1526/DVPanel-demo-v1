@@ -2,16 +2,17 @@
 "use server";
 
 import { z } from "zod";
+import crypto from "crypto";
 import { getIronSession } from 'iron-session';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { sessionOptions, type SessionData } from '@/lib/session';
-import { loadUsers, verifyPassword, hashPassword, type UserData } from '@/app/(app)/roles/actions'; // Adjusted path
+import { loadUsers, verifyPassword, hashPassword, type UserData } from '@/app/(app)/roles/actions'; 
 import { getDataPath } from "@/backend/lib/config";
 import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storageService";
 import fs from 'fs';
 import path from 'path';
-import { type PanelSettingsData, loadPanelSettings as loadGeneralPanelSettings } from '@/app/(app)/settings/actions';
+import { type PanelSettingsData, loadPanelSettings } from '@/app/(app)/settings/actions';
 
 const LoginSchema = z.object({
   username: z.string().min(1, "Username is required."),
@@ -25,9 +26,10 @@ export interface LoginState {
   errors?: Partial<Record<keyof z.infer<typeof LoginSchema> | "_form", string[]>>;
 }
 
+
 async function getPanelSettingsForDebug(): Promise<PanelSettingsData | undefined> {
     try {
-        const settingsResult = await loadGeneralPanelSettings();
+        const settingsResult = await loadPanelSettings();
         return settingsResult.data;
     } catch {
         return undefined;
@@ -38,18 +40,17 @@ async function ensureOwnerFileOnLogin(ownerUsernameEnv: string, ownerPasswordEnv
   const panelSettings = await getPanelSettingsForDebug();
   const debugMode = panelSettings?.debugMode ?? false;
 
-  if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Starting for owner: ${ownerUsernameEnv}`);
-  
   const safeOwnerUsername = ownerUsernameEnv.replace(/[^a-zA-Z0-9_.-]/g, '_');
   const ownerFilename = `${safeOwnerUsername}-Owner.json`;
   const dataPath = getDataPath();
   const ownerFilePath = path.join(dataPath, ownerFilename);
 
   if (debugMode) {
+    console.log(`[LoginAction - ensureOwnerFileOnLogin] Starting for owner: ${ownerUsernameEnv}`);
     console.log(`[LoginAction - ensureOwnerFileOnLogin] Sanitized Owner Filename: ${ownerFilename}`);
     console.log(`[LoginAction - ensureOwnerFileOnLogin] Full Owner File Path: ${ownerFilePath}`);
   }
-
+  
   try {
     const { hash, salt } = await hashPassword(ownerPasswordEnv);
     if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Password hashed for owner.`);
@@ -74,15 +75,15 @@ async function ensureOwnerFileOnLogin(ownerUsernameEnv: string, ownerPasswordEnv
     }
 
     const ownerUserData: UserData = {
-      id: 'owner_root', // Special ID for the owner
-      username: ownerUsernameEnv, // Store the original, unsanitized username
+      id: 'owner_root', 
+      username: ownerUsernameEnv, 
       hashedPassword: hash,
       salt: salt,
       role: 'Owner',
-      projects: [],
-      assignedPages: [],
-      allowedSettingsPages: [],
-      lastLogin: now,
+      projects: [], 
+      assignedPages: [], 
+      allowedSettingsPages: [], 
+      lastLogin: now, 
       status: "Active",
       createdAt: createdAt,
       updatedAt: now,
@@ -91,7 +92,7 @@ async function ensureOwnerFileOnLogin(ownerUsernameEnv: string, ownerPasswordEnv
     if (debugMode) {
       const dataToLog = {...ownerUserData, hashedPassword: '[REDACTED]', salt: '[REDACTED]'};
       console.log(`[LoginAction - ensureOwnerFileOnLogin] Owner user data prepared for saving:`, JSON.stringify(dataToLog));
-      console.log(`[LoginAction - ensureOwnerFileOnLogin] Calling saveEncryptedData for ${ownerFilename} with prepared data.`);
+      console.log(`[LoginAction - ensureOwnerFileOnLogin] Calling saveEncryptedData for ${ownerFilename}. Data sample:`, JSON.stringify(dataToLog).substring(0, 100) + '...');
     }
     
     await saveEncryptedData(ownerFilename, ownerUserData);
@@ -106,7 +107,6 @@ async function ensureOwnerFileOnLogin(ownerUsernameEnv: string, ownerPasswordEnv
   } catch (e) {
     const error = e instanceof Error ? e : new Error(String(e));
     console.error("[LoginAction - ensureOwnerFileOnLogin] CRITICAL: Failed to create/update owner user file:", error.message, error.stack);
-    // We don't want to block login if file creation fails, but it's a critical issue to log.
   }
 }
 
@@ -130,7 +130,6 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     console.log("[LoginAction] FormData entries:", formEntries);
   }
   
-
   const rawFormData = {
     username: String(formData.get("username") ?? ""),
     password: String(formData.get("password") ?? ""),
@@ -146,7 +145,7 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     const formErrors = validatedFields.error.flatten().formErrors;
     if (debugMode) console.error("[LoginAction] Zod validation failed. Full errors:", JSON.stringify(validatedFields.error.flatten()));
     
-    let message = "Validation failed. Please check the form for errors.";
+    let message = "Please check the form for errors.";
     if (formErrors.length > 0 && !Object.keys(fieldErrors).length) {
       message = formErrors.join(', ');
     }
@@ -163,7 +162,6 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
   try {
     const session = await getIronSession<SessionData>(cookies(), sessionOptions);
 
-    // 1. Check against .env.local owner credentials
     if (ownerUsernameEnv && ownerPasswordEnv) {
       if (username === ownerUsernameEnv && password === ownerPasswordEnv) {
         if (debugMode) console.log(`[LoginAction] Matched .env.local owner: ${ownerUsernameEnv}. Proceeding to ensure owner file.`);
@@ -175,22 +173,20 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
           role: 'Owner',
         };
         session.isLoggedIn = true;
+        session.lastActivity = Date.now();
         await session.save();
         if (debugMode) console.log("[LoginAction] Owner session saved successfully.");
         
         const destination = redirectUrl || '/';
         if (debugMode) console.log(`[LoginAction] Redirecting owner to: ${destination}`);
         redirect(destination); 
-        // Unreachable after redirect, but good practice for linters/understanding
-        // return { message: "Owner login successful, redirecting...", status: "success" };
       } else {
-        if (debugMode && username === ownerUsernameEnv) console.log("[LoginAction] Owner username matched, but password did not. Proceeding to check users.json.");
+        if (debugMode && username === ownerUsernameEnv) console.log("[LoginAction] Owner username matched, but password did not. Proceeding to check user files.");
       }
     } else {
-      if (debugMode) console.warn("[LoginAction] OWNER_USERNAME or OWNER_PASSWORD is not set in .env.local. The .env owner login path is disabled.");
+      if (debugMode) console.warn("[LoginAction] OWNER_USERNAME or OWNER_PASSWORD is not set in .env.local. The .env owner login path is disabled for direct login, but owner file sync still occurs if owner logs in via other means.");
     }
 
-    // 2. Check against users from individual files (users.json equivalent)
     if (debugMode) console.log("[LoginAction] Attempting login for regular user:", username);
     const usersResult = await loadUsers();
 
@@ -217,7 +213,6 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
       return { message: "Invalid username or password.", status: "error", errors: { _form: ["Invalid username or password."] } };
     }
 
-    // Login successful for regular user
     if (debugMode) console.log(`[LoginAction] Regular user login successful for: ${username}`);
     session.user = {
       id: user.id,
@@ -225,19 +220,16 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
       role: user.role,
     };
     session.isLoggedIn = true;
+    session.lastActivity = Date.now();
     await session.save();
     if (debugMode) console.log("[LoginAction] Regular user session saved successfully.");
     
     const destination = redirectUrl || '/';
     if (debugMode) console.log(`[LoginAction] Redirecting regular user to: ${destination}`);
     redirect(destination);
-    // Unreachable after redirect
-    // return { message: "Login successful, redirecting...", status: "success" };
 
   } catch (error: any) {
-    // This catch is for unexpected errors during the process
     if (error.digest?.startsWith('NEXT_REDIRECT')) {
-      // This is a normal redirect, re-throw it so Next.js can handle it
       throw error; 
     }
     console.error("[LoginAction] Unexpected login error:", error.message, error.stack);
@@ -248,4 +240,3 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     };
   }
 }
-    

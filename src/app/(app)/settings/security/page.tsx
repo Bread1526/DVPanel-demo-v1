@@ -2,15 +2,17 @@
 "use client";
 
 import React, { useState, useEffect, useTransition } from 'react';
-import { useActionState } from 'react'; // Corrected import
+import { useActionState } from 'react';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input"; // Added Input
 import { Save, Loader2 } from "lucide-react";
 import { savePanelSettings, loadPanelSettings, type SavePanelSettingsState, type PanelSettingsData } from '../actions';
 import { useToast } from "@/hooks/use-toast";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const initialSaveState: SavePanelSettingsState = {
   message: "",
@@ -30,24 +32,29 @@ const defaultSettingsData: PanelSettingsData = {
     enableCopyError: false,
     showConsoleErrorsInNotifications: false,
   },
+  sessionInactivityTimeout: 30,
+  disableAutoLogoutOnInactivity: false,
 };
 
 export default function SecuritySettingsPage() {
   const [allSettings, setAllSettings] = useState<PanelSettingsData>(defaultSettingsData);
   
-  // Add state for security-specific inputs if any in the future
+  const [currentSessionInactivityTimeout, setCurrentSessionInactivityTimeout] = useState(defaultSettingsData.sessionInactivityTimeout);
+  const [currentDisableAutoLogout, setCurrentDisableAutoLogout] = useState(defaultSettingsData.disableAutoLogoutOnInactivity);
+  // Add state for other security-specific inputs if any in the future
   // const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
 
   const { toast } = useToast();
   const [isTransitionPendingForAction, startTransitionForAction] = useTransition();
-  const [formState, formAction] = useActionState(savePanelSettings, initialSaveState); // Changed to useActionState
+  const [formState, formAction] = useActionState(savePanelSettings, initialSaveState);
 
   useEffect(() => {
     const fetchSettings = async () => {
       const result = await loadPanelSettings();
       if (result.data) {
         setAllSettings(result.data);
-        // Populate security-specific state if any
+        setCurrentSessionInactivityTimeout(result.data.sessionInactivityTimeout ?? defaultSettingsData.sessionInactivityTimeout);
+        setCurrentDisableAutoLogout(result.data.disableAutoLogoutOnInactivity ?? defaultSettingsData.disableAutoLogoutOnInactivity);
         // setTwoFactorEnabled(result.data.security?.twoFactor ?? false);
       }
     };
@@ -61,29 +68,39 @@ export default function SecuritySettingsPage() {
     if (formState.status === "success" && formState.message) {
       if (formState.data) {
         setAllSettings(formState.data);
-        // Update security-specific state if any
+        setCurrentSessionInactivityTimeout(formState.data.sessionInactivityTimeout ?? defaultSettingsData.sessionInactivityTimeout);
+        setCurrentDisableAutoLogout(formState.data.disableAutoLogoutOnInactivity ?? defaultSettingsData.disableAutoLogoutOnInactivity);
       }
       toast({
         title: "Settings Update",
-        description: formState.message, // This will show "Panel settings saved successfully"
+        description: formState.message,
         duration: effectiveDuration,
       });
     } else if (formState.status === "error" && formState.message) {
+      let description = formState.message;
+      if (formState.errors?.general) {
+          description = formState.errors.general.join('; ');
+      } else if (formState.errors?.sessionInactivityTimeout) {
+          description = formState.errors.sessionInactivityTimeout.join('; ');
+      } else if (formState.errors?.disableAutoLogoutOnInactivity) {
+          description = formState.errors.disableAutoLogoutOnInactivity.join('; ');
+      }
       toast({
         title: "Error Saving Settings",
-        description: formState.message,
+        description: description,
         variant: "destructive",
         duration: effectiveDuration,
       });
     }
-  }, [formState, allSettings.popup.notificationDuration, toast]); // Added toast to dependency array
+  }, [formState, allSettings.popup.notificationDuration, toast]);
 
   const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     
     const submittedData: PanelSettingsData = {
-      ...allSettings, // Start with all current settings
-      // Overwrite with values from this page if they existed
+      ...allSettings,
+      sessionInactivityTimeout: currentSessionInactivityTimeout,
+      disableAutoLogoutOnInactivity: currentDisableAutoLogout,
       // security: { 
       //   twoFactor: twoFactorEnabled,
       // },
@@ -100,10 +117,52 @@ export default function SecuritySettingsPage() {
     <div>
       <PageHeader title="Security Settings" description="Enhance your panel's security posture." />
       <form onSubmit={handleFormSubmit}>
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Session Management</CardTitle>
+            <CardDescription>Control how user sessions are handled for inactivity.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 items-center gap-4">
+              <Label htmlFor="session-timeout">Session Inactivity Timeout (minutes)</Label>
+              <Input 
+                id="session-timeout" 
+                type="number" 
+                value={currentSessionInactivityTimeout}
+                onChange={(e) => setCurrentSessionInactivityTimeout(parseInt(e.target.value, 10))}
+                className="md:col-span-2" 
+                min="1"
+              />
+            </div>
+            {formState.errors?.sessionInactivityTimeout && (
+              <Alert variant="destructive" className="md:col-span-3 md:ml-[calc(33.33%+1rem)]">
+                <AlertDescription>{formState.errors.sessionInactivityTimeout.join(', ')}</AlertDescription>
+              </Alert>
+            )}
+
+            <div className="flex items-center justify-between p-4 border rounded-lg">
+              <div>
+                <Label htmlFor="disable-auto-logout" className="text-base font-semibold">Disable Auto Logout on Inactivity</Label>
+                <p className="text-sm text-muted-foreground">
+                  If enabled, users will not be logged out due to inactivity. Session will only expire based on cookie lifetime.
+                </p>
+              </div>
+              <Switch 
+                id="disable-auto-logout"
+                checked={currentDisableAutoLogout}
+                onCheckedChange={setCurrentDisableAutoLogout}
+              />
+            </div>
+            {formState.errors?.disableAutoLogoutOnInactivity && (
+              <Alert variant="destructive"><AlertDescription>{formState.errors.disableAutoLogoutOnInactivity.join(', ')}</AlertDescription></Alert>
+            )}
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
-            <CardTitle>Security Configuration</CardTitle>
-            <CardDescription>(Functionality pending for separate security settings saving)</CardDescription>
+            <CardTitle>Other Security Features</CardTitle>
+            <CardDescription>(Functionality pending for IP Whitelisting, 2FA, and Rate Limiting)</CardDescription>
           </CardHeader>
           <CardContent className="space-y-8">
             <div>
@@ -137,9 +196,14 @@ export default function SecuritySettingsPage() {
                 </div>
               </div>
             </div>
+             {formState.errors?.general && (
+                <Alert variant="destructive" className="mt-4">
+                    <AlertDescription>{formState.errors.general.join('; ')}</AlertDescription>
+                </Alert>
+            )}
           </CardContent>
           <CardFooter className="border-t px-6 py-4">
-            <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled>
+            <Button type="submit" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={isPending}>
               {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
               Save Security Settings
             </Button>

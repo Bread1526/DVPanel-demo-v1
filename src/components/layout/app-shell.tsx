@@ -27,7 +27,6 @@ import {
   UserCircle,
   LogOut,
   Replace,
-  ShieldCheck, 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -43,10 +42,11 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/comp
 import { cn } from '@/lib/utils';
 import { useEffect, useState } from 'react';
 import { logout } from '@/app/(app)/logout/actions';
+import { useActivityTracker } from '@/hooks/useActivityTracker';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/projects', label: 'Projects', icon: Layers, count: 5 }, // Project count is mock
+  { href: '/projects', label: 'Projects', icon: Layers, count: 5 },
   { href: '/files', label: 'File Manager', icon: FileText },
   { href: '/ports', label: 'Port Manager', icon: Network },
   { href: '/roles', label: 'User Roles', icon: Users },
@@ -60,6 +60,7 @@ interface CurrentUser {
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  useActivityTracker(); // Initialize activity tracking
   const pathname = usePathname();
   const { state: sidebarState, isMobile } = useSidebar(); 
   const router = useRouter();
@@ -108,17 +109,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <SidebarContent>
           <SidebarMenu>
             {navItems.map((item) => {
-              const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
+              const isActive = item.href === '/' 
+                ? pathname === '/' 
+                : pathname.startsWith(item.href) && item.href !== '/';
               
               const menuButton = (
                 <SidebarMenuButton
+                  href={item.href} // Pass href for the <a> tag
                   isActive={isActive}
                   variant="default"
                   size="default"
+                  // Explicitly destructure and ignore props not meant for <a> if any were added
+                  // For example, if a 'tooltip' prop was on SidebarMenuButton's interface
+                  // but not intended for the final <a> tag, we would handle it here or in SidebarMenuButton.
                 >
                   <item.icon />
                   <span className={cn(
-                    {"invisible group-data-[[data-state=collapsed]]:visible": sidebarState === 'collapsed' && !isMobile }, // For tooltip to work on collapsed
+                    {"invisible group-data-[[data-state=collapsed]]:visible": sidebarState === 'collapsed' && !isMobile }, 
                     {"group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile }
                   )}>
                     {item.label}
@@ -134,26 +141,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               );
 
               let linkWrappedButton = (
-                <Link href={item.href} legacyBehavior passHref>
-                  {menuButton}
-                </Link>
-              );
+                 <Link href={item.href} asChild>
+                   {menuButton}
+                 </Link>
+               );
               
               let finalElement = linkWrappedButton;
 
-              // Only show tooltip if sidebar is collapsed AND it's not a mobile view
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
                  finalElement = (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        {linkWrappedButton}
-                      </TooltipTrigger>
-                      <TooltipContent side="right" align="center">
-                        <p>{item.label}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      {linkWrappedButton}
+                    </TooltipTrigger>
+                    <TooltipContent side="right" align="center">
+                      <p>{item.label}</p>
+                    </TooltipContent>
+                  </Tooltip>
                 );
               }
               
