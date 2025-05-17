@@ -541,14 +541,15 @@ const sidebarMenuButtonVariants = cva(
 )
 
 interface SidebarMenuButtonProps
-  extends React.AnchorHTMLAttributes<HTMLAnchorElement>, 
+  extends React.HTMLAttributes<HTMLSpanElement>, // Changed from HTMLAnchorElement
     VariantProps<typeof sidebarMenuButtonVariants> {
   isActive?: boolean;
-  asChild?: boolean; // Explicitly include asChild to destructure it
+  // href and asChild are explicitly not part of this component's direct props
+  // as they are handled by the parent Link component.
 }
 
 const SidebarMenuButton = React.forwardRef<
-  HTMLAnchorElement, 
+  HTMLSpanElement, // Changed from HTMLAnchorElement
   SidebarMenuButtonProps
 >(
   (
@@ -558,23 +559,28 @@ const SidebarMenuButton = React.forwardRef<
       size,
       isActive,
       children,
-      asChild: _asChild, // Destructure asChild to prevent it from being spread to the DOM element
-      ...otherProps 
+      ...otherProps // href and asChild (if passed) are now in otherProps
     },
     ref
   ) => {
-    // Renders an <a> tag, designed to work with Link asChild
+    // Explicitly remove href and asChild if they somehow make it into otherProps
+    // This is a safeguard, they should be handled by the parent Link.
+    const { href: _href, asChild: _asChild, ...buttonSpecificProps } = otherProps as any;
+
+    // Render a span, styled like a button. The parent <a> from Link handles navigation.
     return (
-      <a 
+      <span // Changed to span
         ref={ref}
         data-sidebar="menu-button"
         data-size={size}
         data-active={String(isActive)}
         className={cn(sidebarMenuButtonVariants({ variant, size, className }))}
-        {...otherProps} 
+        role="button" // Add role for accessibility
+        tabIndex={0}  // Add tabIndex for accessibility
+        {...buttonSpecificProps} 
       >
         {children}
-      </a>
+      </span>
     );
   }
 );

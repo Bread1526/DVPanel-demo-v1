@@ -38,7 +38,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'; 
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'; 
 import { cn } from '@/lib/utils';
 import { useEffect, useState } from 'react';
 import { logout } from '@/app/(app)/logout/actions';
@@ -118,7 +118,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   isActive={isActive}
                   variant="default"
                   size="default"
-                  href={item.href} // Pass href for the <a> tag rendered by SidebarMenuButton
+                  // href={item.href} // href is handled by the parent Link
+                  // onClick prop is also implicitly handled by Link when wrapping a component
                 >
                   <item.icon />
                   <span className={cn(
@@ -139,25 +140,29 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
               let finalElement;
 
+              // Use Link with legacyBehavior and passHref for stable behavior with TooltipTrigger
+              const linkWrappedButton = (
+                 <Link href={item.href} legacyBehavior passHref>
+                   {menuButton}
+                 </Link>
+               );
+
+
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
                  finalElement = (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Link href={item.href} asChild>
-                        {menuButton}
-                      </Link>
-                    </TooltipTrigger>
-                    <TooltipContent side="right" align="center">
-                      <p>{item.label}</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        {linkWrappedButton}
+                      </TooltipTrigger>
+                      <TooltipContent side="right" align="center">
+                        <p>{item.label}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 );
               } else {
-                finalElement = (
-                  <Link href={item.href} asChild>
-                    {menuButton}
-                  </Link>
-                );
+                finalElement = linkWrappedButton;
               }
               
               return (
