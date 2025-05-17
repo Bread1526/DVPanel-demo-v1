@@ -1,10 +1,9 @@
-
 "use client"
 
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
-import type { VariantProps } from "class-variance-authority"
-import { cva } from "class-variance-authority"
+// import type { VariantProps } from "class-variance-authority" // No longer needed here
+// import { cva } from "class-variance-authority" // Moved to AppShell
 import { PanelLeft } from "lucide-react"
 
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -518,61 +517,46 @@ const SidebarMenuItem = React.forwardRef<
 ))
 SidebarMenuItem.displayName = "SidebarMenuItem"
 
-const sidebarMenuButtonVariants = cva(
-  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-none ring-sidebar-ring transition-[width,height,padding] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-[[data-sidebar=menu-action]]/menu-item:pr-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground group-data-[state=collapsed]:group-data-[collapsible=icon]:!size-8 group-data-[state=collapsed]:group-data-[collapsible=icon]:!p-2 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0",
+export const SidebarMenuItemLayout = React.forwardRef<
+  HTMLDivElement,
   {
-    variants: {
-      variant: {
-        default: "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-        outline:
-          "bg-background shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-accent))]",
-      },
-      size: {
-        default: "h-8 text-sm",
-        sm: "h-7 text-xs",
-        lg: "h-12 text-sm group-data-[state=collapsed]:group-data-[collapsible=icon]:!p-0", 
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-      size: "default",
-    },
+    icon?: React.ElementType;
+    label?: string;
+    badgeContent?: React.ReactNode;
+    showText?: boolean;
+    size?: "default" | "sm" | "lg";
+    className?: string;
   }
-)
-
-export interface SidebarMenuButtonProps
-  extends React.AnchorHTMLAttributes<HTMLAnchorElement>,
-    VariantProps<typeof sidebarMenuButtonVariants> {
-  isActive?: boolean;
-}
-
-const SidebarMenuButton = React.memo(React.forwardRef<
-  HTMLAnchorElement,
-  SidebarMenuButtonProps
 >(
   (
-    { className, variant, size, isActive, children, ...props },
+    {
+      icon: Icon,
+      label,
+      badgeContent,
+      showText,
+      size = "default", // Default size, can be adjusted
+      className,
+    },
     ref
   ) => {
-    // Renders an <a> tag, designed to work with Link asChild
-    // Explicitly destructure asChild and do not spread it to the <a> element.
-    const { asChild: _asChild, ...anchorProps } = props;
-
     return (
-      <a 
+      <div
         ref={ref}
-        data-sidebar="menu-button"
-        data-size={size}
-        data-active={isActive ? 'true' : undefined}
-        className={cn(sidebarMenuButtonVariants({ variant, size, className }))}
-        {...anchorProps} // Spread href, onClick, etc.
+        className={cn(
+          "flex w-full items-center gap-2 overflow-hidden",
+          // Padding is now controlled by the parent Link/<a>
+          className
+        )}
+        data-sidebar="menu-item-layout"
       >
-        {children}
-      </a>
+        {Icon && <Icon className={cn("shrink-0", size === "lg" ? "size-5" : "size-4")} />}
+        {showText && label && <span className="truncate">{label}</span>}
+        {showText && badgeContent }
+      </div>
     );
   }
-));
-SidebarMenuButton.displayName = "SidebarMenuButton"
+);
+SidebarMenuItemLayout.displayName = "SidebarMenuItemLayout";
 
 
 const SidebarMenuAction = React.forwardRef<
@@ -591,6 +575,7 @@ const SidebarMenuAction = React.forwardRef<
       className={cn(
         "absolute right-1 top-1.5 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground outline-none ring-sidebar-ring transition-transform hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 peer-hover/menu-button:text-sidebar-accent-foreground [&>svg]:size-4 [&>svg]:shrink-0",
         "after:absolute after:-inset-2 after:md:hidden",
+        // These peer-data attributes refer to the parent Link/<a> tag which would have these size classes
         "peer-data-[size=sm]/menu-button:top-1",
         "peer-data-[size=default]/menu-button:top-1.5",
         "peer-data-[size=lg]/menu-button:top-2.5",
@@ -613,11 +598,9 @@ const SidebarMenuBadge = React.forwardRef<
     ref={ref}
     data-sidebar="menu-badge"
     className={cn(
-      "absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-sidebar-foreground select-none pointer-events-none",
+      "ml-auto flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-sidebar-foreground select-none pointer-events-none", // Added ml-auto
+      // These peer-data attributes refer to the parent Link/<a> tag
       "peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[active=true]/menu-button:text-sidebar-accent-foreground",
-      "peer-data-[size=sm]/menu-button:top-1",
-      "peer-data-[size=default]/menu-button:top-1.5",
-      "peer-data-[size=lg]/menu-button:top-2.5",
       "group-data-[state=collapsed]:group-data-[collapsible=icon]:hidden", 
       className
     )}
@@ -701,7 +684,7 @@ const SidebarMenuSubButton = React.forwardRef<
       ref={ref}
       data-sidebar="menu-sub-button"
       data-size={size}
-      data-active={isActive}
+      data-active={isActive ? 'true' : undefined}
       className={cn(
         "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-2 text-sidebar-foreground outline-none ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
         "data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground",
@@ -730,7 +713,7 @@ export {
   SidebarMenu,
   SidebarMenuAction,
   SidebarMenuBadge,
-  SidebarMenuButton,
+  SidebarMenuItemLayout,
   SidebarMenuItem,
   SidebarMenuSkeleton,
   SidebarMenuSub,
@@ -742,5 +725,3 @@ export {
   SidebarTrigger,
   useSidebar,
 }
-
-    
