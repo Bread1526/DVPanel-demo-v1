@@ -14,6 +14,7 @@ import {
   SidebarMenuItemLayout,
   SidebarMenuBadge,
   useSidebar,
+  SidebarProvider, // Ensured SidebarProvider is imported if used here, but it's in (app)/layout.tsx
 } from '@/components/ui/sidebar';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -23,7 +24,6 @@ import {
   FileText,
   Network,
   Users,
-  Settings,
   LogOut,
   Replace,
   AlertTriangle,
@@ -33,9 +33,12 @@ import {
   ShieldCheck,
   UserCog,
   SlidersHorizontal,
+  UserCircle, // For Profile
+  ScrollText, // For Panel Logs
+  Settings as SettingsIcon, // Renamed to avoid conflict if local Settings var is used
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'; // Removed AvatarImage
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,7 +48,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
-import { cn, } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { logout as serverLogoutAction } from '@/app/(app)/logout/actions';
 import { useActivityTracker } from '@/hooks/useActivityTracker';
 import type { AuthenticatedUser } from '@/lib/session';
@@ -53,7 +56,7 @@ import AccessDeniedOverlay from './access-denied-overlay';
 import { useToast } from "@/hooks/use-toast";
 import { cva } from 'class-variance-authority';
 import ProfileDialog from '@/app/(app)/profile/components/profile-dialog';
-import { loadPanelSettings } from '@/app/(app)/settings/actions';
+import { loadPanelSettings } from '@/app/(app)/settings/actions'; // For debug mode check
 
 const navItemsBase = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, requiredPage: 'dashboard' },
@@ -61,7 +64,7 @@ const navItemsBase = [
   { href: '/files', label: 'File Manager', icon: FileText, requiredPage: 'files' },
   { href: '/ports', label: 'Port Manager', icon: Network, requiredPage: 'ports' },
   { href: '/roles', label: 'User Roles', icon: Users, requiredPage: 'roles' },
-  { href: '/settings', label: 'Settings', icon: Settings, requiredPage: 'settings_area' },
+  { href: '/settings', label: 'Settings', icon: SettingsIcon, requiredPage: 'settings_area' },
 ];
 
 interface ApiAuthUserResponse {
@@ -104,7 +107,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [currentUserData, setCurrentUserData] = useState<AuthenticatedUser | null>(null);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [isPageAccessGranted, setIsPageAccessGranted] = useState<boolean | null>(null);
-  const [userDebugMode, setUserDebugMode] = useState(false); // For AppShell specific debug logs, defaults to false
+  const [userDebugMode, setUserDebugMode] = useState(false);
   const [isPendingLogout, startLogoutTransition] = useTransition();
   const [hasMounted, setHasMounted] = useState(false);
 
@@ -116,7 +119,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (userDebugMode) console.log('[AppShell] performLogout initiated.', { reason });
     startLogoutTransition(async () => {
       try {
-        // Pass username and role if available, for server-side session file deletion
         const usernameToLogout = currentUserData?.username;
         const roleToLogout = currentUserData?.role;
         await serverLogoutAction(usernameToLogout, roleToLogout);
@@ -133,13 +135,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         const error = e instanceof Error ? e.message : String(e);
         console.error("[AppShell] Error calling server logout action:", error);
         toast({ title: "Logout Error", description: `Failed to logout: ${error}`, variant: "destructive" });
-        // Still attempt to clear client state and redirect
         setCurrentUserData(null);
         setIsPageAccessGranted(false);
         router.push(`/login${reason ? `?reason=${reason}_server_error` : '?reason=server_error'}`);
       }
     });
-  }, [router, userDebugMode, toast, currentUserData?.username, currentUserData?.role]);
+  }, [router, userDebugMode, toast, currentUserData?.username, currentUserData?.role, startLogoutTransition]);
 
   const fetchUserAndCheckAccess = useCallback(async () => {
     if (!hasMounted) return;
@@ -147,14 +148,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setIsLoadingUser(true);
     setIsPageAccessGranted(null);
     
-    let initialDebugMode = false;
-    try {
-      const globalSettings = await loadPanelSettings();
-      if (globalSettings.status === 'success' && globalSettings.data) {
-        // Global debug mode is no longer stored in panel settings directly.
-        // User-specific debug mode will be fetched with user data.
-      }
-    } catch { /* ignore, use default false for initial logging */ }
+    let initialDebugMode = false; // For initial AppShell logging before user settings are fetched
 
     if (initialDebugMode) console.log('[AppShell] Attempting to fetch /api/auth/user');
 
@@ -178,7 +172,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       const data: ApiAuthUserResponse = await response.json();
       if (data.user && data.user.status === 'Active') {
         setCurrentUserData(data.user);
-        // Set AppShell's userDebugMode based on fetched user settings
         const fetchedUserDebugMode = data.user.userSettings?.debugMode ?? initialDebugMode;
         setUserDebugMode(fetchedUserDebugMode); 
         if (fetchedUserDebugMode || initialDebugMode) {
@@ -191,7 +184,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           });
         }
       } else {
-        if (initialDebugMode) console.warn('[AppShell] No active user data in response from /api/auth/user. User object:', data.user);
+        if (initialDebugMode || userDebugMode) console.warn('[AppShell] No active user data in response from /api/auth/user. User object:', data.user);
         if (pathname !== '/login') {
            performLogout(data.user?.status === 'Inactive' ? 'account_inactive' : 'unauthorized_no_user_data');
         } else {
@@ -201,7 +194,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
     } catch (error) {
       const e = error instanceof Error ? error : new Error(String(error));
-      if (initialDebugMode) console.error("[AppShell] Error in fetchUserAndCheckAccess during API call:", e.message, e.stack);
+      if (initialDebugMode || userDebugMode) console.error("[AppShell] Error in fetchUserAndCheckAccess during API call:", e.message, e.stack);
       if (pathname !== '/login') {
         performLogout('session_error_catch');
       } else {
@@ -209,9 +202,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       }
     } finally {
       setIsLoadingUser(false);
-      if (initialDebugMode) console.log('[AppShell] fetchUserAndCheckAccess finished. isLoadingUser:', false);
+      if (initialDebugMode || userDebugMode) console.log('[AppShell] fetchUserAndCheckAccess finished. isLoadingUser:', false);
     }
-  }, [pathname, performLogout, hasMounted]); 
+  }, [pathname, performLogout, hasMounted, userDebugMode]); 
 
 
   useEffect(() => {
@@ -235,34 +228,41 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     
     let requiredPageId = navItemsBase.find(item => {
       if (item.href === '/') return currentTopLevelPath === '/';
-      if (item.href === '/settings') return pathname.startsWith('/settings'); 
+      if (item.href === '/settings') return pathname.startsWith('/settings');
+      if (item.href === '/logs') return pathname.startsWith('/logs'); 
       return currentTopLevelPath.startsWith(item.href);
     })?.requiredPage;
   
     if (!requiredPageId && currentTopLevelPath === '/') requiredPageId = 'dashboard';
-  
+    if (!requiredPageId && currentTopLevelPath === '/logs') requiredPageId = 'logs_page'; // Assuming 'logs_page' is the ID for logs page access
+
     if (userDebugMode) console.log(`[AppShell] Page access check for path: "${pathname}", topLevelPath: "${currentTopLevelPath}", effectiveUser role: "${effectiveUser.role}", requiredPageId: "${requiredPageId}"`);
   
     if (effectiveUser.status === 'Inactive') {
       hasAccess = false;
       if (userDebugMode) console.log('[AppShell] Page access: Denied (User Inactive)');
     } else if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') {
-      hasAccess = true;
-      if (userDebugMode) console.log('[AppShell] Page access: Granted (Owner/Administrator)');
+      // Owner and Admin have access to logs.
+      // For other pages, they have access if it's a base nav item or settings.
+      if (requiredPageId === 'logs_page') hasAccess = true;
+      else hasAccess = !!navItemsBase.find(item => item.requiredPage === requiredPageId) || requiredPageId === 'settings_area';
+
+      if (userDebugMode) console.log(`[AppShell] Page access (Owner/Administrator for ${requiredPageId || pathname}): ${hasAccess}`);
     } else if (effectiveUser.role === 'Admin') {
-      if (requiredPageId && requiredPageId === 'settings_area') {
-         hasAccess = effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
-        if (hasAccess && pathSegments[0] === 'settings' && pathSegments[1]) { 
-          const specificSettingPage = `settings_${pathSegments[1]}`;
-          hasAccess = effectiveUser.allowedSettingsPages?.includes(specificSettingPage) ?? false;
+        const adminAllowedAppPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles', 'logs_page']; 
+        if (requiredPageId && requiredPageId === 'settings_area') {
+            hasAccess = effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
+            if (hasAccess && pathSegments[0] === 'settings' && pathSegments[1]) { 
+                const specificSettingPage = `settings_${pathSegments[1]}`;
+                hasAccess = effectiveUser.allowedSettingsPages?.includes(specificSettingPage) ?? false;
+            }
+        } else if (requiredPageId) { 
+            hasAccess = adminAllowedAppPages.includes(requiredPageId);
+        } else {
+            hasAccess = false; 
         }
-      } else if (requiredPageId) { 
-        const adminAllowedAppPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles']; 
-        hasAccess = adminAllowedAppPages.includes(requiredPageId);
-      } else {
-        hasAccess = false; 
-      }
-      if (userDebugMode) console.log(`[AppShell] Page access (Admin for ${requiredPageId || pathname}): ${hasAccess}`);
+        if (userDebugMode) console.log(`[AppShell] Page access (Admin for ${requiredPageId || pathname}): ${hasAccess}`);
+
     } else if (effectiveUser.role === 'Custom' && effectiveUser.assignedPages) {
       if (requiredPageId && requiredPageId === 'settings_area') {
         hasAccess = effectiveUser.assignedPages.includes('settings_area'); 
@@ -289,6 +289,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (!hasMounted) return false;
     if (itemHref === '/') return pathname === '/';
     if (itemHref === '/settings') return pathname === '/settings' || pathname.startsWith('/settings/');
+    if (itemHref === '/logs') return pathname === '/logs' || pathname.startsWith('/logs/'); // Added for logs page
     return pathname.startsWith(itemHref);
   }, [pathname, hasMounted]);
 
@@ -299,7 +300,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       if (item.requiredPage === 'settings_area') {
         return effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
       }
-      const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles'];
+      const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles', 'logs_page']; // Added logs_page
       return item.requiredPage ? adminAllowedPages.includes(item.requiredPage) : true;
     }
     if (effectiveUser.role === 'Custom' && item.requiredPage) {
@@ -328,7 +329,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
     );
   } else if (pathname === '/login' && !isLoadingUser && !effectiveUser) {
-    // This case might not be reached if middleware redirects already
     pageContent = children;
   }
   else {
@@ -417,7 +417,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="w-full justify-start gap-2 px-2">
                 <Avatar className="h-8 w-8">
-                  {/* AvatarImage removed to always show Fallback */}
                   <AvatarFallback>
                     {(!hasMounted || isLoadingUser || !effectiveUser) ? 'L' : effectiveUser.username?.[0]?.toUpperCase() ?? 'U'}
                   </AvatarFallback>
@@ -436,9 +435,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <DropdownMenuLabel>My Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {ProfileDialog && <ProfileDialog currentUser={currentUserData} onSettingsUpdate={handleSettingsUpdated} />}
-              <DropdownMenuItem onClick={() => router.push('/settings')}>
-                <Settings className="mr-2 h-4 w-4" />
-                <span>Panel Settings</span>
+              <DropdownMenuItem onClick={() => router.push('/logs')}>
+                <ScrollText className="mr-2 h-4 w-4" />
+                <span>Panel Logs</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => performLogout('user_initiated')} disabled={!hasMounted || isLoadingUser || !effectiveUser || isPendingLogout}>
@@ -466,7 +465,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             )}>
           <SidebarTrigger className="md:hidden" /> 
            <div className="md:hidden group-data-[variant=inset]/sidebar-wrapper:md:flex group-data-[variant=inset]/sidebar-wrapper:md:items-center">
-           {/* Placeholder for potential future header content specific to inset variant */}
           </div>
         </header>
         <main className="flex-1 p-4 sm:p-6 md:p-8">
