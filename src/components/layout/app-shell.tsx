@@ -29,6 +29,7 @@ import {
   Replace,
   EyeOff, 
   AlertTriangle, 
+  ShieldCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -42,7 +43,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'; 
 import { cn } from '@/lib/utils';
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useState, useTransition, useCallback } from 'react';
 import { logout } from '@/app/(app)/logout/actions';
 import { useActivityTracker } from '@/hooks/useActivityTracker';
 import { stopImpersonation, type FullUserData } from '@/app/(app)/roles/actions'; 
@@ -51,7 +52,7 @@ import { useToast } from '@/hooks/use-toast';
 
 const navItemsBase = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, requiredPage: 'dashboard' },
-  { href: '/projects', label: 'Projects', icon: Layers, count: 0, requiredPage: 'projects_page' }, // Count set to 0
+  { href: '/projects', label: 'Projects', icon: Layers, count: 0, requiredPage: 'projects_page' },
   { href: '/files', label: 'File Manager', icon: FileText, requiredPage: 'files' },
   { href: '/ports', label: 'Port Manager', icon: Network, requiredPage: 'ports' },
   { href: '/roles', label: 'User Roles', icon: Users, requiredPage: 'roles' }, 
@@ -59,7 +60,7 @@ const navItemsBase = [
 ];
 
 interface AuthApiResponse {
-  user: FullUserData | null; // Use FullUserData to include all permission fields
+  user: FullUserData | null;
   isLoggedIn: boolean;
   isImpersonating?: boolean;
   originalUsername?: string;
@@ -81,26 +82,29 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   });
   const [isLoadingUser, setIsLoadingUser] = useState(true);
 
-  useEffect(() => {
-    async function fetchUser() {
-      setIsLoadingUser(true);
-      try {
-        const res = await fetch('/api/auth/user');
-        if (res.ok) {
-          const data: AuthApiResponse = await res.json();
-          setCurrentUserData(data);
-        } else {
-          setCurrentUserData({ user: null, isLoggedIn: false, isImpersonating: false });
-        }
-      } catch (error) {
-        console.error("Failed to fetch user", error);
+  const fetchUserCallback = useCallback(async () => {
+    setIsLoadingUser(true);
+    try {
+      const res = await fetch('/api/auth/user');
+      if (res.ok) {
+        const data: AuthApiResponse = await res.json();
+        setCurrentUserData(data);
+        // console.log('[AppShell] Fetched user data:', data);
+      } else {
         setCurrentUserData({ user: null, isLoggedIn: false, isImpersonating: false });
-      } finally {
-        setIsLoadingUser(false);
+        // console.error('[AppShell] Failed to fetch user, status:', res.status);
       }
+    } catch (error) {
+      console.error("[AppShell] Error fetching user:", error);
+      setCurrentUserData({ user: null, isLoggedIn: false, isImpersonating: false });
+    } finally {
+      setIsLoadingUser(false);
     }
-    fetchUser();
-  }, [pathname]); 
+  }, []);
+
+  useEffect(() => {
+    fetchUserCallback();
+  }, [fetchUserCallback, pathname]); // Re-fetch on pathname change for impersonation status update
 
   const handleLogout = async () => {
     await logout();
@@ -109,9 +113,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const handleStopImpersonation = async () => {
     startStopImpersonationTransition(async () => {
       try {
-        await stopImpersonation(); // Action handles redirection
-        // Toast might not be seen due to redirect, but useful if redirect fails.
-        // The user data will re-fetch due to pathname change (redirect)
+        await stopImpersonation(); 
+        await fetchUserCallback(); // Re-fetch user data to update AppShell state
       } catch (error) {
         toast({ title: "Error", description: "Failed to stop impersonation.", variant: "destructive" });
       }
@@ -119,25 +122,42 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   };
   
   const effectiveUser = currentUserData.user;
+
+  // DEBUGGING LOGS START
+  console.log('[AppShell] currentUserData:', JSON.stringify(currentUserData, null, 2));
+  console.log('[AppShell] effectiveUser:', JSON.stringify(effectiveUser, null, 2));
+  // DEBUGGING LOGS END
+
   const navItems = navItemsBase.filter(item => {
-    if (!effectiveUser) return false; 
-    if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') return true;
+    if (!effectiveUser) {
+      // console.log('[AppShell] No effectiveUser, filtering out item:', item.label);
+      return false;
+    }
+    if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') {
+      // console.log('[AppShell] Owner/Admin, allowing item:', item.label);
+      return true;
+    }
     
     if (effectiveUser.role === 'Custom' && item.requiredPage) {
-      return effectiveUser.assignedPages?.includes(item.requiredPage);
+      const canAccess = effectiveUser.assignedPages?.includes(item.requiredPage) ?? false;
+      // console.log(`[AppShell] Custom role, item: ${item.label}, requiredPage: ${item.requiredPage}, assignedPages: ${effectiveUser.assignedPages}, canAccess: ${canAccess}`);
+      return canAccess;
     }
-    // For 'Admin' role, more complex logic might be needed if their page access isn't just "all standard pages"
-    // For now, let's assume 'Admin' can access all base pages if they have any project access,
-    // or define a specific list of pages they can always access.
-    // This is a placeholder and should be refined based on precise 'Admin' role page permissions.
+    
     if (effectiveUser.role === 'Admin') {
-        // Example: Admins can see Dashboard, Projects, Files, Ports, their Settings.
         const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'settings_area'];
-        return item.requiredPage ? adminAllowedPages.includes(item.requiredPage) : true;
+        const canAccess = item.requiredPage ? adminAllowedPages.includes(item.requiredPage) : true;
+        // console.log(`[AppShell] Admin role, item: ${item.label}, requiredPage: ${item.requiredPage}, canAccess: ${canAccess}`);
+        return canAccess;
     }
+    // console.log('[AppShell] Role not matched or no permissions, filtering out item:', item.label);
     return false; 
   });
 
+  // DEBUGGING LOGS START
+  console.log('[AppShell] Filtered navItems count:', navItems.length);
+  console.log('[AppShell] Filtered navItems (labels):', JSON.stringify(navItems.map(n => n.label)));
+  // DEBUGGING LOGS END
 
   return (
     <>
@@ -156,42 +176,41 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 : pathname.startsWith(item.href) && item.href !== '/';
               
               const menuButton = (
-                <SidebarMenuButton
-                  isActive={isActive}
-                  variant="default"
-                  size="default"
-                   // href, onClick, ref are passed by Link asChild, then by TooltipTrigger asChild
-                >
-                  <item.icon />
-                  <span className={cn(
-                    {"invisible group-data-[[data-state=collapsed]]:visible": sidebarState === 'collapsed' && !isMobile }, 
-                    {"group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile }
-                  )}>
-                    {item.label}
-                  </span>
-                  {item.count > 0 && ( // Conditionally render badge if count > 0
-                     <SidebarMenuBadge className={cn(
-                       {"group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile}
-                     )}>
-                       {item.count}
-                     </SidebarMenuBadge>
-                  )}
-                </SidebarMenuButton>
+                 <SidebarMenuButton
+                    isActive={isActive}
+                    variant="default"
+                    size="default"
+                  >
+                    <item.icon />
+                    <span className={cn(
+                      {"invisible group-data-[[data-state=collapsed]]:visible": sidebarState === 'collapsed' && !isMobile }, 
+                      {"group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile }
+                    )}>
+                      {item.label}
+                    </span>
+                    {item.count > 0 && (
+                       <SidebarMenuBadge className={cn(
+                         {"group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile}
+                       )}>
+                         {item.count}
+                       </SidebarMenuBadge>
+                    )}
+                  </SidebarMenuButton>
               );
+
+              let linkWrappedButton = (
+                 <Link href={item.href} asChild>
+                   {menuButton}
+                 </Link>
+               );
 
               let finalElement;
-              const linkElement = (
-                <Link href={item.href} asChild>
-                  {menuButton}
-                </Link>
-              );
-
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
                  finalElement = (
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        {linkElement}
+                        {linkWrappedButton}
                       </TooltipTrigger>
                       <TooltipContent side="right" align="center">
                         <p>{item.label}</p>
@@ -200,7 +219,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   </TooltipProvider>
                 );
               } else {
-                finalElement = linkElement;
+                finalElement = linkWrappedButton;
               }
               
               return (
@@ -220,7 +239,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <AvatarFallback>{isLoadingUser ? 'L' : effectiveUser?.username?.[0]?.toUpperCase() ?? 'U'}</AvatarFallback>
                 </Avatar>
                 <span className={cn(
-                  "truncate", // Ensure text truncates if too long
+                  "truncate", 
                   {"hidden": sidebarState === 'collapsed' && !isMobile}
                 )}>
                   {isLoadingUser ? "Loading..." : effectiveUser?.username ?? "Not Logged In"}
@@ -280,7 +299,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         )}
         <header className={cn("sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/80 px-4 backdrop-blur-sm sm:h-16 sm:px-6 md:px-8",
-          currentUserData.isImpersonating && "top-[40px]" // Adjust if banner is present, assuming banner height is 40px
+          currentUserData.isImpersonating && "top-[40px]"
         )}>
           <SidebarTrigger className="md:hidden" />
         </header>
