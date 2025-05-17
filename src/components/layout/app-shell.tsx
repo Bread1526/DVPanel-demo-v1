@@ -27,9 +27,10 @@ import {
   UserCircle,
   LogOut,
   Replace,
-  EyeOff, 
-  AlertTriangle, 
+  EyeOff,
+  AlertTriangle,
   ShieldCheck,
+  Eye, // Added for "View Role Details"
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -41,21 +42,21 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'; 
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useEffect, useState, useTransition, useCallback } from 'react';
-import { logout } from '@/app/(app)/logout/actions';
+import { logout } from '@/app/(app)/logout/actions'; 
 import { useActivityTracker } from '@/hooks/useActivityTracker';
-import { stopImpersonation, type FullUserData } from '@/app/(app)/roles/actions'; 
+import { stopImpersonation, type FullUserData } from '@/app/(app)/roles/actions';
 import { useToast } from '@/hooks/use-toast';
-
+import AccessDeniedOverlay from './access-denied-overlay'; // Import the new component
 
 const navItemsBase = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, requiredPage: 'dashboard' },
   { href: '/projects', label: 'Projects', icon: Layers, count: 0, requiredPage: 'projects_page' },
   { href: '/files', label: 'File Manager', icon: FileText, requiredPage: 'files' },
   { href: '/ports', label: 'Port Manager', icon: Network, requiredPage: 'ports' },
-  { href: '/roles', label: 'User Roles', icon: Users, requiredPage: 'roles' }, 
+  { href: '/roles', label: 'User Roles', icon: Users, requiredPage: 'roles' },
   { href: '/settings', label: 'Settings', icon: Settings, requiredPage: 'settings_area' },
 ];
 
@@ -67,32 +68,32 @@ interface AuthApiResponse {
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  useActivityTracker(); 
+  useActivityTracker();
   const pathname = usePathname();
-  const { state: sidebarState, isMobile } = useSidebar(); 
+  const { state: sidebarState, isMobile } = useSidebar();
   const router = useRouter();
   const { toast } = useToast();
   const [isPendingStopImpersonation, startStopImpersonationTransition] = useTransition();
 
-  const [currentUserData, setCurrentUserData] = useState<AuthApiResponse>({ 
-    user: null, 
-    isLoggedIn: false, 
-    isImpersonating: false, 
-    originalUsername: undefined 
+  const [currentUserData, setCurrentUserData] = useState<AuthApiResponse>({
+    user: null,
+    isLoggedIn: false,
+    isImpersonating: false,
+    originalUsername: undefined,
   });
   const [isLoadingUser, setIsLoadingUser] = useState(true);
+  const [isPageAccessGranted, setIsPageAccessGranted] = useState<boolean | null>(null);
 
   const fetchUserCallback = useCallback(async () => {
     setIsLoadingUser(true);
+    setIsPageAccessGranted(null); // Reset while loading
     try {
       const res = await fetch('/api/auth/user');
       if (res.ok) {
         const data: AuthApiResponse = await res.json();
         setCurrentUserData(data);
-        // console.log('[AppShell] Fetched user data:', data);
       } else {
         setCurrentUserData({ user: null, isLoggedIn: false, isImpersonating: false });
-        // console.error('[AppShell] Failed to fetch user, status:', res.status);
       }
     } catch (error) {
       console.error("[AppShell] Error fetching user:", error);
@@ -104,7 +105,48 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     fetchUserCallback();
-  }, [fetchUserCallback, pathname]); // Re-fetch on pathname change for impersonation status update
+  }, [fetchUserCallback, pathname]);
+
+  const effectiveUser = currentUserData.user;
+
+  useEffect(() => {
+    if (!isLoadingUser && effectiveUser && currentUserData.isLoggedIn) {
+      let hasAccess = false;
+      if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') {
+        hasAccess = true;
+      } else if (effectiveUser.role === 'Admin') {
+        // Admins have access to core pages by default (Dashboard, Projects, Files, Ports, Settings Area, Roles)
+        const adminAllowedBasePaths = ['/', '/projects', '/files', '/ports', '/roles', '/settings'];
+        hasAccess = adminAllowedBasePaths.some(basePath => pathname === basePath || pathname.startsWith(basePath + '/'));
+      } else if (effectiveUser.role === 'Custom' && effectiveUser.assignedPages) {
+        const currentNavItem = navItemsBase.find(item => pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href + '/')));
+        if (currentNavItem && currentNavItem.requiredPage) {
+          hasAccess = effectiveUser.assignedPages.includes(currentNavItem.requiredPage);
+        } else if (pathname === '/') { // Special case for dashboard if not explicitly in navItems with requiredPage
+             hasAccess = effectiveUser.assignedPages.includes('dashboard');
+        }
+      }
+      setIsPageAccessGranted(hasAccess);
+    } else if (!isLoadingUser && !currentUserData.isLoggedIn) {
+      // If not logged in, middleware handles redirection. Client-side, assume no access.
+      setIsPageAccessGranted(false); 
+    }
+  }, [isLoadingUser, effectiveUser, currentUserData.isLoggedIn, pathname]);
+
+
+  const navItems = navItemsBase.filter(item => {
+    if (!effectiveUser) return false;
+    if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') return true;
+    if (effectiveUser.role === 'Admin') {
+        // More specific page access for Admins if needed, for now same as Administrator for core pages
+        const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'settings_area', 'roles'];
+        return item.requiredPage ? adminAllowedPages.includes(item.requiredPage) : true;
+    }
+    if (effectiveUser.role === 'Custom' && item.requiredPage) {
+      return effectiveUser.assignedPages?.includes(item.requiredPage) ?? false;
+    }
+    return false;
+  });
 
   const handleLogout = async () => {
     await logout();
@@ -113,51 +155,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const handleStopImpersonation = async () => {
     startStopImpersonationTransition(async () => {
       try {
-        await stopImpersonation(); 
-        await fetchUserCallback(); // Re-fetch user data to update AppShell state
+        await stopImpersonation();
+        await fetchUserCallback(); 
       } catch (error) {
         toast({ title: "Error", description: "Failed to stop impersonation.", variant: "destructive" });
       }
     });
   };
   
-  const effectiveUser = currentUserData.user;
-
-  // DEBUGGING LOGS START
-  console.log('[AppShell] currentUserData:', JSON.stringify(currentUserData, null, 2));
-  console.log('[AppShell] effectiveUser:', JSON.stringify(effectiveUser, null, 2));
-  // DEBUGGING LOGS END
-
-  const navItems = navItemsBase.filter(item => {
-    if (!effectiveUser) {
-      // console.log('[AppShell] No effectiveUser, filtering out item:', item.label);
-      return false;
-    }
-    if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') {
-      // console.log('[AppShell] Owner/Admin, allowing item:', item.label);
-      return true;
-    }
-    
-    if (effectiveUser.role === 'Custom' && item.requiredPage) {
-      const canAccess = effectiveUser.assignedPages?.includes(item.requiredPage) ?? false;
-      // console.log(`[AppShell] Custom role, item: ${item.label}, requiredPage: ${item.requiredPage}, assignedPages: ${effectiveUser.assignedPages}, canAccess: ${canAccess}`);
-      return canAccess;
-    }
-    
-    if (effectiveUser.role === 'Admin') {
-        const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'settings_area'];
-        const canAccess = item.requiredPage ? adminAllowedPages.includes(item.requiredPage) : true;
-        // console.log(`[AppShell] Admin role, item: ${item.label}, requiredPage: ${item.requiredPage}, canAccess: ${canAccess}`);
-        return canAccess;
-    }
-    // console.log('[AppShell] Role not matched or no permissions, filtering out item:', item.label);
-    return false; 
-  });
-
-  // DEBUGGING LOGS START
-  console.log('[AppShell] Filtered navItems count:', navItems.length);
-  console.log('[AppShell] Filtered navItems (labels):', JSON.stringify(navItems.map(n => n.label)));
-  // DEBUGGING LOGS END
+  const menuButtonRef = React.useRef<HTMLSpanElement>(null); // Changed ref type for span
 
   return (
     <>
@@ -171,46 +177,44 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <SidebarContent>
           <SidebarMenu>
             {navItems.map((item) => {
-              const isActive = item.href === '/' 
-                ? pathname === '/' 
+              const isActive = item.href === '/'
+                ? pathname === '/'
                 : pathname.startsWith(item.href) && item.href !== '/';
-              
-              const menuButton = (
-                 <SidebarMenuButton
-                    isActive={isActive}
-                    variant="default"
-                    size="default"
-                  >
-                    <item.icon />
-                    <span className={cn(
-                      {"invisible group-data-[[data-state=collapsed]]:visible": sidebarState === 'collapsed' && !isMobile }, 
-                      {"group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile }
-                    )}>
-                      {item.label}
-                    </span>
-                    {item.count > 0 && (
-                       <SidebarMenuBadge className={cn(
-                         {"group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile}
-                       )}>
-                         {item.count}
-                       </SidebarMenuBadge>
-                    )}
-                  </SidebarMenuButton>
-              );
 
-              let linkWrappedButton = (
-                 <Link href={item.href} asChild>
-                   {menuButton}
-                 </Link>
-               );
+              const menuButton = (
+                <SidebarMenuButton
+                  ref={menuButtonRef} 
+                  isActive={isActive}
+                  variant="default"
+                  size="default"
+                  // href prop is handled by Link passHref
+                >
+                  <item.icon />
+                  <span className={cn(
+                    { "invisible group-data-[[data-state=collapsed]]:visible": sidebarState === 'collapsed' && !isMobile },
+                    { "group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile }
+                  )}>
+                    {item.label}
+                  </span>
+                  {item.count > 0 && (
+                    <SidebarMenuBadge className={cn(
+                      { "group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile }
+                    )}>
+                      {item.count}
+                    </SidebarMenuBadge>
+                  )}
+                </SidebarMenuButton>
+              );
 
               let finalElement;
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
-                 finalElement = (
+                finalElement = (
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        {linkWrappedButton}
+                        <Link href={item.href} legacyBehavior passHref>
+                           {menuButton}
+                        </Link>
                       </TooltipTrigger>
                       <TooltipContent side="right" align="center">
                         <p>{item.label}</p>
@@ -219,9 +223,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   </TooltipProvider>
                 );
               } else {
-                finalElement = linkWrappedButton;
+                finalElement = (
+                  <Link href={item.href} legacyBehavior passHref>
+                    {menuButton}
+                  </Link>
+                );
               }
-              
+
               return (
                 <SidebarMenuItem key={item.label}>
                   {finalElement}
@@ -231,16 +239,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </SidebarMenu>
         </SidebarContent>
         <SidebarFooter className="p-4 flex flex-col gap-2">
-           <DropdownMenu>
+          <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="w-full justify-start gap-2 px-2">
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src="https://placehold.co/100x100.png" alt="User" data-ai-hint="user avatar"/>
+                  <AvatarImage src="https://placehold.co/100x100.png" alt="User" data-ai-hint="user avatar" />
                   <AvatarFallback>{isLoadingUser ? 'L' : effectiveUser?.username?.[0]?.toUpperCase() ?? 'U'}</AvatarFallback>
                 </Avatar>
                 <span className={cn(
-                  "truncate", 
-                  {"hidden": sidebarState === 'collapsed' && !isMobile}
+                  "truncate",
+                  { "hidden": sidebarState === 'collapsed' && !isMobile }
                 )}>
                   {isLoadingUser ? "Loading..." : effectiveUser?.username ?? "Not Logged In"}
                   {currentUserData.isImpersonating && currentUserData.originalUsername && (
@@ -263,7 +271,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <DropdownMenuSeparator />
                 </>
               )}
-              <DropdownMenuItem disabled={!effectiveUser || currentUserData.isImpersonating}> 
+              <DropdownMenuItem disabled={!effectiveUser || currentUserData.isImpersonating}>
                 <UserCircle className="mr-2 h-4 w-4" />
                 <span>Profile</span>
               </DropdownMenuItem>
@@ -287,14 +295,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <span>
               You are viewing as <strong>{effectiveUser.username}</strong> (Role: {effectiveUser.role}).
             </span>
-            <Button 
-              variant="ghost" 
-              size="sm" 
+            <Button
+              variant="ghost"
+              size="sm"
               className="h-auto p-1 text-current hover:bg-yellow-500/30 dark:hover:bg-yellow-700/30"
               onClick={handleStopImpersonation}
               disabled={isPendingStopImpersonation}
             >
-              <EyeOff className="mr-1 h-3 w-3"/> Stop Viewing
+              <EyeOff className="mr-1 h-3 w-3" /> Stop Viewing
             </Button>
           </div>
         )}
@@ -303,7 +311,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         )}>
           <SidebarTrigger className="md:hidden" />
         </header>
-        <main className="flex-1 p-4 sm:p-6 md:p-8">{children}</main>
+        <main className="flex-1 p-4 sm:p-6 md:p-8">
+          {isLoadingUser || isPageAccessGranted === null ? (
+            <div className="flex justify-center items-center h-64">
+              <svg className="animate-spin h-8 w-8 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </div>
+          ) : isPageAccessGranted ? (
+            children
+          ) : (
+            <AccessDeniedOverlay />
+          )}
+        </main>
       </SidebarInset>
     </>
   );

@@ -7,11 +7,11 @@ import { login, type LoginState } from './actions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from "@/components/ui/checkbox"; // Added Checkbox import
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Replace, AlertCircle, Loader2 } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useSearchParams, useRouter } from 'next/navigation';
 
 const initialLoginState: LoginState = { message: "", status: "idle", errors: {} };
@@ -23,10 +23,9 @@ export default function LoginPage() {
   const router = useRouter();
   const redirectUrl = searchParams.get('redirect');
   const reason = searchParams.get('reason');
+  const [reasonMessage, setReasonMessage] = React.useState<string | null>(null);
 
   useEffect(() => {
-    // Successful login is handled by server-side redirect in the action.
-    // This useEffect primarily handles displaying error toasts or messages.
     if (formState.status === "error" && formState.message) {
       if (!formState.errors?.username && !formState.errors?.password && !formState.errors?._form) {
         toast({
@@ -36,19 +35,18 @@ export default function LoginPage() {
         });
       }
     }
-    if (reason === 'inactive' && !formState.message) { // Show inactive message only once
-        toast({
-            title: "Session Expired",
-            description: "You have been logged out due to inactivity.",
-            variant: "default",
-            duration: 7000,
-        });
-        // Clean the reason from URL to prevent re-showing on refresh
+    if (reason && !reasonMessage) { 
+        if (reason === 'inactive') {
+            setReasonMessage("You have been logged out due to inactivity.");
+        } else if (reason === 'unauthorized') {
+            setReasonMessage("You need to log in to access this page.");
+        }
+        // Clean the reason from URL to prevent re-showing on refresh/re-render without a new redirect
         const newUrl = new URL(window.location.href);
         newUrl.searchParams.delete('reason');
         router.replace(newUrl.toString(), { scroll: false });
     }
-  }, [formState, toast, reason, router]);
+  }, [formState, toast, reason, router, reasonMessage]);
 
   return (
     <Card className="w-full max-w-md shadow-2xl rounded-xl">
@@ -61,9 +59,17 @@ export default function LoginPage() {
       </CardHeader>
       <form action={formAction}>
         <CardContent className="space-y-6">
+          {reasonMessage && (
+            <Alert variant="default" className="bg-primary/10 border-primary/30">
+              <AlertCircle className="h-4 w-4 text-primary" />
+              <AlertTitle>Information</AlertTitle>
+              <AlertDescription>{reasonMessage}</AlertDescription>
+            </Alert>
+          )}
           {formState.status === 'error' && formState.errors?._form && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Login Error</AlertTitle>
               <AlertDescription>{formState.errors._form.join(', ')}</AlertDescription>
             </Alert>
           )}
