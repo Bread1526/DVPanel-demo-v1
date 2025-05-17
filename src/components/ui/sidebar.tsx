@@ -541,31 +541,31 @@ const sidebarMenuButtonVariants = cva(
 )
 
 export interface SidebarMenuButtonProps
-  extends React.AnchorHTMLAttributes<HTMLAnchorElement>, // Changed to AnchorHTMLAttributes
+  extends React.AnchorHTMLAttributes<HTMLAnchorElement>,
     VariantProps<typeof sidebarMenuButtonVariants> {
   isActive?: boolean;
-  // No asChild prop here, it will be handled by wrappers like Link or TooltipTrigger
 }
 
 const SidebarMenuButton = React.memo(React.forwardRef<
-  HTMLAnchorElement, // Changed to HTMLAnchorElement
+  HTMLAnchorElement,
   SidebarMenuButtonProps
 >(
   (
-    { className, variant, size, isActive, children, ...otherProps },
+    { className, variant, size, isActive, children, ...props },
     ref
   ) => {
-    // The asChild prop is explicitly removed from otherProps if passed by a wrapper
-    const { asChild: _asChildIgnored, ...safeProps } = otherProps as any;
+    // Renders an <a> tag, designed to work with Link asChild
+    // Explicitly destructure asChild and do not spread it to the <a> element.
+    const { asChild: _asChild, ...anchorProps } = props;
 
     return (
-      <a // Renders an <a> tag
+      <a 
         ref={ref}
         data-sidebar="menu-button"
         data-size={size}
-        data-active={isActive ? 'true' : undefined} // Set data-active based on isActive prop
+        data-active={isActive ? 'true' : undefined}
         className={cn(sidebarMenuButtonVariants({ variant, size, className }))}
-        {...safeProps} 
+        {...anchorProps} // Spread href, onClick, etc.
       >
         {children}
       </a>
@@ -742,3 +742,5 @@ export {
   SidebarTrigger,
   useSidebar,
 }
+
+    

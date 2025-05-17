@@ -51,7 +51,7 @@ import { useActivityTracker } from '@/hooks/useActivityTracker';
 import { type AuthenticatedUser } from '@/lib/session';
 import AccessDeniedOverlay from './access-denied-overlay';
 import { useToast } from '@/hooks/use-toast';
-import { loadPanelSettings, type PanelSettingsData } from '@/app/(app)/settings/actions';
+import { loadPanelSettings } from '@/app/(app)/settings/actions';
 
 const navItemsBase = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, requiredPage: 'dashboard' },
@@ -70,7 +70,7 @@ interface ApiAuthUserResponse {
 export default function AppShell({ children }: { children: React.ReactNode }) {
   useActivityTracker();
   const pathname = usePathname();
-  const { state: sidebarState, isMobile } = useSidebar();
+  const { state: sidebarState, isMobile } = useSidebar(); // Correctly get from useSidebar
   const router = useRouter();
   const { toast } = useToast();
 
@@ -108,7 +108,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const fetchAppSettings = async () => {
       try {
         const settingsResult = await loadPanelSettings();
-        if (settingsResult.data) {
+        if (settingsResult && settingsResult.data) {
           setDebugMode(settingsResult.data.debugMode ?? false);
         }
       } catch (e) {
@@ -119,7 +119,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!hasMounted) return; 
+    if (!hasMounted) return;
 
     const fetchUserAndCheckAccess = async () => {
       setIsLoadingUser(true);
@@ -140,11 +140,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         const data: ApiAuthUserResponse = await response.json();
         if (debugMode && data.user) {
-            console.log('[AppShell] Data from /api/auth/user:', { id: data.user.id, username: data.user.username, role: data.user.role, status: data.user.status });
+          console.log('[AppShell] Data from /api/auth/user:', { id: data.user.id, username: data.user.username, role: data.user.role, status: data.user.status });
         } else if (debugMode) {
-            console.log('[AppShell] No user data in response from /api/auth/user or user object is null.');
+          console.log('[AppShell] No user data in response from /api/auth/user or user object is null.');
         }
-
 
         if (data.user && data.user.status === 'Active') {
           setCurrentUserData(data.user);
@@ -166,27 +165,26 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     fetchUserAndCheckAccess();
   }, [pathname, debugMode, performLogout, hasMounted]);
 
+  const effectiveUser = currentUserData;
+
   useEffect(() => {
-    if (!hasMounted || isLoadingUser || !currentUserData) {
-      if (debugMode && !isLoadingUser && !currentUserData && hasMounted) console.log('[AppShell] Page access check: No current user data or still loading, access not determined yet.');
-      setIsPageAccessGranted(null); // Explicitly set to null until access is determined
+    if (!hasMounted || isLoadingUser || !effectiveUser) {
+      if (debugMode && !isLoadingUser && !effectiveUser && hasMounted) console.log('[AppShell] Page access check: No current user data or still loading, access not determined yet.');
+      setIsPageAccessGranted(null);
       return;
     }
 
-    const effectiveUser = currentUserData;
     let hasAccess = false;
     const pathSegments = pathname.split('/').filter(Boolean);
     const currentTopLevelPath = pathSegments.length > 0 ? `/${pathSegments[0]}` : '/';
     
     let requiredPageId = navItemsBase.find(item => {
-        if (item.href === '/') return currentTopLevelPath === '/';
-        // For settings, we check if the path starts with /settings
-        if (item.href === '/settings') return currentTopLevelPath.startsWith('/settings');
-        return currentTopLevelPath.startsWith(item.href);
-      })?.requiredPage;
+      if (item.href === '/') return currentTopLevelPath === '/';
+      if (item.href === '/settings') return currentTopLevelPath.startsWith('/settings');
+      return currentTopLevelPath.startsWith(item.href);
+    })?.requiredPage;
 
     if (!requiredPageId && currentTopLevelPath === '/') requiredPageId = 'dashboard';
-
 
     if (debugMode) console.log(`[AppShell] Page access check for path: "${pathname}", topLevelPath: "${currentTopLevelPath}", effectiveUser role: "${effectiveUser.role}", requiredPageId: "${requiredPageId}"`);
 
@@ -199,28 +197,28 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     } else if (effectiveUser.role === 'Admin') {
       if (requiredPageId && requiredPageId === 'settings_area') {
         hasAccess = effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
-        if (hasAccess && pathSegments[0] === 'settings' && pathSegments[1]) { // Check specific setting page
+        if (hasAccess && pathSegments[0] === 'settings' && pathSegments[1]) {
           const specificSettingPage = `settings_${pathSegments[1]}`;
           hasAccess = effectiveUser.allowedSettingsPages?.includes(specificSettingPage) ?? false;
         }
       } else if (requiredPageId) {
-        const adminAllowedAppPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles']; // Admins should have access to roles
+        const adminAllowedAppPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles'];
         hasAccess = adminAllowedAppPages.includes(requiredPageId);
       } else {
-        hasAccess = false; 
+        hasAccess = false;
       }
       if (debugMode) console.log(`[AppShell] Page access (Admin for ${requiredPageId || pathname}): ${hasAccess}`);
     } else if (effectiveUser.role === 'Custom' && effectiveUser.assignedPages) {
       if (requiredPageId && requiredPageId === 'settings_area') {
         hasAccess = effectiveUser.assignedPages.includes('settings_area');
-        if (hasAccess && pathSegments[0] === 'settings' && pathSegments[1]) { // Check specific setting page
+        if (hasAccess && pathSegments[0] === 'settings' && pathSegments[1]) {
           const specificSettingPage = `settings_${pathSegments[1]}`;
           hasAccess = effectiveUser.allowedSettingsPages?.includes(specificSettingPage) ?? false;
         }
       } else if (requiredPageId) {
         hasAccess = effectiveUser.assignedPages.includes(requiredPageId);
       } else {
-        hasAccess = false; 
+        hasAccess = false;
       }
       if (debugMode) console.log(`[AppShell] Page access (Custom for ${requiredPageId || pathname}): ${hasAccess}`);
     } else {
@@ -230,10 +228,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setIsPageAccessGranted(hasAccess);
     if (debugMode) console.log(`[AppShell] Final isPageAccessGranted: ${hasAccess} for path ${pathname}`);
 
-  }, [isLoadingUser, currentUserData, pathname, debugMode, hasMounted]);
+  }, [isLoadingUser, effectiveUser, pathname, debugMode, hasMounted]);
 
-
-  const effectiveUser = currentUserData;
+  const getIsActive = useCallback((itemHref: string) => {
+    if (!hasMounted) return false;
+    if (itemHref === '/') {
+      return pathname === '/';
+    }
+    if (itemHref === '/settings') {
+      return pathname.startsWith('/settings');
+    }
+    return pathname.startsWith(itemHref);
+  }, [pathname, hasMounted]);
 
   const navItems = navItemsBase.filter(item => {
     if (!hasMounted || !effectiveUser || effectiveUser.status === 'Inactive') return false;
@@ -242,7 +248,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       if (item.requiredPage === 'settings_area') {
         return effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
       }
-      // Admins should typically see these pages
       const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles'];
       return item.requiredPage ? adminAllowedPages.includes(item.requiredPage) : true;
     }
@@ -253,7 +258,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   });
 
   let pageContent;
-  if (!hasMounted || isLoadingUser || (currentUserData && isPageAccessGranted === null)) {
+  if (!hasMounted || isLoadingUser || (effectiveUser && isPageAccessGranted === null)) {
     pageContent = (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -264,7 +269,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   } else if (effectiveUser && isPageAccessGranted === false) {
     pageContent = <AccessDeniedOverlay />;
   } else if (!effectiveUser && !isLoadingUser && hasMounted) {
-    // This condition should ideally not be hit often if performLogout redirects quickly
     if (pathname !== '/login') {
       pageContent = (
         <div className="flex justify-center items-center h-64">
@@ -273,10 +277,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       );
     } else {
-      pageContent = children; // Allow login page to render if explicitly on /login
+      pageContent = children; 
     }
   } else {
-    // Default loading state if none of the above conditions are met, or before hasMounted
      pageContent = (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -284,20 +287,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
-
-  // Determine active state for sidebar items
-  const getIsActive = useCallback((itemHref: string) => {
-    if (!hasMounted) return false; // Don't determine active state until mounted
-    if (itemHref === '/') {
-      return pathname === '/';
-    }
-    // For settings, active if path starts with /settings
-    if (itemHref === '/settings') {
-      return pathname.startsWith('/settings');
-    }
-    return pathname.startsWith(itemHref);
-  }, [pathname, hasMounted]);
-
 
   return (
     <>
@@ -311,26 +300,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <SidebarContent>
           <SidebarMenu>
             {navItems.map((item) => {
+              const isActive = getIsActive(item.href);
               const menuButton = (
                 <SidebarMenuButton
-                  isActive={getIsActive(item.href)}
+                  isActive={isActive}
                   variant="default"
                   size="default"
                 >
                   {item.icon && <item.icon />}
-                  <span className={cn("truncate", { "hidden": sidebarState === 'collapsed' && !isMobile && hasMounted })}>
-                    {item.label}
-                  </span>
-                  {item.count !== undefined && item.count > 0 && hasMounted && (
-                    <SidebarMenuBadge className={cn({ "hidden": sidebarState === 'collapsed' && !isMobile })}>
-                      {item.count}
-                    </SidebarMenuBadge>
+                  {(hasMounted && (!isMobile && sidebarState === 'expanded' || isMobile)) && (
+                    <span className="truncate">{item.label}</span>
+                  )}
+                  {item.count !== undefined && item.count > 0 && hasMounted && (!isMobile && sidebarState === 'expanded' || isMobile) && (
+                    <SidebarMenuBadge>{item.count}</SidebarMenuBadge>
                   )}
                 </SidebarMenuButton>
               );
 
               let navElement;
-              if (sidebarState === 'collapsed' && !isMobile && item.label && hasMounted) {
+              if (hasMounted && sidebarState === 'collapsed' && !isMobile) {
                 navElement = (
                   <TooltipProvider>
                     <Tooltip>
@@ -366,9 +354,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     {(!hasMounted || isLoadingUser || !effectiveUser) ? 'L' : effectiveUser.username?.[0]?.toUpperCase() ?? 'U'}
                   </AvatarFallback>
                 </Avatar>
-                <span className={cn("truncate", { "hidden": sidebarState === 'collapsed' && !isMobile && hasMounted })}>
-                  {(!hasMounted || isLoadingUser || !effectiveUser) ? "Loading..." : effectiveUser.username ?? "User"}
-                </span>
+                {(hasMounted && (!isMobile && sidebarState === 'expanded' || isMobile)) && (
+                  <span className="truncate">
+                    {(!hasMounted || isLoadingUser || !effectiveUser) ? "Loading..." : effectiveUser.username ?? "User"}
+                  </span>
+                )}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="right" align="start" className="w-56">
@@ -383,7 +373,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <span>Settings</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => performLogout()} disabled={!hasMounted || isLoadingUser || !effectiveUser || isPendingLogout}>
+              <DropdownMenuItem onClick={performLogout} disabled={!hasMounted || isLoadingUser || !effectiveUser || isPendingLogout}>
                 {isPendingLogout ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
                 <span>Log out</span>
               </DropdownMenuItem>
@@ -402,3 +392,5 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </>
   );
 }
+
+    
