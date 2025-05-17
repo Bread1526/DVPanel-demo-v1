@@ -541,33 +541,31 @@ const sidebarMenuButtonVariants = cva(
 )
 
 export interface SidebarMenuButtonProps
-  extends React.AnchorHTMLAttributes<HTMLAnchorElement>,
+  extends React.AnchorHTMLAttributes<HTMLAnchorElement>, // Changed to AnchorHTMLAttributes
     VariantProps<typeof sidebarMenuButtonVariants> {
   isActive?: boolean;
-  asChild?: boolean; // To explicitly capture and ignore if passed by a wrapper
+  // No asChild prop here, it will be handled by wrappers like Link or TooltipTrigger
 }
 
 const SidebarMenuButton = React.memo(React.forwardRef<
-  HTMLAnchorElement,
+  HTMLAnchorElement, // Changed to HTMLAnchorElement
   SidebarMenuButtonProps
 >(
   (
-    { className, variant, size, isActive, children, asChild: _asChild, ...otherProps },
+    { className, variant, size, isActive, children, ...otherProps },
     ref
   ) => {
-    // _asChild is destructured to remove it from otherProps, ensuring it's not spread onto the <a>
-    // All other props (href, onClick, event handlers from TooltipTrigger) are in 'otherProps'.
+    // The asChild prop is explicitly removed from otherProps if passed by a wrapper
+    const { asChild: _asChildIgnored, ...safeProps } = otherProps as any;
+
     return (
-      <a
+      <a // Renders an <a> tag
         ref={ref}
         data-sidebar="menu-button"
         data-size={size}
-        // data-active attribute is handled by cva using data-[active=true] variant
-        // if isActive is true, the cva variant should apply the active classes
-        // For hydration, ensure isActive is stable server/client initial render
-        {...(isActive && { 'data-active': 'true' })} // Explicitly add data-active if true
+        data-active={isActive ? 'true' : undefined} // Set data-active based on isActive prop
         className={cn(sidebarMenuButtonVariants({ variant, size, className }))}
-        {...otherProps} 
+        {...safeProps} 
       >
         {children}
       </a>

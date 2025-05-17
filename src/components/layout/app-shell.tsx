@@ -70,7 +70,7 @@ interface ApiAuthUserResponse {
 export default function AppShell({ children }: { children: React.ReactNode }) {
   useActivityTracker();
   const pathname = usePathname();
-  const { state: sidebarState, isMobile } = useSidebar(); // isMobile from useSidebar is already client-aware
+  const { state: sidebarState, isMobile } = useSidebar();
   const router = useRouter();
   const { toast } = useToast();
 
@@ -97,7 +97,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       } catch (e) {
         console.error("[AppShell] Error calling server logout action:", e);
         toast({ title: "Logout Error", description: "Failed to logout on server.", variant: "destructive" });
-        setCurrentUserData(null); // Still clear client state
+        setCurrentUserData(null);
         setIsPageAccessGranted(false);
         router.push(`/login${reason ? `?reason=${reason}_server_error` : '?reason=server_error'}`);
       }
@@ -119,7 +119,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!hasMounted) return; // Wait for client mount before fetching user
+    if (!hasMounted) return; 
 
     const fetchUserAndCheckAccess = async () => {
       setIsLoadingUser(true);
@@ -139,13 +139,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         }
 
         const data: ApiAuthUserResponse = await response.json();
-        if (debugMode) console.log('[AppShell] Data from /api/auth/user:', data.user ? { id: data.user.id, username: data.user.username, role: data.user.role } : "No user data");
+        if (debugMode && data.user) {
+            console.log('[AppShell] Data from /api/auth/user:', { id: data.user.id, username: data.user.username, role: data.user.role, status: data.user.status });
+        } else if (debugMode) {
+            console.log('[AppShell] No user data in response from /api/auth/user or user object is null.');
+        }
 
-        if (data.user) {
+
+        if (data.user && data.user.status === 'Active') {
           setCurrentUserData(data.user);
         } else {
-          if (debugMode) console.warn('[AppShell] No user object in successful /api/auth/user response. Performing logout.');
-          performLogout('unauthorized');
+          if (debugMode && data.user) console.warn(`[AppShell] User status is not Active: ${data.user.status}. Logging out.`);
+          else if (debugMode) console.warn('[AppShell] No user object or inactive user in successful /api/auth/user response. Performing logout.');
+          performLogout(data.user?.status === 'Inactive' ? 'account_inactive' : 'unauthorized');
         }
       } catch (error) {
         const e = error instanceof Error ? error : new Error(String(error));
@@ -162,8 +168,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!hasMounted || isLoadingUser || !currentUserData) {
-      if (debugMode && !isLoadingUser && !currentUserData) console.log('[AppShell] Page access check: No current user data or still loading, access not determined yet.');
-      setIsPageAccessGranted(null);
+      if (debugMode && !isLoadingUser && !currentUserData && hasMounted) console.log('[AppShell] Page access check: No current user data or still loading, access not determined yet.');
+      setIsPageAccessGranted(null); // Explicitly set to null until access is determined
       return;
     }
 
@@ -171,12 +177,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     let hasAccess = false;
     const pathSegments = pathname.split('/').filter(Boolean);
     const currentTopLevelPath = pathSegments.length > 0 ? `/${pathSegments[0]}` : '/';
+    
     let requiredPageId = navItemsBase.find(item => {
-      if (item.href === '/') return currentTopLevelPath === '/';
-      return currentTopLevelPath.startsWith(item.href);
-    })?.requiredPage;
+        if (item.href === '/') return currentTopLevelPath === '/';
+        // For settings, we check if the path starts with /settings
+        if (item.href === '/settings') return currentTopLevelPath.startsWith('/settings');
+        return currentTopLevelPath.startsWith(item.href);
+      })?.requiredPage;
 
     if (!requiredPageId && currentTopLevelPath === '/') requiredPageId = 'dashboard';
+
 
     if (debugMode) console.log(`[AppShell] Page access check for path: "${pathname}", topLevelPath: "${currentTopLevelPath}", effectiveUser role: "${effectiveUser.role}", requiredPageId: "${requiredPageId}"`);
 
@@ -189,30 +199,30 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     } else if (effectiveUser.role === 'Admin') {
       if (requiredPageId && requiredPageId === 'settings_area') {
         hasAccess = effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
-        if (hasAccess && pathSegments[1]) {
+        if (hasAccess && pathSegments[0] === 'settings' && pathSegments[1]) { // Check specific setting page
           const specificSettingPage = `settings_${pathSegments[1]}`;
           hasAccess = effectiveUser.allowedSettingsPages?.includes(specificSettingPage) ?? false;
         }
       } else if (requiredPageId) {
-        const adminAllowedAppPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles'];
+        const adminAllowedAppPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles']; // Admins should have access to roles
         hasAccess = adminAllowedAppPages.includes(requiredPageId);
       } else {
-        hasAccess = false;
+        hasAccess = false; 
       }
-      if (debugMode) console.log(`[AppShell] Page access (Admin): ${hasAccess} for ${requiredPageId || pathname}`);
+      if (debugMode) console.log(`[AppShell] Page access (Admin for ${requiredPageId || pathname}): ${hasAccess}`);
     } else if (effectiveUser.role === 'Custom' && effectiveUser.assignedPages) {
       if (requiredPageId && requiredPageId === 'settings_area') {
         hasAccess = effectiveUser.assignedPages.includes('settings_area');
-        if (hasAccess && pathSegments[1]) {
+        if (hasAccess && pathSegments[0] === 'settings' && pathSegments[1]) { // Check specific setting page
           const specificSettingPage = `settings_${pathSegments[1]}`;
           hasAccess = effectiveUser.allowedSettingsPages?.includes(specificSettingPage) ?? false;
         }
       } else if (requiredPageId) {
         hasAccess = effectiveUser.assignedPages.includes(requiredPageId);
       } else {
-        hasAccess = false;
+        hasAccess = false; 
       }
-      if (debugMode) console.log(`[AppShell] Page access (Custom): ${hasAccess} for ${requiredPageId || pathname}`);
+      if (debugMode) console.log(`[AppShell] Page access (Custom for ${requiredPageId || pathname}): ${hasAccess}`);
     } else {
       hasAccess = false;
     }
@@ -221,6 +231,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (debugMode) console.log(`[AppShell] Final isPageAccessGranted: ${hasAccess} for path ${pathname}`);
 
   }, [isLoadingUser, currentUserData, pathname, debugMode, hasMounted]);
+
 
   const effectiveUser = currentUserData;
 
@@ -231,8 +242,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       if (item.requiredPage === 'settings_area') {
         return effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
       }
+      // Admins should typically see these pages
       const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles'];
-      return item.requiredPage ? adminAllowedAppPages.includes(item.requiredPage) : true;
+      return item.requiredPage ? adminAllowedPages.includes(item.requiredPage) : true;
     }
     if (effectiveUser.role === 'Custom' && item.requiredPage) {
       return effectiveUser.assignedPages?.includes(item.requiredPage) ?? false;
@@ -252,6 +264,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   } else if (effectiveUser && isPageAccessGranted === false) {
     pageContent = <AccessDeniedOverlay />;
   } else if (!effectiveUser && !isLoadingUser && hasMounted) {
+    // This condition should ideally not be hit often if performLogout redirects quickly
     if (pathname !== '/login') {
       pageContent = (
         <div className="flex justify-center items-center h-64">
@@ -260,16 +273,31 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       );
     } else {
-      pageContent = children;
+      pageContent = children; // Allow login page to render if explicitly on /login
     }
   } else {
-    pageContent = (
+    // Default loading state if none of the above conditions are met, or before hasMounted
+     pageContent = (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
         <p className="ml-2">Loading panel...</p>
       </div>
     );
   }
+
+  // Determine active state for sidebar items
+  const getIsActive = useCallback((itemHref: string) => {
+    if (!hasMounted) return false; // Don't determine active state until mounted
+    if (itemHref === '/') {
+      return pathname === '/';
+    }
+    // For settings, active if path starts with /settings
+    if (itemHref === '/settings') {
+      return pathname.startsWith('/settings');
+    }
+    return pathname.startsWith(itemHref);
+  }, [pathname, hasMounted]);
+
 
   return (
     <>
@@ -283,16 +311,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <SidebarContent>
           <SidebarMenu>
             {navItems.map((item) => {
-              const calculatedIsActive = item.href === '/'
-                ? pathname === '/'
-                : pathname.startsWith(item.href) && item.href !== '/';
-              
-              const displayIsActive = hasMounted ? calculatedIsActive : false;
-
               const menuButton = (
                 <SidebarMenuButton
-                  href={item.href} // Pass href for the <a> tag
-                  isActive={displayIsActive}
+                  isActive={getIsActive(item.href)}
                   variant="default"
                   size="default"
                 >
