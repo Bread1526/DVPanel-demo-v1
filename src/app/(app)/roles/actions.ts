@@ -1,5 +1,4 @@
-
-"use server";
+'use server';
 
 import { z } from "zod";
 import crypto from "crypto";
@@ -7,11 +6,9 @@ import { v4 as uuidv4 } from "uuid";
 import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storageService";
 import { getDataPath } from "@/backend/lib/config";
 import path from 'path';
-import fs from 'fs/promises'; // Using promises API for readdir and unlink
+import fs from 'fs/promises'; 
 import { type PanelSettingsData, loadPanelSettings as loadGeneralPanelSettings } from '@/app/(app)/settings/actions';
 
-
-// Schema for individual user data
 const userSchema = z.object({
   id: z.union([z.string().uuid(), z.literal('owner_root')]).describe("Unique user ID or 'owner_root' for the system owner."),
   username: z.string().min(3, "Username must be at least 3 characters long.")
@@ -34,14 +31,14 @@ const addUserInputSchema = userSchema.omit({
     id: true, hashedPassword: true, salt: true, createdAt: true, updatedAt: true, lastLogin: true, role: true
 }).extend({
     password: z.string().min(8, "Password must be at least 8 characters long."),
-    role: z.enum(["Administrator", "Admin", "Custom"]), // Explicitly list creatable roles
+    role: z.enum(["Administrator", "Admin", "Custom"]), 
 });
 
 const updateUserInputSchema = userSchema.omit({
     hashedPassword: true, salt: true, createdAt: true, updatedAt: true, lastLogin: true, role: true
 }).extend({
     password: z.string().min(8, "Password must be at least 8 characters long.").optional().or(z.literal('')),
-    role: z.enum(["Administrator", "Admin", "Custom"]), // Explicitly list updatable roles
+    role: z.enum(["Administrator", "Admin", "Custom"]), 
 }).required({ id: true });
 
 export type AddUserInput = z.infer<typeof addUserInputSchema>;
@@ -97,6 +94,65 @@ async function getPanelSettingsForDebug(): Promise<PanelSettingsData | undefined
     }
 }
 
+export async function ensureOwnerFileExists(ownerUsername: string, ownerPasswordPlain: string, panelSettings?: PanelSettingsData): Promise<void> {
+    const debugMode = panelSettings?.debugMode ?? false;
+    if (debugMode) console.log(`[RolesActions - ensureOwnerFileExists] Ensuring file for Owner: ${ownerUsername}`);
+
+    const safeOwnerUsername = ownerUsername.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const ownerFilename = `${safeOwnerUsername}-Owner.json`;
+    const ownerFilePath = path.join(getDataPath(), ownerFilename);
+
+    if (debugMode) {
+        console.log(`[RolesActions - ensureOwnerFileExists] Target owner file: ${ownerFilePath}`);
+    }
+
+    let existingOwnerData: Partial<UserData> = {};
+    if (fs.existsSync(ownerFilePath)) {
+        try {
+            const loaded = await loadEncryptedData(ownerFilename);
+            if (loaded) existingOwnerData = loaded as UserData;
+            if(debugMode) console.log(`[RolesActions - ensureOwnerFileExists] Loaded existing owner file for ${ownerUsername}. Preserving createdAt: ${existingOwnerData.createdAt}`);
+        } catch (e) {
+            console.error(`[RolesActions - ensureOwnerFileExists] Error loading existing owner file ${ownerFilename}, will create anew:`, e);
+        }
+    }
+
+    const { hash, salt } = await hashPassword(ownerPasswordPlain);
+    const now = new Date().toISOString();
+
+    const ownerData: UserData = {
+        id: 'owner_root',
+        username: ownerUsername,
+        hashedPassword: hash,
+        salt: salt,
+        role: 'Owner',
+        projects: [],
+        assignedPages: [],
+        allowedSettingsPages: [],
+        status: 'Active',
+        createdAt: existingOwnerData.createdAt || now,
+        updatedAt: now,
+        lastLogin: now, // Update lastLogin on this operation
+    };
+
+    try {
+        if(debugMode) console.log(`[RolesActions - ensureOwnerFileExists] Preparing to save owner data to ${ownerFilename}:`, {id: ownerData.id, username: ownerData.username, role: ownerData.role});
+        await saveEncryptedData(ownerFilename, ownerData);
+        if(debugMode) {
+            console.log(`[RolesActions - ensureOwnerFileExists] Successfully called saveEncryptedData for ${ownerFilename}.`);
+            if (fs.existsSync(ownerFilePath)) {
+                console.log(`[RolesActions - ensureOwnerFileExists] VERIFIED: Owner file ${ownerFilename} exists at ${ownerFilePath} after save.`);
+            } else {
+                console.error(`[RolesActions - ensureOwnerFileExists] CRITICAL VERIFICATION FAILURE: Owner file ${ownerFilename} DOES NOT EXIST at ${ownerFilePath} after save.`);
+            }
+        }
+    } catch (e) {
+        console.error(`[RolesActions - ensureOwnerFileExists] CRITICAL: Failed to save owner file ${ownerFilename}:`, e);
+        throw e; // Re-throw to indicate failure
+    }
+}
+
+
 export async function loadUsers(): Promise<LoadUsersState> {
   const panelSettings = await getPanelSettingsForDebug();
   const debugMode = panelSettings?.debugMode ?? false;
@@ -118,7 +174,6 @@ export async function loadUsers(): Promise<LoadUsersState> {
   }
 
   for (const file of files) {
-    // Match user files (e.g., username-Role.json) but exclude system files.
     if (file.endsWith('.json') && file !== '.settings.json' && !file.endsWith('-Auth.json')) {
       try {
         const fileData = await loadEncryptedData(file);
@@ -148,17 +203,64 @@ export async function loadUserById(userId: string): Promise<UserData | null> {
   if (debugMode) console.log(`[RolesActions - loadUserById] Attempting to load user ID: ${userId}`);
 
   const dataPath = getDataPath();
+  
+  // Handle Owner loading directly
+  if (userId === 'owner_root') {
+    const ownerUsernameEnv = process.env.OWNER_USERNAME;
+    if (!ownerUsernameEnv) {
+      if (debugMode) console.error("[RolesActions - loadUserById] OWNER_USERNAME not set in .env, cannot load owner_root by ID.");
+      return null;
+    }
+    const safeOwnerUsername = ownerUsernameEnv.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const ownerFilename = `${safeOwnerUsername}-Owner.json`;
+    const ownerFilePath = path.join(dataPath, ownerFilename);
+
+    if (debugMode) console.log(`[RolesActions - loadUserById] Attempting to load owner_root from specific file: ${ownerFilename}`);
+    try {
+      const fileData = await loadEncryptedData(ownerFilename);
+      if (fileData) {
+        const parsedUser = userSchema.safeParse(fileData);
+        if (parsedUser.success && parsedUser.data.id === 'owner_root') {
+          if (debugMode) console.log(`[RolesActions - loadUserById] Successfully loaded owner_root from ${ownerFilename}`);
+          return parsedUser.data;
+        } else if (!parsedUser.success) {
+          if (debugMode) console.warn(`[RolesActions - loadUserById] Owner file ${ownerFilename} parsed with errors:`, parsedUser.error.flatten().fieldErrors);
+        } else {
+            if (debugMode) console.warn(`[RolesActions - loadUserById] Owner file ${ownerFilename} loaded, but ID was not 'owner_root'. Data:`, parsedUser.data);
+        }
+      } else {
+        if(debugMode) console.log(`[RolesActions - loadUserById] Owner file ${ownerFilename} not found or empty when trying to load owner_root.`);
+      }
+    } catch (e) {
+      if (debugMode) console.error(`[RolesActions - loadUserById] Error loading owner_root file ${ownerFilename}:`, e);
+    }
+    if(debugMode) console.log(`[RolesActions - loadUserById] Failed to load owner_root from specific file. It might not have been created yet.`);
+    return null; // Owner file not found or invalid
+  }
+
+  // Handle regular users by scanning files
   let files: string[];
   try {
     files = await fs.readdir(dataPath);
-  } catch {
-    if (debugMode) console.warn(`[RolesActions - loadUserById] Error reading data directory for user ID ${userId}.`);
+  } catch(e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+        if (debugMode) console.warn(`[RolesActions - loadUserById] Data directory not found when searching for user ID ${userId}.`);
+    } else {
+        if (debugMode) console.warn(`[RolesActions - loadUserById] Error reading data directory for user ID ${userId}:`, e);
+    }
     return null;
   }
 
   for (const file of files) {
-     // Match user files (e.g., username-Role.json) but exclude system files.
     if (file.endsWith('.json') && file !== '.settings.json' && !file.endsWith('-Auth.json')) {
+      // Avoid trying to load the owner file again if it was already attempted and failed or for a different owner
+      const ownerUsernameEnv = process.env.OWNER_USERNAME;
+      if (ownerUsernameEnv) {
+          const safeOwnerUsername = ownerUsernameEnv.replace(/[^a-zA-Z0-9_.-]/g, '_');
+          const ownerFilenamePattern = `${safeOwnerUsername}-Owner.json`;
+          if (file === ownerFilenamePattern) continue; // Skip the main owner file, it's handled above
+      }
+
       try {
         const fileData = await loadEncryptedData(file);
         if (fileData) {
@@ -207,7 +309,6 @@ export async function addUser(prevState: UserActionState, userInput: AddUserInpu
   const { password, ...userDataToStore } = validatedFields.data;
 
   try {
-    // Check for username uniqueness across all existing user files
     const dataPath = getDataPath();
     let existingFiles: string[];
     try { existingFiles = await fs.readdir(dataPath); } catch { existingFiles = []; }
@@ -258,24 +359,37 @@ export async function updateUser(prevState: UserActionState, userInput: UpdateUs
   if (debugMode) console.log(`[RolesActions - updateUser] Attempting to update user ID: ${userInput.id}`);
 
   if (userInput.id === 'owner_root') {
-     if (debugMode) console.warn("[RolesActions - updateUser] Attempt to update owner_root user directly. This is restricted. Owner details are primarily synced via .env on login.");
+     if (debugMode) console.warn("[RolesActions - updateUser] Attempt to update owner_root user directly.");
      const ownerUsernameEnv = process.env.OWNER_USERNAME;
      if (!ownerUsernameEnv) return { message: "Owner username not configured in .env", status: "error" };
      
-     const ownerFilename = path.basename(getUserFilePath(ownerUsernameEnv, 'Owner'));
+     const safeOwnerUsername = ownerUsernameEnv.replace(/[^a-zA-Z0-9_.-]/g, '_');
+     const ownerFilename = `${safeOwnerUsername}-Owner.json`;
+     
      try {
         let ownerData = await loadEncryptedData(ownerFilename) as UserData | null;
         if (!ownerData || ownerData.id !== 'owner_root') {
-            return { message: "Owner data file not found or invalid.", status: "error" };
+            return { message: "Owner data file not found or invalid. Cannot update owner settings.", status: "error" };
         }
         
-        ownerData.assignedPages = userInput.assignedPages || ownerData.assignedPages;
-        ownerData.allowedSettingsPages = userInput.allowedSettingsPages || ownerData.allowedSettingsPages;
-        ownerData.status = userInput.status || ownerData.status; // Allow status change for owner
+        // Only allow updating specific fields for owner via this UI route
+        ownerData.assignedPages = userInput.assignedPages !== undefined ? userInput.assignedPages : ownerData.assignedPages;
+        ownerData.allowedSettingsPages = userInput.allowedSettingsPages !== undefined ? userInput.allowedSettingsPages : ownerData.allowedSettingsPages;
+        ownerData.projects = userInput.projects !== undefined ? userInput.projects : ownerData.projects; // Allow project assignment for owner if needed
+        ownerData.status = userInput.status || ownerData.status; 
         ownerData.updatedAt = new Date().toISOString();
         
+        // Owner's username, role, password cannot be changed here.
+        // Username/password sync happens via .env and ensureOwnerFileExists on login.
+        if (userInput.username && userInput.username !== ownerData.username) {
+             if(debugMode) console.warn("[RolesActions - updateUser] Attempt to change Owner's username via UI was ignored.");
+        }
+        if (userInput.password) {
+            if(debugMode) console.warn("[RolesActions - updateUser] Attempt to change Owner's password via UI was ignored. Use .env.");
+        }
+        
         await saveEncryptedData(ownerFilename, ownerData);
-        return { message: "Owner restricted settings updated successfully.", status: "success", user: ownerData };
+        return { message: "Owner restricted settings (like page/project assignments, status) updated successfully.", status: "success", user: ownerData };
 
      } catch(e) {
         const error = e instanceof Error ? e : new Error(String(e));
@@ -304,7 +418,6 @@ export async function updateUser(prevState: UserActionState, userInput: UpdateUs
     try { files = await fs.readdir(dataPath); } catch { files = []; }
     
     let currentUserData: UserData | null = null;
-    let oldFilePath: string | null = null;
     let oldFilename: string | null = null;
 
     for (const file of files) {
@@ -315,16 +428,17 @@ export async function updateUser(prevState: UserActionState, userInput: UpdateUs
           if (parsed.success && parsed.data.id === userInput.id && parsed.data.id !== 'owner_root') { 
             currentUserData = parsed.data;
             oldFilename = file;
-            oldFilePath = path.join(dataPath, file);
             break;
           }
         }
       }
     }
 
-    if (!currentUserData || !oldFilePath || !oldFilename) {
+    if (!currentUserData || !oldFilename) {
       return { message: "User not found for update.", status: "error", errors: { _form: ["User to update not found."] } };
     }
+
+    const oldFilePath = path.join(dataPath, oldFilename);
 
     if (updatesToApply.username && updatesToApply.username !== currentUserData.username) {
       if (updatesToApply.username === process.env.OWNER_USERNAME) {
@@ -355,8 +469,11 @@ export async function updateUser(prevState: UserActionState, userInput: UpdateUs
       updatedUser.hashedPassword = hash;
       updatedUser.salt = salt;
     }
+    
+    const safeNewUsername = updatedUser.username.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const safeNewRole = updatedUser.role.replace(/[^a-zA-Z0-9]/g, '_');
+    const newFilename = `${safeNewUsername}-${safeNewRole}.json`;
 
-    const newFilename = path.basename(getUserFilePath(updatedUser.username, updatedUser.role));
 
     if (oldFilename !== newFilename && oldFilePath) {
       try {
