@@ -1,8 +1,8 @@
 
 "use client";
 
-import React, { useState, useEffect, useTransition } from 'react';
-import { useActionState } from 'react'; // Corrected import
+import React, { useState, useEffect, useTransition, useCallback } from 'react';
+import { useActionState } from 'react'; 
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,36 +28,41 @@ const defaultSettingsData: PanelSettingsData = {
     enableCopyError: false,
     showConsoleErrorsInNotifications: false,
   },
+  sessionInactivityTimeout: 30,
+  disableAutoLogoutOnInactivity: false,
 };
 
 export default function GeneralSettingsPage() {
   const [allSettings, setAllSettings] = useState<PanelSettingsData>(defaultSettingsData);
   
-  // Add state for general-specific inputs if any in the future
-
   const { toast } = useToast();
   const [isTransitionPendingForAction, startTransitionForAction] = useTransition();
-  const [formState, formAction] = useActionState(savePanelSettings, initialSaveState); // Changed to useActionState
+  const [formState, formAction] = useActionState(savePanelSettings, initialSaveState);
 
   useEffect(() => {
     const fetchSettings = async () => {
-      const result = await loadPanelSettings();
-      if (result.data) {
-        setAllSettings(result.data);
-        // Populate general-specific state if any
+      try {
+        const result = await loadPanelSettings();
+        if (result && result.data) { // Added check for result itself
+          setAllSettings(result.data);
+        } else if (result && result.message && result.status !== 'success') {
+            toast({ title: "Error Loading Settings", description: result.message, variant: "destructive" });
+        }
+      } catch (e) {
+        toast({ title: "Error Loading Settings", description: "An unexpected error occurred.", variant: "destructive" });
+        console.error("Failed to load settings in General page:", e);
       }
     };
     fetchSettings();
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
-    const toastDurationSource = formState.data?.popup?.notificationDuration ?? allSettings.popup.notificationDuration;
-    const effectiveDuration = toastDurationSource * 1000;
+    const toastDurationSource = formState.data?.popup?.notificationDuration ?? allSettings.popup?.notificationDuration;
+    const effectiveDuration = (toastDurationSource || 5) * 1000;
 
     if (formState.status === "success" && formState.message) {
       if (formState.data) {
         setAllSettings(formState.data);
-        // Update general-specific state if any
       }
       toast({
         title: "Settings Update",
@@ -72,21 +77,19 @@ export default function GeneralSettingsPage() {
         duration: effectiveDuration,
       });
     }
-  }, [formState, allSettings.popup.notificationDuration, toast]); // Added toast to dependency array
+  }, [formState, allSettings.popup?.notificationDuration, toast]);
 
-  const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleFormSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     
     const submittedData: PanelSettingsData = {
-      ...allSettings, // Start with all current settings
-      // Overwrite with values from this page if they existed
-      // general: { ... } 
+      ...allSettings, 
     };
     
     startTransitionForAction(() => {
       formAction(submittedData); 
     });
-  };
+  }, [allSettings, startTransitionForAction, formAction]);
   
   const isPending = formState.isPending || isTransitionPendingForAction;
 
@@ -97,11 +100,11 @@ export default function GeneralSettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle>General Application Settings</CardTitle>
-            <CardDescription>(Functionality pending)</CardDescription>
+            <CardDescription>(Functionality pending for changing owner credentials. Settings related to this (e.g., via an `info.json`) are not yet implemented.)</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <p className="text-muted-foreground">
-              General settings for panel administration, such as changing the panel owner username and password (encrypted), will be available here in a future update.
+              This section will allow management of core panel settings, including owner account credentials (stored encrypted). Currently, owner credentials are managed via `.env.local`.
             </p>
           </CardContent>
           <CardFooter className="border-t px-6 py-4">

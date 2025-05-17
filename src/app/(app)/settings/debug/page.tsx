@@ -1,8 +1,8 @@
 
 "use client";
 
-import React, { useState, useEffect, useTransition } from 'react';
-import { useActionState } from 'react'; // Corrected import
+import React, { useState, useEffect, useTransition, useCallback } from 'react';
+import { useActionState } from 'react'; 
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,6 +31,8 @@ const defaultSettingsData: PanelSettingsData = {
     enableCopyError: false,
     showConsoleErrorsInNotifications: false,
   },
+  sessionInactivityTimeout: 30,
+  disableAutoLogoutOnInactivity: false,
 };
 
 export default function DebugSettingsPage() {
@@ -39,22 +41,29 @@ export default function DebugSettingsPage() {
 
   const { toast } = useToast();
   const [isTransitionPendingForAction, startTransitionForAction] = useTransition();
-  const [formState, formAction] = useActionState(savePanelSettings, initialSaveState); // Changed to useActionState
+  const [formState, formAction] = useActionState(savePanelSettings, initialSaveState);
 
   useEffect(() => {
     const fetchSettings = async () => {
-      const result = await loadPanelSettings();
-      if (result.data) {
-        setAllSettings(result.data);
-        setCurrentDebugMode(result.data.debugMode ?? defaultSettingsData.debugMode);
+      try {
+        const result = await loadPanelSettings();
+        if (result && result.data) { // Added check for result itself
+          setAllSettings(result.data);
+          setCurrentDebugMode(result.data.debugMode ?? defaultSettingsData.debugMode);
+        } else if (result && result.message && result.status !== 'success') {
+           toast({ title: "Error Loading Settings", description: result.message, variant: "destructive" });
+        }
+      } catch(e) {
+          toast({ title: "Error Loading Settings", description: "An unexpected error occurred.", variant: "destructive" });
+          console.error("Failed to load settings in Debug page:", e);
       }
     };
     fetchSettings();
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
-    const toastDurationSource = formState.data?.popup?.notificationDuration ?? allSettings.popup.notificationDuration;
-    const effectiveDuration = toastDurationSource * 1000;
+    const toastDurationSource = formState.data?.popup?.notificationDuration ?? allSettings.popup?.notificationDuration;
+    const effectiveDuration = (toastDurationSource || 5) * 1000;
 
     if (formState.status === "success" && formState.message) {
       if (formState.data) {
@@ -68,8 +77,8 @@ export default function DebugSettingsPage() {
       });
     } else if (formState.status === "error" && formState.message) {
       let description = "Validation failed for Debug settings. Please check the fields.";
-      if (formState.errors?.general) {
-        description = formState.errors.general;
+      if (formState.errors?.general?.length) {
+        description = formState.errors.general.join('; ');
       } else if (formState.errors?.debugMode) {
         description = formState.errors.debugMode.join('; ') || description;
       }
@@ -78,33 +87,33 @@ export default function DebugSettingsPage() {
         description: description,
         variant: "destructive",
         duration: effectiveDuration,
-        errorContent: formState.errors?.general || (formState.errors?.debugMode || []).join('; ')
+        errorContent: formState.errors?.general?.join('; ') || (formState.errors?.debugMode || []).join('; ')
       });
     }
-  }, [formState, allSettings.popup.notificationDuration, toast]); // Added toast to dependency array
+  }, [formState, allSettings.popup?.notificationDuration, toast]);
 
-  const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleFormSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     
     const submittedData: PanelSettingsData = {
-      ...allSettings, // Start with all current settings
-      debugMode: currentDebugMode, // Override with values from this page
+      ...allSettings, 
+      debugMode: currentDebugMode, 
     };
     
     startTransitionForAction(() => {
       formAction(submittedData);
     });
-  };
+  }, [allSettings, currentDebugMode, startTransitionForAction, formAction]);
 
-  const handleTestDefaultPopup = () => {
+  const handleTestDefaultPopup = useCallback(() => {
     toast({
       title: "Test Default Popup",
       description: "This is a test informational notification!",
       duration: (allSettings.popup?.notificationDuration ?? 5) * 1000,
     });
-  };
+  }, [toast, allSettings.popup?.notificationDuration]);
 
-  const handleTestErrorPopup = () => {
+  const handleTestErrorPopup = useCallback(() => {
     try {
       throw new Error("This is a simulated console error for testing purposes.");
     } catch (e: any) {
@@ -120,7 +129,7 @@ export default function DebugSettingsPage() {
         errorContent: `Error: ${e.message}\nStack: ${e.stack}`,
       });
     }
-  };
+  }, [toast, allSettings.popup?.notificationDuration, allSettings.popup?.showConsoleErrorsInNotifications, currentDebugMode]);
   
   const isPending = formState.isPending || isTransitionPendingForAction;
 
@@ -143,7 +152,7 @@ export default function DebugSettingsPage() {
               </div>
               <Switch 
                 id="debug-mode-switch" 
-                name="debug-mode"
+                name="debugMode"
                 checked={currentDebugMode}
                 onCheckedChange={setCurrentDebugMode}
               />
@@ -167,7 +176,7 @@ export default function DebugSettingsPage() {
             </div>
             {formState.errors?.general && (
               <Alert variant="destructive" className="mt-4">
-                <AlertDescription>{formState.errors.general}</AlertDescription>
+                <AlertDescription>{formState.errors.general.join('; ')}</AlertDescription>
               </Alert>
             )}
           </CardContent>

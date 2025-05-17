@@ -1,8 +1,8 @@
 
 "use client";
 
-import React, { useState, useEffect, useTransition } from 'react';
-import { useActionState } from 'react'; // Corrected import
+import React, { useState, useEffect, useTransition, useCallback } from 'react';
+import { useActionState } from 'react'; 
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +11,6 @@ import { Label } from "@/components/ui/label";
 import { Save, Loader2 } from "lucide-react";
 import { savePanelSettings, loadPanelSettings, type SavePanelSettingsState, type PanelSettingsData } from '../actions';
 import { useToast } from "@/hooks/use-toast";
-// import { Alert, AlertDescription } from "@/components/ui/alert"; // Uncomment if error display is needed
 
 const initialSaveState: SavePanelSettingsState = {
   message: "",
@@ -31,72 +30,68 @@ const defaultSettingsData: PanelSettingsData = {
     enableCopyError: false,
     showConsoleErrorsInNotifications: false,
   },
+  sessionInactivityTimeout: 30,
+  disableAutoLogoutOnInactivity: false,
 };
 
 export default function DaemonSettingsPage() {
   const [allSettings, setAllSettings] = useState<PanelSettingsData>(defaultSettingsData);
   
-  // Add state for daemon-specific inputs if any in the future
-  // const [currentDaemonPort, setCurrentDaemonPort] = useState("8443"); 
-  // const [currentDaemonIp, setCurrentDaemonIp] = useState("");
-
   const { toast } = useToast();
   const [isTransitionPendingForAction, startTransitionForAction] = useTransition();
-  const [formState, formAction] = useActionState(savePanelSettings, initialSaveState); // Changed to useActionState
+  const [formState, formAction] = useActionState(savePanelSettings, initialSaveState);
 
   useEffect(() => {
     const fetchSettings = async () => {
-      const result = await loadPanelSettings();
-      if (result.data) {
-        setAllSettings(result.data);
-        // Populate daemon-specific state if any
-        // setCurrentDaemonPort(result.data.daemon?.port ?? "8443");
+      try {
+        const result = await loadPanelSettings();
+        if (result && result.data) { // Added check for result itself
+          setAllSettings(result.data);
+        } else if (result && result.message && result.status !== 'success') {
+            toast({ title: "Error Loading Settings", description: result.message, variant: "destructive" });
+        }
+      } catch (e) {
+        toast({ title: "Error Loading Settings", description: "An unexpected error occurred.", variant: "destructive" });
+        console.error("Failed to load settings in Daemon page:", e);
       }
     };
     fetchSettings();
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
-     const toastDurationSource = formState.data?.popup?.notificationDuration ?? allSettings.popup.notificationDuration;
-     const effectiveDuration = toastDurationSource * 1000;
+     const toastDurationSource = formState.data?.popup?.notificationDuration ?? allSettings.popup?.notificationDuration;
+     const effectiveDuration = (toastDurationSource || 5) * 1000;
 
     if (formState.status === "success" && formState.message) {
       if (formState.data) {
         setAllSettings(formState.data);
-        // Update daemon-specific state if any
       }
       toast({
         title: "Settings Update",
-        description: formState.message, // This will show "Panel settings saved successfully" for now
+        description: formState.message, 
         duration: effectiveDuration,
       });
     } else if (formState.status === "error" && formState.message) {
       toast({
         title: "Error Saving Settings",
-        description: formState.message, // Or more specific error based on formState.errors
+        description: formState.message, 
         variant: "destructive",
         duration: effectiveDuration,
       });
     }
-  }, [formState, allSettings.popup.notificationDuration, toast]); // Added toast to dependency array
+  }, [formState, allSettings.popup?.notificationDuration, toast]);
 
-  const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleFormSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     
-    // Construct submittedData including daemon settings if they existed in PanelSettingsData
     const submittedData: PanelSettingsData = {
-      ...allSettings, // Start with all current settings
-      // Overwrite with values from this page if they existed
-      // daemon: { 
-      //   port: currentDaemonPort,
-      //   ip: currentDaemonIp,
-      // },
+      ...allSettings, 
     };
     
     startTransitionForAction(() => {
       formAction(submittedData); 
     });
-  };
+  }, [allSettings, startTransitionForAction, formAction]);
   
   const isPending = formState.isPending || isTransitionPendingForAction;
 

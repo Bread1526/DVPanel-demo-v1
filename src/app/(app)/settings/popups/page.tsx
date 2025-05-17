@@ -1,8 +1,8 @@
 
 "use client";
 
-import React, { useState, useEffect, useTransition } from 'react';
-import { useActionState } from 'react'; // Corrected import
+import React, { useState, useEffect, useTransition, useCallback } from 'react';
+import { useActionState } from 'react'; 
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +33,8 @@ const defaultSettingsData: PanelSettingsData = {
     enableCopyError: false,
     showConsoleErrorsInNotifications: false,
   },
+  sessionInactivityTimeout: 30,
+  disableAutoLogoutOnInactivity: false,
 };
 
 export default function PopupsSettingsPage() {
@@ -46,37 +48,46 @@ export default function PopupsSettingsPage() {
 
   const { toast } = useToast();
   const [isTransitionPendingForAction, startTransitionForAction] = useTransition();
-  const [formState, formAction] = useActionState(savePanelSettings, initialSaveState); // Corrected import
+  const [formState, formAction] = useActionState(savePanelSettings, initialSaveState);
 
   useEffect(() => {
     const fetchSettings = async () => {
-      const result = await loadPanelSettings();
-      if (result.data) {
-        setAllSettings(result.data);
-        const popupDefaults = defaultSettingsData.popup;
-        setCurrentNotificationDuration(result.data.popup?.notificationDuration ?? popupDefaults.notificationDuration);
-        setCurrentDisableAllNotifications(result.data.popup?.disableAllNotifications ?? popupDefaults.disableAllNotifications);
-        setCurrentDisableAutoClose(result.data.popup?.disableAutoClose ?? popupDefaults.disableAutoClose);
-        setCurrentEnableCopyError(result.data.popup?.enableCopyError ?? popupDefaults.enableCopyError);
-        setCurrentShowConsoleErrors(result.data.popup?.showConsoleErrorsInNotifications ?? popupDefaults.showConsoleErrorsInNotifications);
+      try {
+        const result = await loadPanelSettings();
+        if (result && result.data) { // Added check for result itself
+          setAllSettings(result.data);
+          const popupDefaults = defaultSettingsData.popup;
+          const loadedPopupSettings = result.data.popup || popupDefaults;
+          setCurrentNotificationDuration(loadedPopupSettings.notificationDuration ?? popupDefaults.notificationDuration);
+          setCurrentDisableAllNotifications(loadedPopupSettings.disableAllNotifications ?? popupDefaults.disableAllNotifications);
+          setCurrentDisableAutoClose(loadedPopupSettings.disableAutoClose ?? popupDefaults.disableAutoClose);
+          setCurrentEnableCopyError(loadedPopupSettings.enableCopyError ?? popupDefaults.enableCopyError);
+          setCurrentShowConsoleErrors(loadedPopupSettings.showConsoleErrorsInNotifications ?? popupDefaults.showConsoleErrorsInNotifications);
+        } else if (result && result.message && result.status !== 'success') {
+          toast({ title: "Error Loading Settings", description: result.message, variant: "destructive" });
+        }
+      } catch(e) {
+        toast({ title: "Error Loading Settings", description: "An unexpected error occurred.", variant: "destructive" });
+        console.error("Failed to load settings in Popups page:", e);
       }
     };
     fetchSettings();
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
-    const toastDurationSource = formState.data?.popup?.notificationDuration ?? allSettings.popup.notificationDuration;
-    const effectiveDuration = toastDurationSource * 1000;
+    const toastDurationSource = formState.data?.popup?.notificationDuration ?? allSettings.popup?.notificationDuration;
+    const effectiveDuration = (toastDurationSource || 5) * 1000;
 
     if (formState.status === "success" && formState.message) {
       if (formState.data) {
         setAllSettings(formState.data);
         const popupDefaults = defaultSettingsData.popup;
-        setCurrentNotificationDuration(formState.data.popup?.notificationDuration ?? popupDefaults.notificationDuration);
-        setCurrentDisableAllNotifications(formState.data.popup?.disableAllNotifications ?? popupDefaults.disableAllNotifications);
-        setCurrentDisableAutoClose(formState.data.popup?.disableAutoClose ?? popupDefaults.disableAutoClose);
-        setCurrentEnableCopyError(formState.data.popup?.enableCopyError ?? popupDefaults.enableCopyError);
-        setCurrentShowConsoleErrors(formState.data.popup?.showConsoleErrorsInNotifications ?? popupDefaults.showConsoleErrorsInNotifications);
+        const newPopupSettings = formState.data.popup || popupDefaults;
+        setCurrentNotificationDuration(newPopupSettings.notificationDuration ?? popupDefaults.notificationDuration);
+        setCurrentDisableAllNotifications(newPopupSettings.disableAllNotifications ?? popupDefaults.disableAllNotifications);
+        setCurrentDisableAutoClose(newPopupSettings.disableAutoClose ?? popupDefaults.disableAutoClose);
+        setCurrentEnableCopyError(newPopupSettings.enableCopyError ?? popupDefaults.enableCopyError);
+        setCurrentShowConsoleErrors(newPopupSettings.showConsoleErrorsInNotifications ?? popupDefaults.showConsoleErrorsInNotifications);
       }
       toast({
         title: "Settings Update",
@@ -85,8 +96,8 @@ export default function PopupsSettingsPage() {
       });
     } else if (formState.status === "error" && formState.message) {
       let description = "Validation failed for Popup settings. Please check the fields.";
-       if (formState.errors?.general) {
-        description = formState.errors.general;
+       if (formState.errors?.general?.length) { // Use .length for arrays
+        description = formState.errors.general.join('; ');
       } else if (formState.errors?.popup) {
          description = Object.values(formState.errors.popup).flat().join('; ') || description;
       }
@@ -95,17 +106,17 @@ export default function PopupsSettingsPage() {
         description: description,
         variant: "destructive",
         duration: effectiveDuration,
-        errorContent: formState.errors?.general || Object.values(formState.errors?.popup || {}).flat().join('; ')
+        errorContent: formState.errors?.general?.join('; ') || Object.values(formState.errors?.popup || {}).flat().join('; ')
       });
     }
-  }, [formState, allSettings.popup.notificationDuration, toast]); // Added toast to dependency array
+  }, [formState, allSettings.popup?.notificationDuration, toast]);
 
-  const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleFormSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     
     const submittedData: PanelSettingsData = {
-      ...allSettings, // Start with all current settings
-      popup: { // Override with values from this page
+      ...allSettings, 
+      popup: { 
         notificationDuration: currentNotificationDuration,
         disableAllNotifications: currentDisableAllNotifications,
         disableAutoClose: currentDisableAutoClose,
@@ -117,7 +128,7 @@ export default function PopupsSettingsPage() {
     startTransitionForAction(() => {
       formAction(submittedData);
     });
-  };
+  }, [allSettings, currentNotificationDuration, currentDisableAllNotifications, currentDisableAutoClose, currentEnableCopyError, currentShowConsoleErrors, startTransitionForAction, formAction]);
   
   const isPending = formState.isPending || isTransitionPendingForAction;
 
@@ -136,7 +147,7 @@ export default function PopupsSettingsPage() {
               <div className="flex items-center gap-4">
                 <Slider
                   id="popup-duration-slider"
-                  name="popup-duration" 
+                  name="notificationDuration" 
                   min={2} max={15} step={1}
                   value={[currentNotificationDuration]}
                   onValueChange={(value) => setCurrentNotificationDuration(value[0])}
@@ -151,9 +162,9 @@ export default function PopupsSettingsPage() {
                   className="w-20"
                 />
               </div>
-              {formState.errors?.popup?.notificationDuration && (
+              {formState.errors?.["popup.notificationDuration"] && (
                 <Alert variant="destructive" className="mt-2">
-                  <AlertDescription>{formState.errors.popup.notificationDuration.join(', ')}</AlertDescription>
+                  <AlertDescription>{formState.errors["popup.notificationDuration"].join(', ')}</AlertDescription>
                 </Alert>
               )}
             </div>
@@ -165,13 +176,13 @@ export default function PopupsSettingsPage() {
               </div>
               <Switch 
                 id="popup-disable-all"
-                name="popup-disable-all"
+                name="disableAllNotifications"
                 checked={currentDisableAllNotifications}
                 onCheckedChange={setCurrentDisableAllNotifications}
               />
             </div>
-            {formState.errors?.popup?.disableAllNotifications && (
-              <Alert variant="destructive"><AlertDescription>{formState.errors.popup.disableAllNotifications.join(', ')}</AlertDescription></Alert>
+            {formState.errors?.["popup.disableAllNotifications"] && (
+              <Alert variant="destructive"><AlertDescription>{formState.errors["popup.disableAllNotifications"].join(', ')}</AlertDescription></Alert>
             )}
 
             <div className="flex items-center justify-between p-4 border rounded-lg">
@@ -181,13 +192,13 @@ export default function PopupsSettingsPage() {
               </div>
               <Switch
                 id="popup-disable-autoclose"
-                name="popup-disable-autoclose"
+                name="disableAutoClose"
                 checked={currentDisableAutoClose}
                 onCheckedChange={setCurrentDisableAutoClose}
               />
             </div>
-            {formState.errors?.popup?.disableAutoClose && (
-              <Alert variant="destructive"><AlertDescription>{formState.errors.popup.disableAutoClose.join(', ')}</AlertDescription></Alert>
+            {formState.errors?.["popup.disableAutoClose"] && (
+              <Alert variant="destructive"><AlertDescription>{formState.errors["popup.disableAutoClose"].join(', ')}</AlertDescription></Alert>
             )}
 
             <div className="flex items-center justify-between p-4 border rounded-lg">
@@ -197,13 +208,13 @@ export default function PopupsSettingsPage() {
               </div>
               <Switch
                 id="popup-enable-copy"
-                name="popup-enable-copy"
+                name="enableCopyError"
                 checked={currentEnableCopyError}
                 onCheckedChange={setCurrentEnableCopyError}
               />
             </div>
-            {formState.errors?.popup?.enableCopyError && (
-              <Alert variant="destructive"><AlertDescription>{formState.errors.popup.enableCopyError.join(', ')}</AlertDescription></Alert>
+            {formState.errors?.["popup.enableCopyError"] && (
+              <Alert variant="destructive"><AlertDescription>{formState.errors["popup.enableCopyError"].join(', ')}</AlertDescription></Alert>
             )}
             
             <div className="flex items-center justify-between p-4 border rounded-lg">
@@ -213,17 +224,17 @@ export default function PopupsSettingsPage() {
               </div>
               <Switch
                 id="popup-show-console-errors"
-                name="popup-show-console-errors"
+                name="showConsoleErrorsInNotifications"
                 checked={currentShowConsoleErrors}
                 onCheckedChange={setCurrentShowConsoleErrors}
               />
             </div>
-            {formState.errors?.popup?.showConsoleErrorsInNotifications && (
-              <Alert variant="destructive"><AlertDescription>{formState.errors.popup.showConsoleErrorsInNotifications.join(', ')}</AlertDescription></Alert>
+            {formState.errors?.["popup.showConsoleErrorsInNotifications"] && (
+              <Alert variant="destructive"><AlertDescription>{formState.errors["popup.showConsoleErrorsInNotifications"].join(', ')}</AlertDescription></Alert>
             )}
              {formState.errors?.general && (
                 <Alert variant="destructive" className="mt-4">
-                    <AlertDescription>{formState.errors.general}</AlertDescription>
+                    <AlertDescription>{formState.errors.general.join('; ')}</AlertDescription>
                 </Alert>
             )}
           </CardContent>

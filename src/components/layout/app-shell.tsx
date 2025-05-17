@@ -29,7 +29,10 @@ import {
   Replace,
   AlertTriangle,
   EyeOff,
-  Loader2, 
+  Loader2,
+  Shield, // Changed from ShieldLock
+  ArrowLeft, // For Go Back button
+  Eye, // For View Role button
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -45,7 +48,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/comp
 import { cn } from '@/lib/utils';
 import { logout as serverLogoutAction } from '@/app/(app)/logout/actions';
 import { useActivityTracker } from '@/hooks/useActivityTracker';
-import { type AuthenticatedUser, type LocalSessionInfo } from '@/lib/session';
+import { type AuthenticatedUser, type LocalSessionInfo } from '@/lib/session'; // Assuming LocalSessionInfo is for localStorage structure
 import AccessDeniedOverlay from './access-denied-overlay';
 import { useToast } from '@/hooks/use-toast';
 import { loadPanelSettings } from '@/app/(app)/settings/actions'; 
@@ -75,32 +78,27 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [isPageAccessGranted, setIsPageAccessGranted] = useState<boolean | null>(null);
   const [debugMode, setDebugMode] = useState(false);
-
+  
   const performLogout = useCallback(async (reason?: string) => {
-    const storedSession = localStorage.getItem('dvpanel-session');
-    let usernameToLogout, roleToLogout;
-    if (storedSession) {
-      try {
-        const session: LocalSessionInfo = JSON.parse(storedSession);
-        usernameToLogout = session.username;
-        roleToLogout = session.role;
-      } catch (e) {
-        console.error("[AppShell] Error parsing session from localStorage during logout", e);
-      }
-    }
-
-    localStorage.removeItem('dvpanel-session');
-    setCurrentUserData(null);
-    setIsPageAccessGranted(false); // Ensure access is revoked on logout
-
+    if (debugMode) console.log('[AppShell] performLogout initiated.');
+    
+    // For file-based tokens, client doesn't hold sensitive session details to pass to server logout.
+    // Server logout action will use session cookie to identify and clear server-side session.
     try {
-      await serverLogoutAction(usernameToLogout, roleToLogout);
+      await serverLogoutAction(); // Server action now reads session from cookie
+      if (debugMode) console.log('[AppShell] Server logout action completed.');
     } catch (e) {
       console.error("[AppShell] Error calling server logout action:", e);
     }
-    if (debugMode) console.log(`[AppShell] performLogout triggered, redirecting to /login. Reason: ${reason}`);
+    
+    // Client-side cleanup for iron-session means cookie is handled by server. No localStorage to clear for session token.
+    
+    setCurrentUserData(null);
+    setIsPageAccessGranted(false); 
+    if (debugMode) console.log(`[AppShell] performLogout finished, redirecting to /login. Reason: ${reason}`);
     router.push(`/login${reason ? `?reason=${reason}` : '?reason=logout'}`);
   }, [router, debugMode]);
+
 
   useEffect(() => {
     const fetchAppSettings = async () => {
@@ -119,63 +117,33 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const fetchUserAndCheckAccess = async () => {
       setIsLoadingUser(true);
-      setIsPageAccessGranted(null); 
+      setIsPageAccessGranted(null);
       if (debugMode) console.log('[AppShell] fetchUserAndCheckAccess started. Pathname:', pathname);
 
-      const storedSession = localStorage.getItem('dvpanel-session');
-      if (debugMode) console.log('[AppShell] Stored session from localStorage:', storedSession ? "Found" : "Not Found");
-
-      if (!storedSession) {
-        if (debugMode) console.log('[AppShell] No session in localStorage. Performing logout.');
-        setCurrentUserData(null);
-        setIsLoadingUser(false);
-        performLogout('unauthorized'); 
-        return;
-      }
-
-      let session: LocalSessionInfo;
       try {
-        session = JSON.parse(storedSession);
-        if (debugMode) console.log('[AppShell] Parsed session from localStorage:', { username: session.username, role: session.role, tokenExists: !!session.token });
-      } catch (e) {
-        if (debugMode) console.error('[AppShell] Failed to parse session from localStorage. Performing logout.', e);
-        performLogout('unauthorized');
-        return;
-      }
-      
-      if (!session.token || !session.username || !session.role) {
-        if (debugMode) console.log('[AppShell] Incomplete session data in localStorage. Performing logout.');
-        performLogout('unauthorized');
-        return;
-      }
-        
-      try {
-        if (debugMode) console.log('[AppShell] Fetching /api/auth/user with headers:', { 'X-Auth-Token': session.token, 'X-Auth-Username': session.username, 'X-Auth-Role': session.role });
-        const response = await fetch('/api/auth/user', {
-          method: 'GET', // Explicitly GET
-          headers: {
-            'X-Auth-Token': session.token,
-            'X-Auth-Username': session.username,
-            'X-Auth-Role': session.role,
-          }
-        });
+        if (debugMode) console.log('[AppShell] Fetching /api/auth/user');
+        const response = await fetch('/api/auth/user'); // Cookie is sent automatically
         
         if (debugMode) console.log('[AppShell] /api/auth/user response status:', response.status);
 
-        if (!response.ok) { 
-          const errorData = await response.json().catch(() => ({ error: "Failed to parse error response from /api/auth/user" }));
-          if (debugMode) console.warn(`[AppShell] /api/auth/user returned non-OK status: ${response.status}. Error:`, errorData?.error);
-          performLogout(response.status === 401 ? 'unauthorized' : 'session_error');
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: "Failed to parse error response" }));
+          if (debugMode) console.warn(`[AppShell] /api/auth/user NOK. Status: ${response.status}. Error:`, errorData?.error);
+          if (response.status === 401) {
+             performLogout(pathname === '/login' ? undefined : 'unauthorized');
+          } else {
+             performLogout('session_error');
+          }
           return;
         }
 
         const data: ApiAuthUserResponse = await response.json();
-        if (debugMode) console.log('[AppShell] Data from /api/auth/user:', data.user ? { username: data.user.username, role: data.user.role } : "No user data in response");
+        if (debugMode) console.log('[AppShell] Data from /api/auth/user:', data.user ? { username: data.user.username, role: data.user.role } : "No user data");
 
         if (data.user) {
           setCurrentUserData(data.user);
         } else {
-          if (debugMode) console.warn('[AppShell] No user object in successful /api/auth/user response body. Performing logout.');
+          if (debugMode) console.warn('[AppShell] No user object in successful /api/auth/user response. Performing logout.');
           performLogout('unauthorized');
         }
       } catch (error) {
@@ -189,45 +157,41 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
 
     fetchUserAndCheckAccess();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, debugMode]); // performLogout is memoized, router is stable
+  }, [pathname, debugMode, performLogout]);
 
   useEffect(() => {
     if (isLoadingUser || !currentUserData) {
-      if (debugMode && !isLoadingUser && !currentUserData) console.log('[AppShell] Page access check: No current user data or still loading, access not granted yet.');
+      if (debugMode && !isLoadingUser && !currentUserData) console.log('[AppShell] Page access check: No current user data or still loading, access not determined yet.');
+      setIsPageAccessGranted(null); // Keep it null until user data is available
       return;
     }
-
+    
     const effectiveUser = currentUserData;
     let hasAccess = false;
-    let requiredPageId = 'unknown';
+    
+    const currentTopLevelPathSegment = pathname.split('/')[1] || '';
+    const targetPage = navItemsBase.find(item => {
+        if (item.href === '/') return pathname === '/';
+        return item.href === `/${currentTopLevelPathSegment}`;
+    });
 
-    const currentTopLevelPath = pathname.split('/')[1] || '';
-    
-    if (pathname.startsWith('/settings')) {
-        const settingSubPage = pathname.split('/')[2] || 'panel'; 
-        requiredPageId = `settings_${settingSubPage === '' ? 'panel' : settingSubPage}`;
-    } else {
-        const navItemMatch = navItemsBase.find(item =>
-            item.href === '/' ? pathname === '/' : (pathname.startsWith(item.href) && item.href !== '/')
-        );
-        if (navItemMatch) {
-            requiredPageId = navItemMatch.requiredPage;
-        } else if (pathname === '/') {
-             requiredPageId = 'dashboard'; 
-        }
-    }
-    
+    const requiredPageId = targetPage?.requiredPage || (pathname === '/' ? 'dashboard' : 'unknown');
+
     if (debugMode) console.log(`[AppShell] Page access check for path: "${pathname}", effectiveUser role: "${effectiveUser.role}", requiredPageId: "${requiredPageId}"`);
 
-    if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') {
+    if (effectiveUser.status === 'Inactive') {
+        hasAccess = false;
+        if (debugMode) console.log('[AppShell] Page access: Denied (User Inactive)');
+    } else if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') {
       hasAccess = true;
       if (debugMode) console.log('[AppShell] Page access: Granted (Owner/Administrator)');
     } else if (effectiveUser.role === 'Admin') {
       if (requiredPageId.startsWith('settings_')) {
+        // Admins need explicit settings page grants
         hasAccess = effectiveUser.allowedSettingsPages?.includes(requiredPageId) ?? false;
         if (debugMode) console.log(`[AppShell] Page access (Admin, settings): ${hasAccess} for ${requiredPageId}`);
       } else {
+        // Admins have access to core app pages by default, unless a more granular system is built
         const adminAllowedAppPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles']; 
         hasAccess = adminAllowedAppPages.includes(requiredPageId);
         if (debugMode) console.log(`[AppShell] Page access (Admin, app page): ${hasAccess} for ${requiredPageId}`);
@@ -247,14 +211,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   }, [isLoadingUser, currentUserData, pathname, debugMode]);
 
-
   const effectiveUser = currentUserData;
 
   const navItems = navItemsBase.filter(item => {
-    if (!effectiveUser) return false;
+    if (!effectiveUser || effectiveUser.status === 'Inactive') return false; // Also check for inactive status
     if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') return true;
     if (effectiveUser.role === 'Admin') {
-      if (item.requiredPage === 'settings_area') {
+      if (item.requiredPage === 'settings_area') { // Access to parent "Settings"
         return effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
       }
       const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles'];
@@ -266,33 +229,28 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return false;
   });
 
-  const menuButtonRef = React.useRef<HTMLSpanElement>(null);
-
+  const menuButtonRef = React.useRef<HTMLAnchorElement>(null);
 
   let pageContent;
-  if (isLoadingUser || isPageAccessGranted === null) {
+  if (isLoadingUser || (currentUserData && isPageAccessGranted === null)) { // Wait for access grant decision if user data is loaded
     pageContent = (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
-  } else if (currentUserData && isPageAccessGranted) { // Check currentUserData for truthiness before assuming logged in
+  } else if (effectiveUser && isPageAccessGranted) {
     pageContent = children;
-  } else if (currentUserData && !isPageAccessGranted) { // Logged in but no access
+  } else if (effectiveUser && !isPageAccessGranted) { 
     pageContent = <AccessDeniedOverlay />;
   } else { 
-    // This state implies !currentUserData && !isLoadingUser, meaning auth check failed or user is not logged in.
-    // performLogout should have already redirected. If we reach here, it's an unexpected state.
-    // Show loader as a fallback, but this path should ideally not be hit if performLogout works.
-    if (debugMode) console.log('[AppShell] Reached unexpected content rendering state: !currentUserData && !isLoadingUser. Should have been redirected.');
+    if (debugMode) console.log('[AppShell] Reached unhandled content rendering state. This may happen briefly during logout/redirect.');
     pageContent = (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="ml-2">Redirecting...</p>
+        <p className="ml-2">Loading session...</p>
       </div>
     );
   }
-
 
   return (
     <>
@@ -312,56 +270,42 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
               const menuButton = (
                 <SidebarMenuButton
-                  // ref is no longer needed here as it's a span and TooltipTrigger wraps Link
+                  ref={menuButtonRef} 
                   isActive={isActive}
                   variant="default"
                   size="default"
                 >
                   <item.icon />
-                  <span className={cn(
-                    { "invisible group-data-[[data-state=collapsed]]:visible": sidebarState === 'collapsed' && !isMobile },
-                    { "group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile }
-                  )}>
-                    {item.label}
-                  </span>
+                  <span>{item.label}</span>
                   {item.count !== undefined && item.count > 0 && (
-                    <SidebarMenuBadge className={cn(
-                      { "group-data-[[data-state=collapsed]]:hidden": sidebarState === 'collapsed' && !isMobile }
-                    )}>
-                      {item.count}
-                    </SidebarMenuBadge>
+                    <SidebarMenuBadge>{item.count}</SidebarMenuBadge>
                   )}
                 </SidebarMenuButton>
               );
 
-               let linkElement = (
-                 <Link href={item.href} legacyBehavior passHref>
-                   {menuButton}
-                 </Link>
-               );
-
-               if (sidebarState === 'collapsed' && !isMobile && item.label) {
-                 return (
-                   <SidebarMenuItem key={item.label}>
-                     <TooltipProvider>
-                       <Tooltip>
-                         <TooltipTrigger asChild>
-                           {linkElement}
-                         </TooltipTrigger>
-                         <TooltipContent side="right" align="center">
-                           <p>{item.label}</p>
-                         </TooltipContent>
-                       </Tooltip>
-                     </TooltipProvider>
-                   </SidebarMenuItem>
-                 );
-               }
-
-              return (
-                <SidebarMenuItem key={item.label}>
-                  {linkElement}
-                </SidebarMenuItem>
+              let linkElement = (
+                <Link href={item.href} legacyBehavior passHref>
+                  {menuButton}
+                </Link>
               );
+
+              if (sidebarState === 'collapsed' && !isMobile && item.label) {
+                return (
+                  <SidebarMenuItem key={item.label}>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          {linkElement}
+                        </TooltipTrigger>
+                        <TooltipContent side="right" align="center">
+                          <p>{item.label}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </SidebarMenuItem>
+                );
+              }
+              return <SidebarMenuItem key={item.label}>{linkElement}</SidebarMenuItem>;
             })}
           </SidebarMenu>
         </SidebarContent>
@@ -402,8 +346,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
-        <header className={cn("sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/80 px-4 backdrop-blur-sm sm:h-16 sm:px-6 md:px-8"
-        )}>
+        <header className={cn("sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/80 px-4 backdrop-blur-sm sm:h-16 sm:px-6 md:px-8")}>
           <SidebarTrigger className="md:hidden" />
         </header>
         <main className="flex-1 p-4 sm:p-6 md:p-8">

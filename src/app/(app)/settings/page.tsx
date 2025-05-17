@@ -1,8 +1,8 @@
 
 "use client";
 
-import React, { useState, useEffect, useTransition } from 'react';
-import { useActionState } from 'react'; // Corrected import
+import React, { useState, useEffect, useTransition, useCallback } from 'react';
+import { useActionState } from 'react';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,6 +31,8 @@ const defaultPanelSettingsData: PanelSettingsData = {
     enableCopyError: false,
     showConsoleErrorsInNotifications: false,
   },
+  sessionInactivityTimeout: 30,
+  disableAutoLogoutOnInactivity: false,
 };
 
 export default function PanelSettingsPage() {
@@ -41,25 +43,32 @@ export default function PanelSettingsPage() {
 
   const { toast } = useToast();
   const [isTransitionPendingForAction, startTransitionForAction] = useTransition(); 
-  const [formState, formAction] = useActionState(savePanelSettings, initialSaveState); // Corrected import
+  const [formState, formAction] = useActionState(savePanelSettings, initialSaveState);
 
   useEffect(() => {
     const fetchSettings = async () => {
-      console.log("[PanelSettingsPage] useEffect: Calling loadPanelSettings");
-      const result = await loadPanelSettings();
-      console.log("[PanelSettingsPage] useEffect: loadPanelSettings result:", result);
-      if (result.data) {
-        setAllSettings(result.data);
-        setCurrentPanelPort(result.data.panelPort);
-        setCurrentPanelIp(result.data.panelIp || "");
+      if (typeof window !== 'undefined') console.log("[PanelSettingsPage] useEffect: Calling loadPanelSettings");
+      try {
+        const result = await loadPanelSettings();
+        if (typeof window !== 'undefined') console.log("[PanelSettingsPage] useEffect: loadPanelSettings result:", result);
+        if (result && result.data) { // Added check for result itself
+          setAllSettings(result.data);
+          setCurrentPanelPort(result.data.panelPort);
+          setCurrentPanelIp(result.data.panelIp || "");
+        } else if (result && result.message && result.status !== 'success'){
+           toast({ title: "Error Loading Settings", description: result.message, variant: "destructive" });
+        }
+      } catch (e) {
+         toast({ title: "Error Loading Settings", description: "An unexpected error occurred.", variant: "destructive" });
+         console.error("Failed to load settings in Panel page:", e);
       }
     };
     fetchSettings();
-  }, []); 
+  }, [toast]); 
 
   useEffect(() => {
-    const toastDurationSource = formState.data?.popup?.notificationDuration ?? allSettings.popup.notificationDuration;
-    const effectiveDuration = toastDurationSource * 1000;
+    const toastDurationSource = formState.data?.popup?.notificationDuration ?? allSettings.popup?.notificationDuration;
+    const effectiveDuration = (toastDurationSource || 5) * 1000;
 
     if (formState.status === "success" && formState.message) {
       if (formState.data) {
@@ -75,7 +84,7 @@ export default function PanelSettingsPage() {
     } else if (formState.status === "error" && formState.message) {
        let description = formState.message;
       if (formState.errors?.general) {
-        description = formState.errors.general; 
+        description = formState.errors.general.join('; '); 
       } else if (formState.errors && formState.errors.panelPort) {
         description = formState.errors.panelPort.join('; ');
       } else if (formState.errors && formState.errors.panelIp) {
@@ -86,25 +95,26 @@ export default function PanelSettingsPage() {
         description: description,
         variant: "destructive",
         duration: effectiveDuration, 
-        errorContent: formState.errors?.general || Object.values(formState.errors || {}).flat().join('; ')
+        errorContent: formState.errors?.general?.join('; ') || Object.values(formState.errors || {}).flat().join('; ')
       });
     }
-  }, [formState, allSettings.popup.notificationDuration, toast]); // Added toast to dependency array
+  }, [formState, allSettings.popup?.notificationDuration, toast]);
 
-  const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleFormSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (typeof window !== 'undefined') console.log("[PanelSettingsPage] handleFormSubmit: currentPanelPort", currentPanelPort, "currentPanelIp", currentPanelIp);
     
     const submittedData: PanelSettingsData = {
-      ...allSettings, // Base with all loaded settings
+      ...allSettings,
       panelPort: currentPanelPort, 
       panelIp: currentPanelIp,     
     };
-    console.log("[PanelSettingsPage] handleFormSubmit: Submitting with data:", submittedData);
+    if (typeof window !== 'undefined') console.log("[PanelSettingsPage] handleFormSubmit: Submitting with data:", submittedData);
     
     startTransitionForAction(() => {
       formAction(submittedData);
     });
-  };
+  }, [allSettings, currentPanelPort, currentPanelIp, startTransitionForAction, formAction]);
   
   const isPending = formState.isPending || isTransitionPendingForAction;
 
@@ -125,7 +135,7 @@ export default function PanelSettingsPage() {
               <Label htmlFor="panel-port-input">Panel Port</Label>
               <Input 
                 id="panel-port-input" 
-                name="panel-port" 
+                name="panelPort" 
                 type="number" 
                 value={currentPanelPort}
                 onChange={(e) => setCurrentPanelPort(e.target.value)}
@@ -142,7 +152,7 @@ export default function PanelSettingsPage() {
               <Label htmlFor="panel-ip-input">Panel IP/Domain</Label>
               <Input 
                 id="panel-ip-input" 
-                name="panel-ip"
+                name="panelIp"
                 value={currentPanelIp}
                 onChange={(e) => setCurrentPanelIp(e.target.value)}
                 placeholder="e.g., 0.0.0.0 or mypanel.example.com (leave blank for 0.0.0.0)" 
@@ -156,7 +166,7 @@ export default function PanelSettingsPage() {
             )}
             {formState.errors?.general && (
               <Alert variant="destructive" className="md:col-span-3">
-                <AlertDescription>{formState.errors.general}</AlertDescription>
+                <AlertDescription>{formState.errors.general.join('; ')}</AlertDescription>
               </Alert>
             )}
             <p className="text-sm text-muted-foreground md:col-span-3 md:pl-[calc(33.33%+1rem)]">

@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, XCircle, ShieldCheck, Loader2, KeyRound } from "lucide-react";
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { verifyLicenseKey } from "./actions";
 
 interface LicenseStatus {
@@ -27,7 +27,7 @@ export default function LicenseSettingsPage() {
   const [licenseKey, setLicenseKey] = useState("");
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus>({ status: "idle", pro: false });
 
-  const handleVerifyLicense = async () => {
+  const handleVerifyLicense = useCallback(async () => {
     if (!licenseKey) {
       setLicenseStatus({ status: "error", pro: false, message: "Please enter a license key." });
       return;
@@ -39,7 +39,7 @@ export default function LicenseSettingsPage() {
     } catch (error) {
       setLicenseStatus({ status: "error", pro: false, message: "Failed to verify license. Please try again." });
     }
-  };
+  }, [licenseKey]);
 
   return (
     <div>
