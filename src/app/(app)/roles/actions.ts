@@ -10,6 +10,7 @@ import path from 'path';
 import fs from 'fs/promises'; // Using promises API for readdir and unlink
 import { type PanelSettingsData, loadPanelSettings as loadGeneralPanelSettings } from '@/app/(app)/settings/actions';
 
+
 // Schema for individual user data
 const userSchema = z.object({
   id: z.union([z.string().uuid(), z.literal('owner_root')]).describe("Unique user ID or 'owner_root' for the system owner."),
@@ -17,7 +18,7 @@ const userSchema = z.object({
             .regex(/^[a-zA-Z0-9_.-]+$/, "Username can only contain letters, numbers, dots, underscores, and hyphens."),
   hashedPassword: z.string(),
   salt: z.string(),
-  role: z.enum(["Administrator", "Admin", "Custom", "Owner"]), // Added Owner for file representation
+  role: z.enum(["Administrator", "Admin", "Custom", "Owner"]),
   projects: z.array(z.string()).optional().default([]),
   assignedPages: z.array(z.string()).optional().default([]),
   allowedSettingsPages: z.array(z.string()).optional().default([]),
@@ -117,14 +118,14 @@ export async function loadUsers(): Promise<LoadUsersState> {
   }
 
   for (const file of files) {
-    // Match user files (e.g., username-Role.json) but exclude the panel settings file.
-    if (file.endsWith('.json') && file !== '.settings.json') {
+    // Match user files (e.g., username-Role.json) but exclude system files.
+    if (file.endsWith('.json') && file !== '.settings.json' && !file.endsWith('-Auth.json')) {
       try {
         const fileData = await loadEncryptedData(file);
         if (fileData) {
           const parsedUser = userSchema.safeParse(fileData);
           if (parsedUser.success) {
-            // Filter out the owner record if it's loaded, as it's managed separately
+            // Filter out the owner record if it's loaded from its file, as it's handled specially.
             if (parsedUser.data.id !== 'owner_root') {
               users.push(parsedUser.data);
             }
@@ -151,23 +152,24 @@ export async function loadUserById(userId: string): Promise<UserData | null> {
   try {
     files = await fs.readdir(dataPath);
   } catch {
+    if (debugMode) console.warn(`[RolesActions - loadUserById] Error reading data directory for user ID ${userId}.`);
     return null;
   }
 
   for (const file of files) {
-    if (file.endsWith('.json') && file !== '.settings.json') {
+     // Match user files (e.g., username-Role.json) but exclude system files.
+    if (file.endsWith('.json') && file !== '.settings.json' && !file.endsWith('-Auth.json')) {
       try {
         const fileData = await loadEncryptedData(file);
         if (fileData) {
           const parsedUser = userSchema.safeParse(fileData);
           if (parsedUser.success && parsedUser.data.id === userId) {
-            if (debugMode && parsedUser.data.id === 'owner_root') console.log(`[RolesActions - loadUserById] Loaded owner_root from its file: ${file}`);
-            if (debugMode && parsedUser.data.id !== 'owner_root') console.log(`[RolesActions - loadUserById] Found user ID ${userId} in file ${file}`);
+            if (debugMode) console.log(`[RolesActions - loadUserById] Found user ID ${userId} in file ${file}`);
             return parsedUser.data;
           }
         }
       } catch (e) {
-        if (debugMode) console.error(`[RolesActions - loadUserById] Error processing file ${file}:`, e);
+        if (debugMode) console.error(`[RolesActions - loadUserById] Error processing file ${file} for user ID ${userId}:`, e);
       }
     }
   }
@@ -211,7 +213,7 @@ export async function addUser(prevState: UserActionState, userInput: AddUserInpu
     try { existingFiles = await fs.readdir(dataPath); } catch { existingFiles = []; }
 
     for (const file of existingFiles) {
-        if (file.endsWith('.json') && file !== '.settings.json') {
+        if (file.endsWith('.json') && file !== '.settings.json' && !file.endsWith('-Auth.json')) {
             const fileData = await loadEncryptedData(file);
             if (fileData) {
                 const existingUser = userSchema.safeParse(fileData);
@@ -226,7 +228,7 @@ export async function addUser(prevState: UserActionState, userInput: AddUserInpu
     const newUser: UserData = {
       id: uuidv4(),
       ...userDataToStore,
-      role: userInput.role, // Explicitly set from AddUserInput
+      role: userInput.role, 
       hashedPassword: hash,
       salt: salt,
       createdAt: now,
@@ -256,8 +258,7 @@ export async function updateUser(prevState: UserActionState, userInput: UpdateUs
   if (debugMode) console.log(`[RolesActions - updateUser] Attempting to update user ID: ${userInput.id}`);
 
   if (userInput.id === 'owner_root') {
-     if (debugMode) console.warn("[RolesActions - updateUser] Attempt to update owner_root user directly. This is highly restricted. Owner details are primarily synced via .env on login.");
-     // Allow updating assignedPages and allowedSettingsPages for owner_root
+     if (debugMode) console.warn("[RolesActions - updateUser] Attempt to update owner_root user directly. This is restricted. Owner details are primarily synced via .env on login.");
      const ownerUsernameEnv = process.env.OWNER_USERNAME;
      if (!ownerUsernameEnv) return { message: "Owner username not configured in .env", status: "error" };
      
@@ -267,10 +268,10 @@ export async function updateUser(prevState: UserActionState, userInput: UpdateUs
         if (!ownerData || ownerData.id !== 'owner_root') {
             return { message: "Owner data file not found or invalid.", status: "error" };
         }
-        // Only update specific fields for owner
+        
         ownerData.assignedPages = userInput.assignedPages || ownerData.assignedPages;
         ownerData.allowedSettingsPages = userInput.allowedSettingsPages || ownerData.allowedSettingsPages;
-        ownerData.status = userInput.status || ownerData.status;
+        ownerData.status = userInput.status || ownerData.status; // Allow status change for owner
         ownerData.updatedAt = new Date().toISOString();
         
         await saveEncryptedData(ownerFilename, ownerData);
@@ -307,11 +308,11 @@ export async function updateUser(prevState: UserActionState, userInput: UpdateUs
     let oldFilename: string | null = null;
 
     for (const file of files) {
-      if (file.endsWith('.json') && file !== '.settings.json') {
+      if (file.endsWith('.json') && file !== '.settings.json' && !file.endsWith('-Auth.json')) {
         const fileData = await loadEncryptedData(file);
         if (fileData) {
           const parsed = userSchema.safeParse(fileData);
-          if (parsed.success && parsed.data.id === userInput.id && parsed.data.id !== 'owner_root') { // Ensure not owner_root here
+          if (parsed.success && parsed.data.id === userInput.id && parsed.data.id !== 'owner_root') { 
             currentUserData = parsed.data;
             oldFilename = file;
             oldFilePath = path.join(dataPath, file);
@@ -329,9 +330,8 @@ export async function updateUser(prevState: UserActionState, userInput: UpdateUs
       if (updatesToApply.username === process.env.OWNER_USERNAME) {
         return { message: "Cannot change username to Owner's username.", status: "error", errors: { username: ["This username is reserved."] }};
       }
-      // Check for username uniqueness among other users
       for (const file of files) {
-          if (file.endsWith('.json') && file !== '.settings.json' && file !== oldFilename) { // Exclude current user's old file
+          if (file.endsWith('.json') && file !== '.settings.json' && !file.endsWith('-Auth.json') && file !== oldFilename) { 
               const fileData = await loadEncryptedData(file);
               if (fileData) {
                   const existingUser = userSchema.safeParse(fileData);
@@ -346,7 +346,7 @@ export async function updateUser(prevState: UserActionState, userInput: UpdateUs
     const updatedUser: UserData = {
       ...currentUserData,
       ...updatesToApply,
-      role: userInput.role, // Explicitly set from UpdateUserInput
+      role: userInput.role, 
       updatedAt: now,
     };
 
@@ -363,7 +363,6 @@ export async function updateUser(prevState: UserActionState, userInput: UpdateUs
         await fs.unlink(oldFilePath);
         if (debugMode) console.log(`[RolesActions - updateUser] Deleted old user file: ${oldFilename}`);
       } catch (e) {
-        // Log if deletion fails but continue, as saving new file is more critical
         console.warn(`[RolesActions - updateUser] Could not delete old user file ${oldFilename}:`, e);
       }
     }
@@ -405,20 +404,17 @@ export async function deleteUser(userId: string): Promise<UserActionState> {
     let filenameToDelete: string | null = null;
 
     for (const file of files) {
-       if (file.endsWith('.json') && file !== '.settings.json') {
+       if (file.endsWith('.json') && file !== '.settings.json' && !file.endsWith('-Auth.json')) {
         const fileData = await loadEncryptedData(file);
         if (fileData) {
-          const potentialUser = fileData as Partial<UserData & {id: string}>; // Ensure id exists
-          if (potentialUser.id === userId) {
-             const parsed = userSchema.safeParse(fileData);
-             if (parsed.success){
-                userToDelete = parsed.data;
-                filenameToDelete = file;
-                filePathToDelete = path.join(dataPath, file);
-                break;
-             } else {
-                if(debugMode) console.warn(`[RolesActions - deleteUser] Found file for ID ${userId} but it failed schema validation: ${file}`, parsed.error);
-             }
+          const parsedUser = userSchema.safeParse(fileData);
+          if (parsedUser.success && parsedUser.data.id === userId) {
+            userToDelete = parsedUser.data;
+            filenameToDelete = file;
+            filePathToDelete = path.join(dataPath, file);
+            break;
+          } else if (!parsedUser.success && (fileData as any).id === userId) {
+             if(debugMode) console.warn(`[RolesActions - deleteUser] Found file for ID ${userId} but it failed schema validation: ${file}`, parsedUser.error);
           }
         }
       }
@@ -433,9 +429,8 @@ export async function deleteUser(userId: string): Promise<UserActionState> {
     } catch (e) {
        if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
          if (debugMode) console.warn(`[RolesActions - deleteUser] File not found for user ${userToDelete.username}, assuming already deleted: ${filenameToDelete}`);
-         // If file not found, consider it a success in terms of deletion intent.
        } else {
-         throw e; // Re-throw other errors
+         throw e; 
        }
     }
 

@@ -42,7 +42,7 @@ const availableAppPages = [
   { id: 'files', name: 'File Manager (/files)' },
   { id: 'ports', name: 'Port Manager (/ports)' },
   { id: 'settings_area', name: 'Settings Area (/settings)' }, 
-  { id: 'roles', name: 'User Roles (/roles)'}, // Added roles page for consistency
+  { id: 'roles', name: 'User Roles (/roles)'},
 ];
 
 const availableSettingsPages = [
@@ -106,7 +106,8 @@ export default function RolesPage() {
   const handleUserChange = useCallback(async () => { 
     await fetchUsers();
     if (userToViewDetails) { 
-        const updatedUser = (await loadUsers()).users?.find(u => u.id === userToViewDetails.id);
+        const usersResult = await loadUsers();
+        const updatedUser = usersResult.users?.find(u => u.id === userToViewDetails.id);
         if (updatedUser) {
             setUserToViewDetails(updatedUser);
         } else { 
@@ -136,7 +137,7 @@ export default function RolesPage() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>User List</CardTitle>
-            <CardDescription>All registered users and their assigned roles.</CardDescription>
+            <CardDescription>All registered users and their assigned roles (excluding the system Owner).</CardDescription>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -181,7 +182,7 @@ export default function RolesPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onSelect={() => setUserToViewDetails(user)}>
-                              <Eye className="mr-2 h-4 w-4" /> View Details
+                              <Eye className="mr-2 h-4 w-4" /> View Role Details
                             </DropdownMenuItem>
                              
                             {AddUserRoleDialog && <AddUserRoleDialog 
@@ -189,7 +190,7 @@ export default function RolesPage() {
                               userData={user} 
                               onUserChange={handleUserChange}
                               triggerButton={
-                                <DropdownMenuItem onSelect={(e) => e.preventDefault()} disabled={user.id === 'owner_root' && user.username === process.env.OWNER_USERNAME}> 
+                                <DropdownMenuItem onSelect={(e) => e.preventDefault()} disabled={user.id === 'owner_root'}> 
                                   <Edit className="mr-2 h-4 w-4" /> Edit User / Role
                                 </DropdownMenuItem>
                               }
@@ -291,7 +292,7 @@ export default function RolesPage() {
                         handleUserChange(); 
                     }}
                     triggerButton={
-                        <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={userToViewDetails.id === 'owner_root' && userToViewDetails.username === process.env.OWNER_USERNAME}>
+                        <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={userToViewDetails.id === 'owner_root'}>
                             <Edit className="mr-2 h-4 w-4" /> Edit This Role
                         </Button>
                     }
