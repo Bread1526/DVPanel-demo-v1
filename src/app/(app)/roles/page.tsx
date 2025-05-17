@@ -9,10 +9,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye, ShieldQuestion, UserCog } from "lucide-react"; // Removed ArrowLeft
-import { loadUsers, deleteUser, type UserData, type UserActionState, startImpersonation, type ImpersonationActionState } from "./actions";
+import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye } from "lucide-react";
+import { loadUsers, deleteUser, type UserData, type UserActionState } from "./actions";
 import { useToast } from "@/hooks/use-toast";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle as AlertDialogCoreTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogClose, DialogFooter as DialogCoreFooter, DialogContent as DialogCoreContent, DialogHeader as DialogCoreHeader, DialogTitle as DialogCoreTitle, DialogDescription as DialogCoreDescription} from "@/components/ui/dialog"; 
 
 const AddUserRoleDialog = dynamic(() => import('./components/add-user-role-dialog'), {
@@ -28,6 +28,7 @@ const rolesDefinitions = [
   { name: "Custom", description: "Granular permissions assigned per module, page, or project." },
 ];
 
+// These should ideally come from a shared config or backend
 const availableProjects = [ 
   { id: 'project_ecommerce_api', name: 'E-commerce API'},
   { id: 'project_company_website', name: 'Company Website'},
@@ -41,7 +42,7 @@ const availableAppPages = [
   { id: 'files', name: 'File Manager (/files)' },
   { id: 'ports', name: 'Port Manager (/ports)' },
   { id: 'settings_area', name: 'Settings Area (/settings)' }, 
-  { id: 'roles', name: 'User Roles (/roles)'},
+  { id: 'roles', name: 'User Roles (/roles)'}, // Added roles page for consistency
 ];
 
 const availableSettingsPages = [
@@ -61,9 +62,8 @@ export default function RolesPage() {
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   const [isPendingDelete, startDeleteTransition] = useTransition();
-  const [isPendingImpersonate, startImpersonateTransition] = useTransition();
   const [userToDelete, setUserToDelete] = useState<UserData | null>(null);
-  const [userToViewDetails, setUserToViewDetails] = useState<UserData | null>(null); // For the View Role Details Dialog
+  const [userToViewDetails, setUserToViewDetails] = useState<UserData | null>(null); 
 
   const fetchUsers = useCallback(async () => {
     setIsLoading(true);
@@ -115,19 +115,6 @@ export default function RolesPage() {
     }
   }, [fetchUsers, userToViewDetails]);
 
-  const handleStartImpersonation = (userId: string) => {
-    startImpersonateTransition(async () => {
-      try {
-        await startImpersonation(userId);
-        // The action itself handles redirection.
-        // Toast for success might not be visible due to immediate redirect.
-      } catch (error) {
-        const err = error instanceof Error ? error.message : "Failed to start impersonation.";
-        toast({ title: "Impersonation Error", description: err, variant: "destructive" });
-      }
-    });
-  };
-
   const findNameById = (id: string, list: {id: string, name: string}[]) => list.find(item => item.id === id)?.name || id;
 
   return (
@@ -173,7 +160,7 @@ export default function RolesPage() {
                     <TableRow key={user.id}>
                       <TableCell className="font-medium">{user.username}</TableCell>
                       <TableCell>
-                        <Badge variant={user.role === 'Administrator' ? 'secondary' : 'outline'}>
+                        <Badge variant={user.role === 'Administrator' ? 'secondary' : user.role === 'Owner' ? 'default' : 'outline'}>
                           {user.role}
                         </Badge>
                       </TableCell>
@@ -188,7 +175,7 @@ export default function RolesPage() {
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                            <Button variant="ghost" size="icon" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={user.id === 'owner_root'}>
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
@@ -202,22 +189,17 @@ export default function RolesPage() {
                               userData={user} 
                               onUserChange={handleUserChange}
                               triggerButton={
-                                <DropdownMenuItem onSelect={(e) => e.preventDefault()}> 
+                                <DropdownMenuItem onSelect={(e) => e.preventDefault()} disabled={user.id === 'owner_root' && user.username === process.env.OWNER_USERNAME}> 
                                   <Edit className="mr-2 h-4 w-4" /> Edit User / Role
                                 </DropdownMenuItem>
                               }
                             />}
                             
-                            <DropdownMenuItem onSelect={() => handleStartImpersonation(user.id)} disabled={isPendingImpersonate || user.id === 'owner_root'}>
-                              <UserCog className="mr-2 h-4 w-4" /> 
-                              {isPendingImpersonate ? "Starting..." : "Impersonate User"}
-                            </DropdownMenuItem>
-                             
                             <DropdownMenuSeparator />
                             <DropdownMenuItem 
                               className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground"
                               onSelect={(e) => { e.preventDefault(); setUserToDelete(user); }}
-                              disabled={user.id === 'owner_root'} // Owner cannot be deleted
+                              disabled={user.id === 'owner_root'}
                             >
                               <Trash2 className="mr-2 h-4 w-4" /> Delete User
                             </DropdownMenuItem>
@@ -248,7 +230,6 @@ export default function RolesPage() {
         </Card>
       </div>
       
-      {/* View Role Details Dialog */}
       <Dialog open={!!userToViewDetails} onOpenChange={(isOpen) => !isOpen && setUserToViewDetails(null)}>
         <DialogCoreContent className="sm:max-w-lg md:max-w-xl lg:max-w-2xl rounded-2xl backdrop-blur-sm">
           {userToViewDetails && (
@@ -261,7 +242,7 @@ export default function RolesPage() {
               </DialogCoreHeader>
               <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto pr-2">
                 <p><span className="font-semibold text-muted-foreground">Username:</span> {userToViewDetails.username}</p>
-                <p><span className="font-semibold text-muted-foreground">Role:</span> <Badge variant={userToViewDetails.role === 'Administrator' ? 'secondary' : 'outline'}>{userToViewDetails.role}</Badge></p>
+                <p><span className="font-semibold text-muted-foreground">Role:</span> <Badge variant={userToViewDetails.role === 'Administrator' ? 'secondary' : userToViewDetails.role === 'Owner' ? 'default' : 'outline'}>{userToViewDetails.role}</Badge></p>
                 <p><span className="font-semibold text-muted-foreground">Status:</span> <Badge variant={userToViewDetails.status === 'Active' ? 'default' : 'destructive'} className={userToViewDetails.status === 'Active' ? 'bg-green-500/20 text-green-700 dark:bg-green-500/10 dark:text-green-400 border-green-500/30' : ''}>{userToViewDetails.status}</Badge></p>
                 
                 {(userToViewDetails.role === 'Admin' || userToViewDetails.role === 'Custom') && userToViewDetails.projects && userToViewDetails.projects.length > 0 && (
@@ -291,7 +272,10 @@ export default function RolesPage() {
                   </div>
                 )}
 
-                {((userToViewDetails.role === 'Admin' || userToViewDetails.role === 'Custom') && userToViewDetails.projects?.length === 0 && userToViewDetails.assignedPages?.length === 0 && userToViewDetails.allowedSettingsPages?.length === 0) && (
+                 {userToViewDetails.role === 'Owner' && (
+                    <p className="text-sm text-muted-foreground text-center pt-2">Owner has full system access. No specific permissions are listed here.</p>
+                 )}
+                 {(userToViewDetails.role !== 'Owner' && (userToViewDetails.role === 'Admin' || userToViewDetails.role === 'Custom') && userToViewDetails.projects?.length === 0 && userToViewDetails.assignedPages?.length === 0 && userToViewDetails.allowedSettingsPages?.length === 0) && (
                   <p className="text-sm text-muted-foreground text-center pt-2">No specific project, page, or settings permissions assigned.</p>
                 )}
                 {userToViewDetails.role === 'Administrator' && userToViewDetails.allowedSettingsPages?.length === 0 && (
@@ -307,7 +291,7 @@ export default function RolesPage() {
                         handleUserChange(); 
                     }}
                     triggerButton={
-                        <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                        <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={userToViewDetails.id === 'owner_root' && userToViewDetails.username === process.env.OWNER_USERNAME}>
                             <Edit className="mr-2 h-4 w-4" /> Edit This Role
                         </Button>
                     }
@@ -321,18 +305,16 @@ export default function RolesPage() {
         </DialogCoreContent>
       </Dialog>
 
-      {/* Delete User Confirmation Dialog */}
       <AlertDialog 
         open={!!userToDelete} 
         onOpenChange={(isOpen) => { 
           if (!isOpen) setUserToDelete(null); 
         }}
       >
-        <AlertDialogContent>
-          {userToDelete && ( 
-            <>
+        {userToDelete && ( 
+            <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                <AlertDialogCoreTitle>Are you absolutely sure?</AlertDialogCoreTitle>
                 <AlertDialogDescription>
                   This action cannot be undone. This will permanently delete the user account for 
                   <span className="font-semibold"> {userToDelete.username}</span>.
@@ -340,14 +322,13 @@ export default function RolesPage() {
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel onClick={() => setUserToDelete(null)} disabled={isPendingDelete}>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDeleteUser} disabled={isPendingDelete} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+                <AlertDialogAction onClick={handleDeleteUser} disabled={isPendingDelete || userToDelete.id === 'owner_root'} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
                   {isPendingDelete ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
                   Delete User
                 </AlertDialogAction>
               </AlertDialogFooter>
-            </>
-          )}
-        </AlertDialogContent>
+            </AlertDialogContent>
+        )}
       </AlertDialog>
     </div>
   );

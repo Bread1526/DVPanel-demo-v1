@@ -1,42 +1,37 @@
 // src/lib/session.ts
-import type { IronSessionOptions } from 'iron-session';
-import type { UserData } from '@/app/(app)/roles/actions';
 
-// Define a type for the user object stored in the session
-export type SessionUser = {
+// Define a type for the user object stored in localStorage and used for API requests
+export type LocalSessionInfo = {
+  userId: string;
+  username: string;
+  role: string; // UserData['role'] | 'Owner'
+  token: string;
+};
+
+// Define a type for the data stored in the encrypted session file (e.g., {username}-{role}-Auth.json)
+export type FileSessionData = {
+  userId: string;
+  username: string;
+  role: string; // UserData['role'] | 'Owner'
+  token: string; // The session token
+  createdAt: number; // Timestamp of session creation
+  lastActivity: number; // Timestamp of last recorded activity
+  // Session-specific inactivity settings, copied from global settings at session creation
+  sessionInactivityTimeoutMinutes: number; 
+  disableAutoLogoutOnInactivity: boolean;
+};
+
+// Type for basic user info used in AppShell state after successful auth
+export type AuthenticatedUser = {
   id: string;
   username: string;
-  role: UserData['role'] | 'Owner'; // Allow 'Owner' role from .env
+  role: string; // UserData['role'] | 'Owner';
+  // These will be populated from the main user file (e.g., {username}-{role}.json), not the -Auth.json file
+  projects?: string[];
+  assignedPages?: string[];
+  allowedSettingsPages?: string[];
+  status?: 'Active' | 'Inactive';
 };
 
-export interface SessionData {
-  user?: SessionUser;
-  isLoggedIn: boolean;
-  lastActivity?: number; // Timestamp of last recorded activity
-  sessionInactivityTimeoutMinutes?: number; // User's specific timeout setting for this session
-  disableAutoLogoutOnInactivity?: boolean; // User's specific auto-logout setting for this session
-  
-  // Impersonation state
-  originalUser?: SessionUser; // Stores the original admin user during impersonation
-  impersonatingUserId?: string; // ID of the user being impersonated
-}
-
-export const sessionOptions: IronSessionOptions = {
-  cookieName: 'dvpanel_session',
-  password: process.env.SESSION_PASSWORD as string, // Must be set in .env.local
-  cookieOptions: {
-    secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
-    httpOnly: true,
-    sameSite: 'lax',
-    // maxAge can be set here if you want a fixed absolute timeout.
-    // By default, iron-session creates session cookies (expire when browser closes).
-    // If we set maxAge, and then refresh by re-saving, it acts like a rolling session.
-    // For example, maxAge: 60 * 60 * 24 (24 hours)
-    // We will primarily rely on the explicit inactivity timeout logic in the middleware.
-  },
-};
-
-// This is where we specify the typings of req.session.*
-declare module 'iron-session' {
-  interface IronSessionData extends SessionData {}
-}
+// This file no longer exports iron-session options as we're moving to a custom file-based system.
+// If iron-session is completely removed, ensure its dependencies are also cleaned up from package.json eventually.

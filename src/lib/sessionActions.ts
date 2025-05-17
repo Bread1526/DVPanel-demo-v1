@@ -1,16 +1,55 @@
 
 'use server';
-import { getIronSession } from 'iron-session';
-import { cookies } from 'next/headers';
-import { sessionOptions, type SessionData } from '@/lib/session';
+import { type FileSessionData } from '@/lib/session';
+import { loadEncryptedData, saveEncryptedData } from "@/backend/services/storageService";
+import { loadPanelSettings } from '@/app/(app)/settings/actions'; // For debug logging
+import { getDataPath } from '@/backend/lib/config';
+import path from 'path';
 
-export async function updateSessionActivity() {
-  const session = await getIronSession<SessionData>(cookies(), sessionOptions);
-  if (session.isLoggedIn) {
-    session.lastActivity = Date.now();
-    await session.save(); // This re-saves the session, extending the cookie's expiration
-    // console.log('[SessionActions] Session activity updated and cookie refreshed.');
-    return { success: true, message: 'Session activity updated.' };
+interface TouchSessionResponse {
+  success: boolean;
+  message: string;
+}
+
+export async function touchSession(username?: string, role?: string, token?: string): Promise<TouchSessionResponse> {
+  const panelSettingsResult = await loadPanelSettings();
+  const debugMode = panelSettingsResult.data?.debugMode ?? false;
+
+  if (debugMode) console.log(`[SessionActions - touchSession] Attempting for user: ${username}, role: ${role}, token: ${token ? 'Present' : 'Missing'}`);
+
+  if (!username || !role || !token) {
+    if (debugMode) console.warn('[SessionActions - touchSession] Missing username, role, or token. Cannot update activity.');
+    return { success: false, message: 'Missing session identifiers.' };
   }
-  return { success: false, message: 'User not logged in.' };
+
+  const safeUsername = username.replace(/[^a-zA-Z0-9_.-]/g, '_');
+  const safeRole = role.replace(/[^a-zA-Z0-9]/g, '_');
+  const sessionFilename = `${safeUsername}-${safeRole}-Auth.json`;
+  const dataPath = getDataPath();
+  const sessionFilePath = path.join(dataPath, sessionFilename);
+
+  try {
+    const sessionFileData = await loadEncryptedData(sessionFilename) as FileSessionData | null;
+
+    if (!sessionFileData) {
+      if (debugMode) console.warn(`[SessionActions - touchSession] Session file not found: ${sessionFilename}. Cannot update activity.`);
+      return { success: false, message: 'Session file not found.' };
+    }
+
+    if (sessionFileData.token !== token) {
+      if (debugMode) console.warn(`[SessionActions - touchSession] Token mismatch for user ${username}. Activity not updated.`);
+      // Optionally, could delete the session file here if strict token validation is desired on touch
+      return { success: false, message: 'Invalid session token.' };
+    }
+
+    sessionFileData.lastActivity = Date.now();
+    await saveEncryptedData(sessionFilename, sessionFileData);
+
+    if (debugMode) console.log(`[SessionActions - touchSession] Successfully updated lastActivity for user ${username} in ${sessionFilename}.`);
+    return { success: true, message: 'Session activity updated.' };
+
+  } catch (error) {
+    console.error(`[SessionActions - touchSession] Error updating session activity for ${username}:`, error);
+    return { success: false, message: 'Error updating session activity.' };
+  }
 }

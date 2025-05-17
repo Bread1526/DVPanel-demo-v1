@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react'; // Added useState
 import { useActionState } from 'react';
 import { login, type LoginState } from './actions';
 import { Button } from '@/components/ui/button';
@@ -21,12 +21,43 @@ export default function LoginPage() {
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const redirectUrl = searchParams.get('redirect');
-  const reason = searchParams.get('reason');
-  const [reasonMessage, setReasonMessage] = React.useState<string | null>(null);
+  
+  const [reasonMessage, setReasonMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (formState.status === "error" && formState.message) {
+    // Handle redirect reasons from URL
+    const reason = searchParams.get('reason');
+    if (reason) {
+        if (reason === 'inactive') {
+            setReasonMessage("You have been logged out due to inactivity.");
+        } else if (reason === 'unauthorized') {
+            setReasonMessage("You need to log in to access this page.");
+        } else if (reason === 'settings_changed') {
+            setReasonMessage("Settings updated. Please log in again.");
+        }
+        // Clean the reason from URL to prevent re-showing on refresh/re-render without a new redirect
+        const newUrl = new URL(window.location.href);
+        newUrl.searchParams.delete('reason');
+        router.replace(newUrl.toString(), { scroll: false });
+    }
+  }, [searchParams, router]);
+
+
+  useEffect(() => {
+    if (formState.status === "success" && formState.sessionInfo) {
+      toast({
+        title: "Login Successful",
+        description: formState.message,
+      });
+      // Store session info in localStorage
+      localStorage.setItem('dvpanel-session', JSON.stringify(formState.sessionInfo));
+      
+      const redirectUrlParam = searchParams.get('redirect'); // Get redirect from current searchParams
+      const destination = redirectUrlParam || '/'; // Default to dashboard
+      router.push(destination);
+
+    } else if ((formState.status === "error" || formState.status === "validation_failed") && formState.message) {
+      // Display field-specific errors if available, otherwise the general message
       if (!formState.errors?.username && !formState.errors?.password && !formState.errors?._form) {
         toast({
           title: "Login Failed",
@@ -35,18 +66,7 @@ export default function LoginPage() {
         });
       }
     }
-    if (reason && !reasonMessage) { 
-        if (reason === 'inactive') {
-            setReasonMessage("You have been logged out due to inactivity.");
-        } else if (reason === 'unauthorized') {
-            setReasonMessage("You need to log in to access this page.");
-        }
-        // Clean the reason from URL to prevent re-showing on refresh/re-render without a new redirect
-        const newUrl = new URL(window.location.href);
-        newUrl.searchParams.delete('reason');
-        router.replace(newUrl.toString(), { scroll: false });
-    }
-  }, [formState, toast, reason, router, reasonMessage]);
+  }, [formState, toast, router, searchParams]);
 
   return (
     <Card className="w-full max-w-md shadow-2xl rounded-xl">
@@ -66,7 +86,7 @@ export default function LoginPage() {
               <AlertDescription>{reasonMessage}</AlertDescription>
             </Alert>
           )}
-          {formState.status === 'error' && formState.errors?._form && (
+          {formState.status !== "idle" && formState.errors?._form && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertTitle>Login Error</AlertTitle>
@@ -107,10 +127,10 @@ export default function LoginPage() {
               htmlFor="keepLoggedIn"
               className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
             >
-              Keep me logged in
+              Keep me logged in (Not functional with file-based sessions)
             </Label>
           </div>
-          {redirectUrl && <input type="hidden" name="redirectUrl" value={redirectUrl} />}
+          {searchParams.get('redirect') && <input type="hidden" name="redirectUrl" value={searchParams.get('redirect')!} />}
         </CardContent>
         <CardFooter className="flex flex-col">
           <Button type="submit" className="w-full text-lg py-6 shadow-md hover:scale-105 transform transition-transform duration-150" disabled={isPending}>
