@@ -1,12 +1,10 @@
-
 // src/lib/logger.ts
-'use server';
-
 import { loadEncryptedData, saveEncryptedData } from '@/backend/services/storageService';
-import { type UserSettingsData } from './user-settings';
-import { type PanelSettingsData, loadPanelSettings as loadGlobalPanelSettingsIfAvailable } from '@/app/(app)/settings/actions'; // For global settings
+import type { UserSettingsData } from './user-settings'; // For user debug settings
+// import type { PanelSettingsData } from '@/app/(app)/settings/actions'; // For global settings
+import { loadPanelSettings as loadGlobalPanelSettingsIfAvailable } from '@/app/(app)/settings/actions';
 
-type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'AUTH' | 'DEBUG';
+export type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'AUTH' | 'DEBUG';
 
 export interface LogEntry {
   timestamp: string;
@@ -20,38 +18,58 @@ export interface LogEntry {
   ipAddress?: string; // Optional: if IP logging is desired and obtainable
 }
 
-const OWNER_LOG_FILE = 'Owner-Logs.json';
-const ADMIN_LOG_FILE = 'Admin-Logs.json';
-const CUSTOM_LOG_FILE = 'Custom-Logs.json';
+export const OWNER_LOG_FILE = 'Owner-Logs.json';
+export const ADMIN_LOG_FILE = 'Admin-Logs.json';
+export const CUSTOM_LOG_FILE = 'Custom-Logs.json';
+
+// Placeholder for potential future settings specific to logging behavior, if needed.
+export interface PanelLogSettings {
+  maxLogFileSize?: number; // e.g., in MB
+  logRotation?: boolean;
+}
+
 
 async function getEffectiveDebugMode(username?: string, role?: string): Promise<boolean> {
-  if (username && role && username !== 'System' && username !== 'UnknownUser') {
+  // Attempt to load user-specific debugMode first
+  if (username && role && username !== 'System' && username !== 'UnknownUser' && username !== 'Unknown') {
+    const safeUsername = username.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const safeRole = role.replace(/[^a-zA-Z0-9]/g, '_');
+    const settingsFilename = `${safeUsername}-${safeRole}-settings.json`;
     try {
-      const safeUsername = username.replace(/[^a-zA-Z0-9_.-]/g, '_');
-      const safeRole = role.replace(/[^a-zA-Z0-9]/g, '_');
-      const settingsFilename = `${safeUsername}-${safeRole}-settings.json`;
-      const userSettingsData = await loadEncryptedData(settingsFilename) as UserSettingsData | null;
-      if (userSettingsData && typeof userSettingsData.debugMode === 'boolean') {
-        return userSettingsData.debugMode;
+      const userSettings = await loadEncryptedData(settingsFilename) as UserSettingsData | null;
+      if (userSettings && typeof userSettings.debugMode === 'boolean') {
+        // console.log(`[Logger - DebugModeCheck] User ${username} debugMode: ${userSettings.debugMode}`);
+        return userSettings.debugMode;
       }
-    } catch { /* Fall through */ }
+    } catch (e) {
+      // console.warn(`[Logger - DebugModeCheck] Could not load user-specific settings for ${username}:`, e);
+    }
   }
-  // Fallback to global settings if user-specific not found or not applicable
+
+  // Fallback to global debugMode from .settings.json
+  // Note: panelSettingsSchema no longer includes debugMode, so this path may not be relevant
+  // for a global debug flag unless it's re-added or sourced differently.
   try {
     const globalSettingsResult = await loadGlobalPanelSettingsIfAvailable();
     if (globalSettingsResult.status === 'success' && globalSettingsResult.data) {
-      // Global panel settings no longer directly store debugMode.
-      // This part can be removed or adapted if global debug makes sense.
-      // For now, if user-specific debug isn't on, assume debug is off for logging verbosity.
+       // if (typeof globalSettingsResult.data.debugMode === 'boolean') {
+       //  console.log(`[Logger - DebugModeCheck] Global debugMode: ${globalSettingsResult.data.debugMode}`);
+       //  return globalSettingsResult.data.debugMode;
+       // }
     }
-  } catch { /* ignore */ }
-  return false; // Default to false
+  } catch (e) {
+    // console.warn(`[Logger - DebugModeCheck] Could not load global panel settings:`, e);
+  }
+  
+  // Default to false if no debugMode setting is found anywhere
+  // console.log(`[Logger - DebugModeCheck] Defaulting to debugMode: false for user: ${username || 'N/A'}`);
+  return false;
 }
 
 
 export async function logEvent(
   username: string,
-  role: string, // This is the role of the user *performing* the action
+  role: string, 
   action: string,
   level: LogLevel,
   details?: object | string,
@@ -59,7 +77,7 @@ export async function logEvent(
   targetRole?: string
 ): Promise<void> {
   
-  const effectiveDebugMode = await getEffectiveDebugMode(username, role);
+  const effectiveDebugModeForThisEvent = await getEffectiveDebugMode(username, role);
 
   const fullLogEntry: LogEntry = {
     timestamp: new Date().toISOString(),
@@ -80,18 +98,19 @@ export async function logEvent(
       if (existingLogsRaw && Array.isArray(existingLogsRaw)) {
         logs = existingLogsRaw as LogEntry[];
       } else if (existingLogsRaw) {
-        // If file exists but isn't an array (e.g., corrupted), log warning and overwrite.
-        console.warn(`[Logger] Log file ${filename} was not an array or was corrupted. Resetting log file.`);
-        // Optionally, back up corrupted file before resetting:
-        // await saveEncryptedData(`${filename}.corrupted.${Date.now()}.json`, existingLogsRaw);
-        logs = []; // Start fresh
+        // This case implies the file existed but wasn't an array (corrupted)
+        if (effectiveDebugModeForThisEvent) {
+            console.warn(`[Logger] Log file ${filename} was not an array or was corrupted. Resetting log file.`);
+        }
+        logs = []; // Reset to empty array to prevent further errors with this file
       }
-      // else if !existingLogsRaw, logs remains an empty array, which is fine for new file
+      // If existingLogsRaw is null (file didn't exist), logs remains an empty array, which is correct.
 
       logs.push(entry);
-      await saveEncryptedData(filename, logs); // storageService encrypts and saves
+      // Optional: Limit log size, e.g., logs = logs.slice(-1000);
+      await saveEncryptedData(filename, logs); 
 
-      if (effectiveDebugMode) {
+      if (effectiveDebugModeForThisEvent) {
         console.log(`[Logger - Debug] Event logged to ${filename}: Action: ${entry.action}, User: ${entry.username}(${entry.role})`);
       }
     } catch (e) {
@@ -100,20 +119,30 @@ export async function logEvent(
   };
 
   // Hierarchical logging
+  // All logs go to Owner-Logs.json
   await appendToLogFile(OWNER_LOG_FILE, fullLogEntry);
 
   if (role === 'Admin') {
     await appendToLogFile(ADMIN_LOG_FILE, fullLogEntry);
   } else if (role === 'Custom') {
-    await appendToLogFile(ADMIN_LOG_FILE, fullLogEntry); // Custom logs also go into Admin logs
+    // Custom logs also go into Admin logs for Admin visibility, then into their own.
+    await appendToLogFile(ADMIN_LOG_FILE, fullLogEntry); 
     await appendToLogFile(CUSTOM_LOG_FILE, fullLogEntry);
   }
-  // 'Owner', 'Administrator', 'System', 'Unknown' roles only log to OWNER_LOG_FILE directly.
-
+  
   // Console logging part
+  const consoleMsg = `[${fullLogEntry.level}] User: ${fullLogEntry.username}(${fullLogEntry.role}) Action: ${fullLogEntry.action}`;
+  const detailsString = fullLogEntry.details ? (typeof fullLogEntry.details === 'string' ? fullLogEntry.details : JSON.stringify(fullLogEntry.details)) : '';
+  const targetString = fullLogEntry.targetUser ? `Target: ${fullLogEntry.targetUser}(${fullLogEntry.targetRole || 'N/A'})` : '';
+
+  // Always log ERROR and AUTH to console.
+  // Log WARN and INFO to console regardless of debug mode for general visibility.
+  // Log DEBUG level messages only if effectiveDebugModeForThisEvent is true.
   if (level === 'ERROR' || level === 'AUTH') {
-    console.error(`[${fullLogEntry.level}] ${fullLogEntry.timestamp} User: ${fullLogEntry.username}(${fullLogEntry.role}) Action: ${fullLogEntry.action}`, fullLogEntry.details || '', fullLogEntry.targetUser ? `Target: ${fullLogEntry.targetUser}(${fullLogEntry.targetRole})` : '');
-  } else if (effectiveDebugMode || level === 'WARN') { 
-     console.log(`[${fullLogEntry.level}] ${fullLogEntry.timestamp} User: ${fullLogEntry.username}(${fullLogEntry.role}) Action: ${fullLogEntry.action}`, fullLogEntry.details || '', fullLogEntry.targetUser ? `Target: ${fullLogEntry.targetUser}(${fullLogEntry.targetRole})` : '');
+    console.error(`${consoleMsg}`, detailsString, targetString);
+  } else if (level === 'WARN' || level === 'INFO') {
+     console.log(`${consoleMsg}`, detailsString, targetString);
+  } else if (level === 'DEBUG' && effectiveDebugModeForThisEvent) {
+     console.log(`${consoleMsg}`, detailsString, targetString);
   }
 }
