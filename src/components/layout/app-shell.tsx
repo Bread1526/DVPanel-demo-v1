@@ -38,7 +38,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'; 
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'; 
 import { cn } from '@/lib/utils';
 import { useEffect, useState } from 'react';
 import { logout } from '@/app/(app)/logout/actions';
@@ -60,7 +60,7 @@ interface CurrentUser {
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  useActivityTracker(); // Initialize activity tracking
+  useActivityTracker(); 
   const pathname = usePathname();
   const { state: sidebarState, isMobile } = useSidebar(); 
   const router = useRouter();
@@ -115,13 +115,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               
               const menuButton = (
                 <SidebarMenuButton
-                  href={item.href} // Pass href for the <a> tag
                   isActive={isActive}
                   variant="default"
                   size="default"
-                  // Explicitly destructure and ignore props not meant for <a> if any were added
-                  // For example, if a 'tooltip' prop was on SidebarMenuButton's interface
-                  // but not intended for the final <a> tag, we would handle it here or in SidebarMenuButton.
+                  href={item.href} // Pass href for the <a> tag rendered by SidebarMenuButton
                 >
                   <item.icon />
                   <span className={cn(
@@ -140,24 +137,26 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 </SidebarMenuButton>
               );
 
-              let linkWrappedButton = (
-                 <Link href={item.href} asChild>
-                   {menuButton}
-                 </Link>
-               );
-              
-              let finalElement = linkWrappedButton;
+              let finalElement;
 
               if (sidebarState === 'collapsed' && !isMobile && item.label) {
                  finalElement = (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      {linkWrappedButton}
+                      <Link href={item.href} asChild>
+                        {menuButton}
+                      </Link>
                     </TooltipTrigger>
                     <TooltipContent side="right" align="center">
                       <p>{item.label}</p>
                     </TooltipContent>
                   </Tooltip>
+                );
+              } else {
+                finalElement = (
+                  <Link href={item.href} asChild>
+                    {menuButton}
+                  </Link>
                 );
               }
               
@@ -213,3 +212,5 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </>
   );
 }
+
+    
