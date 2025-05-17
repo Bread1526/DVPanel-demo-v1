@@ -56,14 +56,15 @@ import { useToast } from "@/hooks/use-toast";
 import { cva } from 'class-variance-authority';
 import ProfileDialog from '@/app/(app)/profile/components/profile-dialog';
 import { loadPanelSettings } from '@/app/(app)/settings/actions'; 
+import LogsViewerDialog from '@/components/logs/LogsViewerDialog'; // Import the new dialog
 
 const navItemsBase = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, requiredPage: 'dashboard' },
-  { href: '/projects', label: 'Projects', icon: Layers, count: 0, requiredPage: 'projects_page' }, // Example count
+  { href: '/projects', label: 'Projects', icon: Layers, count: 0, requiredPage: 'projects_page' },
   { href: '/files', label: 'File Manager', icon: FileText, requiredPage: 'files' },
   { href: '/ports', label: 'Port Manager', icon: Network, requiredPage: 'ports' },
   { href: '/roles', label: 'User Roles', icon: Users, requiredPage: 'roles' },
-  { href: '/logs', label: 'Panel Logs', icon: ScrollText, requiredPage: 'logs_page' }, // Added Logs Page
+  // { href: '/logs', label: 'Panel Logs', icon: ScrollText, requiredPage: 'logs_page' }, // Removed from main nav
   { href: '/settings', label: 'Settings', icon: SettingsIcon, requiredPage: 'settings_area' },
 ];
 
@@ -108,23 +109,27 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [currentUserData, setCurrentUserData] = useState<AuthenticatedUser | null>(null);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [isPageAccessGranted, setIsPageAccessGranted] = useState<boolean | null>(null);
-  const [userDebugMode, setUserDebugMode] = useState(false); 
   const [globalDebugMode, setGlobalDebugMode] = useState(false);
   const [isPendingLogout, startLogoutTransition] = useTransition();
   const [hasMounted, setHasMounted] = useState(false);
+  const [isLogsViewerOpen, setIsLogsViewerOpen] = useState(false); // State for logs dialog
 
   useEffect(() => {
     setHasMounted(true);
     const fetchGlobalDebugMode = async () => {
-        const settings = await loadPanelSettings();
-        if (settings.data?.debugMode) {
-            setGlobalDebugMode(true);
+        try {
+            const settings = await loadPanelSettings();
+            if (settings.data?.debugMode) {
+                setGlobalDebugMode(true);
+            }
+        } catch (e) {
+            console.warn("[AppShell] Could not load global debug settings for initial check.");
         }
     };
     fetchGlobalDebugMode();
   }, []);
   
-  const effectiveDebugMode = userDebugMode || globalDebugMode;
+  const effectiveDebugMode = currentUserData?.userSettings?.debugMode || globalDebugMode;
 
   const performLogout = useCallback(async (reason?: string) => {
     if (effectiveDebugMode) console.log('[AppShell] performLogout initiated.', { reason });
@@ -138,6 +143,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         setIsPageAccessGranted(false); 
 
         const redirectPath = `/login${reason ? `?reason=${reason}` : ''}`;
+        if (effectiveDebugMode) console.log(`[AppShell] Redirecting to ${redirectPath} after logout.`);
         router.push(redirectPath);
 
       } catch (e) {
@@ -179,7 +185,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       const data: ApiAuthUserResponse = await response.json();
       if (data.user && data.user.status === 'Active') {
         setCurrentUserData(data.user);
-        setUserDebugMode(data.user.userSettings?.debugMode ?? false);
         if (data.user.userSettings?.debugMode || globalDebugMode) {
           console.log('[AppShell] User data fetched successfully:', { 
             id: data.user.id, 
@@ -217,13 +222,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (hasMounted) {
       fetchUserAndCheckAccess();
     }
-  }, [pathname, hasMounted, fetchUserAndCheckAccess]);
+  }, [pathname, hasMounted, fetchUserAndCheckAccess]); // Pathname dependency will refetch user on route change
 
   const effectiveUser = currentUserData;
 
   useEffect(() => {
     if (!hasMounted || isLoadingUser || !effectiveUser) {
-      if (userDebugMode && !isLoadingUser && !effectiveUser && hasMounted) console.log('[AppShell] Page access check: No current user data or still loading, access not determined yet.');
+      if (effectiveDebugMode && !isLoadingUser && !effectiveUser && hasMounted) console.log('[AppShell] Page access check: No current user data or still loading, access not determined yet.');
       setIsPageAccessGranted(null);
       return;
     }
@@ -234,14 +239,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     
     let requiredPageId = navItemsBase.find(item => {
       if (item.href === '/') return currentTopLevelPath === '/';
-      // Match /settings or /settings/*
       if (item.href === '/settings') return pathname.startsWith('/settings');
-      // Match /logs or /logs/*
-      if (item.href === '/logs') return pathname.startsWith('/logs');
+      // if (item.href === '/logs') return pathname.startsWith('/logs'); // Logs page removed from main nav
       return currentTopLevelPath.startsWith(item.href);
     })?.requiredPage;
   
-    // Default to dashboard if at root
     if (!requiredPageId && currentTopLevelPath === '/') requiredPageId = 'dashboard';
   
     if (effectiveDebugMode) console.log(`[AppShell] Page access check for path: "${pathname}", topLevelPath: "${currentTopLevelPath}", effectiveUser role: "${effectiveUser.role}", requiredPageId: "${requiredPageId}"`);
@@ -250,12 +252,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       hasAccess = false;
       if (effectiveDebugMode) console.log('[AppShell] Page access: Denied (User Inactive)');
     } else if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') {
-      hasAccess = !!navItemsBase.find(item => item.requiredPage === requiredPageId) || (requiredPageId === 'settings_area' && pathname.startsWith('/settings')) || (requiredPageId === 'logs_page' && pathname.startsWith('/logs'));
+      hasAccess = !!navItemsBase.find(item => item.requiredPage === requiredPageId) || (requiredPageId === 'settings_area' && pathname.startsWith('/settings'));
       if (effectiveDebugMode) console.log(`[AppShell] Page access (Owner/Administrator for ${requiredPageId || pathname}): ${hasAccess}`);
     } else if (effectiveUser.role === 'Admin') {
-        // Admins can access dashboard, projects, files, ports, roles, and logs.
-        // For settings, they need specific permissions.
-        const adminBaseAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles', 'logs_page'];
+        const adminBaseAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles' /* 'logs_page' removed */];
         if (requiredPageId === 'settings_area' && pathname.startsWith('/settings')) {
             hasAccess = effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
             if (hasAccess && pathSegments[0] === 'settings' && pathSegments[1]) {
@@ -275,9 +275,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           const specificSettingPageId = `settings_${pathSegments[1]}`;
           hasAccess = effectiveUser.allowedSettingsPages?.includes(specificSettingPageId) ?? false;
         }
-      } else if (requiredPageId && requiredPageId === 'logs_page' && pathname.startsWith('/logs')) {
-        hasAccess = effectiveUser.assignedPages.includes('logs_page');
-      }
+      } 
+      // else if (requiredPageId && requiredPageId === 'logs_page' && pathname.startsWith('/logs')) { // logs_page removed
+      //   hasAccess = effectiveUser.assignedPages.includes('logs_page');
+      // }
       else if (requiredPageId) { 
         hasAccess = effectiveUser.assignedPages.includes(requiredPageId);
       } else {
@@ -296,9 +297,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const getIsActive = useCallback((itemHref: string) => {
     if (!hasMounted) return false;
     if (itemHref === '/') return pathname === '/';
-    // For /settings, make active if path is /settings or /settings/*
     if (itemHref === '/settings') return pathname === '/settings' || pathname.startsWith('/settings/');
-    if (itemHref === '/logs') return pathname === '/logs' || pathname.startsWith('/logs/');
+    // if (itemHref === '/logs') return pathname === '/logs' || pathname.startsWith('/logs/'); // logs page removed
     return pathname.startsWith(itemHref);
   }, [pathname, hasMounted]);
 
@@ -308,7 +308,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') return true;
     
     if (effectiveUser.role === 'Admin') {
-      const adminBaseAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles', 'logs_page'];
+      const adminBaseAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles' /* 'logs_page' removed */];
       if (item.requiredPage === 'settings_area') {
         return effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
       }
@@ -341,7 +341,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
     );
   } else if (pathname === '/login' && !isLoadingUser && !effectiveUser) {
-    // This case might not be hit if middleware redirects before AppShell mounts for /login
     pageContent = children; 
   }
   else {
@@ -370,9 +369,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     fetchUserAndCheckAccess();
   }, [fetchUserAndCheckAccess, effectiveDebugMode]);
 
-  // const menuButtonRef = React.useRef<HTMLAnchorElement>(null);
-  // Use different ref for button if SidebarMenuButton renders a button
-  const menuButtonRef = React.useRef<HTMLButtonElement>(null);
+  const menuButtonRef = React.useRef<HTMLAnchorElement>(null);
 
 
   return (
@@ -387,44 +384,40 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <SidebarContent>
           <SidebarMenu>
             {navItems.map((item) => {
-              const isActive = getIsActive(item.href);
-              const showTextForLayout = hasMounted && (!isMobile && sidebarState === 'expanded' || isMobile);
-              const showTooltip = hasMounted && sidebarState === 'collapsed' && !isMobile && item.label;
-
-              const menuItemContent = (
-                <SidebarMenuItemLayout
-                  icon={item.icon}
-                  label={item.label}
-                  badgeContent={item.count && item.count > 0 ? <SidebarMenuBadge>{item.count}</SidebarMenuBadge> : undefined}
-                  showText={showTextForLayout}
-                />
-              );
-
-              let linkWrappedButton = (
-                 <Link href={item.href} className={cn(linkAsButtonVariants({ isActive }))} >
-                   {menuItemContent}
+               const isActive = getIsActive(item.href);
+               const showTextForLayout = hasMounted && (!isMobile && sidebarState === 'expanded' || isMobile);
+               const showTooltip = hasMounted && sidebarState === 'collapsed' && !isMobile && item.label;
+ 
+               const menuButtonContent = (
+                 <SidebarMenuItemLayout
+                   icon={item.icon}
+                   label={item.label}
+                   badgeContent={item.count && item.count > 0 ? <SidebarMenuBadge>{item.count}</SidebarMenuBadge> : undefined}
+                   showText={showTextForLayout}
+                 />
+               );
+ 
+               let linkElement = (
+                 <Link href={item.href} className={cn(linkAsButtonVariants({ isActive }))}>
+                   {menuButtonContent}
                  </Link>
                );
-
-              if (showTooltip) {
-                linkWrappedButton = (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        {linkWrappedButton}
-                      </TooltipTrigger>
-                      <TooltipContent side="right" align="center">
-                        <p>{item.label}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                );
-              }
-              return (
-                <SidebarMenuItem key={item.label}>
-                  {linkWrappedButton}
-                </SidebarMenuItem>
-              );
+ 
+               if (showTooltip) {
+                 linkElement = (
+                   <TooltipProvider>
+                     <Tooltip>
+                       <TooltipTrigger asChild>
+                         {linkElement}
+                       </TooltipTrigger>
+                       <TooltipContent side="right" align="center">
+                         <p>{item.label}</p>
+                       </TooltipContent>
+                     </Tooltip>
+                   </TooltipProvider>
+                 );
+               }
+               return <SidebarMenuItem key={item.label}>{linkElement}</SidebarMenuItem>;
             })}
           </SidebarMenu>
         </SidebarContent>
@@ -451,7 +444,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <DropdownMenuLabel>My Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {ProfileDialog && <ProfileDialog currentUser={currentUserData} onSettingsUpdate={handleSettingsUpdated} />}
-              <DropdownMenuItem onClick={() => router.push('/logs')}>
+              <DropdownMenuItem onSelect={() => setIsLogsViewerOpen(true)}>
                 <ScrollText className="mr-2 h-4 w-4" />
                 <span>Panel Logs</span>
               </DropdownMenuItem>
@@ -467,7 +460,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 variant="outline" 
                 size="sm" 
                 onClick={() => setSidebarOpen(sidebarState === 'expanded' ? false : true)} 
-                className="md:hidden" // Only show on mobile if sidebar is expanded, to allow collapsing it
+                className="md:hidden"
               >
               <PanelLeft className="mr-2 h-4 w-4" /> Collapse
             </Button>
@@ -477,18 +470,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <SidebarInset>
         <header className={cn(
             "sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background/80 px-4 backdrop-blur-sm sm:h-16 sm:px-6 md:px-8",
-            // This ensures the header is shown when sidebar is inset and not on mobile
             "md:hidden group-data-[variant=inset]/sidebar-wrapper:md:flex group-data-[variant=inset]/sidebar-wrapper:md:items-center" 
             )}>
           <SidebarTrigger className="md:hidden" /> 
            <div className="md:hidden group-data-[variant=inset]/sidebar-wrapper:md:flex group-data-[variant=inset]/sidebar-wrapper:md:items-center">
-            {/* Placeholder for potential breadcrumbs or page title in header */}
           </div>
         </header>
         <main className="flex-1 p-4 sm:p-6 md:p-8">
           {pageContent}
         </main>
       </SidebarInset>
+      <LogsViewerDialog open={isLogsViewerOpen} onOpenChange={setIsLogsViewerOpen} />
     </>
   );
 }
