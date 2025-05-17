@@ -10,53 +10,80 @@ import {
   ToastTitle,
   ToastViewport,
 } from "@/components/ui/toast"
-import React from "react";
+import React, { useEffect, useState } from "react"; // Added useState, useEffect
+import type { UserSettingsData, UserPopupSettingsData } from "@/lib/user-settings"; // Import types
 
 export function Toaster() {
   const { toasts } = useToast();
 
-  const [popupSettings, setPopupSettings] = React.useState(() => {
-    if (typeof window !== 'undefined') {
+  // Try to get user-specific settings from AppShell context or global state if available
+  // For this example, we'll simulate getting it from localStorage on mount.
+  // A more robust solution would involve React Context or a global state manager.
+  const [popupSettings, setPopupSettings] = useState<UserPopupSettingsData | null>(null);
+  const [hasMounted, setHasMounted] = useState(false);
+
+  useEffect(() => {
+    setHasMounted(true);
+    // Attempt to load user-specific settings if available, e.g., from localStorage
+    // This is a simplified approach. In a real app, this might come from a user context.
+    const storedSettings = localStorage.getItem('dvpanel-user-settings'); // Assuming settings are stored here
+    if (storedSettings) {
       try {
-        const storedSettings = localStorage.getItem('dvpanel-popup-settings');
-        if (storedSettings) {
-          const parsed = JSON.parse(storedSettings);
-          return {
-            disableAutoClose: parsed.disableAutoClose ?? false,
-            enableCopyError: parsed.enableCopyError ?? true, 
-          };
-        }
-      } catch (error) {
-        console.warn("Could not parse popup settings from localStorage", error);
+        const parsedSettings: UserSettingsData = JSON.parse(storedSettings);
+        setPopupSettings(parsedSettings.popup);
+      } catch (e) {
+        console.warn("Toaster: Could not parse user settings from localStorage", e);
       }
     }
-    // Fallback defaults if localStorage is unavailable or invalid
-    return { 
-      disableAutoClose: false,
-      enableCopyError: true, 
-    };
-  });
+  }, []);
+
+  const getEffectivePopupSetting = <K extends keyof UserPopupSettingsData>(
+    key: K, 
+    defaultValue: UserPopupSettingsData[K]
+  ): UserPopupSettingsData[K] => {
+    if (!hasMounted || !popupSettings) {
+      // Fallback to localStorage or hardcoded defaults before user settings are loaded
+      // This part needs to align with how actual settings are made available globally
+      // For now, using a simple localStorage check as a placeholder for broader access
+      if (typeof window !== 'undefined') {
+        try {
+            const lsGlobalSettings = localStorage.getItem('dvpanel-popup-settings'); // Old global settings key
+            if(lsGlobalSettings) {
+                const parsed = JSON.parse(lsGlobalSettings);
+                if (parsed && typeof parsed[key] !== 'undefined') return parsed[key];
+            }
+        } catch (e) { /* ignore */ }
+      }
+      return defaultValue;
+    }
+    return popupSettings[key] ?? defaultValue;
+  };
+
 
   return (
-    <ToastProvider duration={5000}> {/* This is the provider's default if individual toast duration is undefined */}
+    <ToastProvider duration={getEffectivePopupSetting('notificationDuration', 5) * 1000}>
       {toasts.map(function ({ id, title, description, action, errorContent, duration: toastSpecificDuration, ...props }) {
         
-        // Determine the duration to pass to the Radix Toast Root.
-        // If disableAutoClose is true, duration is Infinity.
-        // Otherwise, use the specific duration for this toast if provided.
-        // If toastSpecificDuration is undefined, Toast.Root will inherit from ToastProvider.
-        const actualDurationForRadix = popupSettings.disableAutoClose 
-          ? Infinity 
-          : toastSpecificDuration; 
-        
-        // console.log(`[Toaster.tsx] Toast ID: ${id}, disableAutoClose: ${popupSettings.disableAutoClose}, toastSpecificDuration: ${toastSpecificDuration}, actualDurationForRadix: ${actualDurationForRadix}`);
+        const effectiveDisableAutoClose = getEffectivePopupSetting('disableAutoClose', false);
+        const effectiveEnableCopyError = getEffectivePopupSetting('enableCopyError', true);
 
+        // Determine the duration to pass to the Radix Toast Root.
+        let actualDurationForRadix: number | undefined = toastSpecificDuration;
+
+        if (effectiveDisableAutoClose) {
+          actualDurationForRadix = Infinity;
+        } else if (typeof toastSpecificDuration !== 'number') {
+          // If no specific duration for this toast, let it inherit from ToastProvider
+          // The ToastProvider's duration is already set using getEffectivePopupSetting.
+          actualDurationForRadix = undefined; 
+        }
+        
         return (
           <Toast 
             key={id} 
-            duration={actualDurationForRadix} // Pass this to the Toast component
+            duration={actualDurationForRadix}
             errorContent={errorContent}
-            data-enable-copy-error={String(popupSettings.enableCopyError)}
+            data-enable-copy-error={String(effectiveEnableCopyError)}
             {...props}
           >
             <div className="grid gap-1">

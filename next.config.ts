@@ -17,9 +17,9 @@ const nextConfig: NextConfig = {
         port: '',
         pathname: '/**',
       },
-      {
+       {
         protocol: 'https',
-        hostname: 'codehs.com',
+        hostname: 'cdn.dvpanel.com',
         port: '',
         pathname: '/**',
       },

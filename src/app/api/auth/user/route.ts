@@ -1,37 +1,42 @@
+
 'use server';
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { getIronSession } from 'iron-session';
+import { cookies } from 'next/headers';
 import { sessionOptions, type SessionData, type AuthenticatedUser } from '@/lib/session';
 import { loadUserById, type UserData as FullUserData } from '@/app/(app)/roles/actions';
-import { loadPanelSettings } from '@/app/(app)/settings/actions';
-import { cookies } from 'next/headers';
-import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storageService";
+import { loadPanelSettings } from '@/app/(app)/settings/actions'; // For global debug mode
+import { loadEncryptedData, saveEncryptedData } from "@/backend/services/storageService";
+import { userSettingsSchema, defaultUserSettings, type UserSettingsData } from '@/lib/user-settings'; // For user-specific settings
 import { getDataPath } from '@/backend/lib/config';
 import path from 'path';
 import fs from 'fs/promises';
+import { logEvent } from '@/lib/logger';
 
-// Structure for the server-side Auth JSON file
-type ServerSessionAuthFileData = {
-  userId: string;
+// Type for the server-side session file ({username}-{role}-Auth.json)
+// This file primarily tracks activity and specific session timeout settings.
+// The primary session proof is the iron-session cookie.
+type ServerSideSessionFileData = {
+  userId: string; // To link back to the main user profile
   username: string;
   role: string;
-  token: string; // This is the token stored in the file, not used by iron-session directly
+  // token: string; // A token might be stored here if needed for external service validation or revoking specific file-based sessions.
   createdAt: number;
   lastActivity: number;
   sessionInactivityTimeoutMinutes: number;
   disableAutoLogoutOnInactivity: boolean;
 };
 
-
 export async function GET(request: NextRequest) {
-  const panelSettingsResult = await loadPanelSettings();
-  const debugMode = panelSettingsResult.data?.debugMode ?? false;
+  const panelSettingsResult = await loadPanelSettings(); // For global debug_mode flag
+  // User specific debug mode is loaded later after user identification.
+  const globalDebugMode = panelSettingsResult.data?.debugMode ?? false; 
   const session = await getIronSession<SessionData>(cookies(), sessionOptions);
 
-  if (debugMode) {
+  if (globalDebugMode) {
     console.log('[API /auth/user] Received GET request.');
-    console.log('[API /auth/user] Cookie Session Data:', { 
+    console.log('[API /auth/user] IronSession Cookie Data:', { 
       isLoggedIn: session.isLoggedIn, 
       userId: session.userId, 
       username: session.username, 
@@ -40,37 +45,41 @@ export async function GET(request: NextRequest) {
   }
 
   if (!session.isLoggedIn || !session.userId || !session.username || !session.role) {
-    if (debugMode) console.log('[API /auth/user] No active session found in cookie. Returning 401.');
+    if (globalDebugMode) console.log('[API /auth/user] No active session found in cookie. Returning 401.');
+    logEvent('Unknown', 'Unknown', 'AUTH_USER_NO_SESSION_COOKIE', 'INFO');
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
-  // Construct server-side session filename
+  // At this point, iron-session cookie is valid. Now, check server-side session file for activity.
   const safeUsername = session.username.replace(/[^a-zA-Z0-9_.-]/g, '_');
   const safeRole = session.role.replace(/[^a-zA-Z0-9]/g, '_');
-  const serverSessionFilename = `${safeUsername}-${safeRole}-Auth.json`;
+  const serverSessionFilename = `${safeUsername}-${safeRole}-Auth.json`; // This file stores activity for an iron-session
   
-  if(debugMode) console.log(`[API /auth/user] Looking for server session file: ${serverSessionFilename}`);
+  if(globalDebugMode) console.log(`[API /auth/user] Cookie valid for ${session.username}. Looking for server session state file: ${serverSessionFilename}`);
 
-  let serverSessionData: ServerSessionAuthFileData | null = null;
+  let serverSessionFileData: ServerSideSessionFileData | null = null;
   try {
-    serverSessionData = await loadEncryptedData(serverSessionFilename) as ServerSessionAuthFileData | null;
+    serverSessionFileData = await loadEncryptedData(serverSessionFilename) as ServerSideSessionFileData | null;
   } catch (e) {
     console.error(`[API /auth/user] Error loading server session file ${serverSessionFilename}:`, e);
-    await session.destroy(); // Destroy cookie session if server file is problematic
+    logEvent(session.username, session.role, 'AUTH_USER_SERVER_SESSION_LOAD_ERROR', 'ERROR', { error: (e as Error).message });
+    await session.destroy(); 
     return NextResponse.json({ error: 'Session data error on server' }, { status: 500 });
   }
 
-  if (!serverSessionData) {
-    if (debugMode) console.log(`[API /auth/user] Server session file ${serverSessionFilename} not found. Invalidating cookie session. Returning 401.`);
-    await session.destroy(); // Destroy cookie session if server file is missing
+  if (!serverSessionFileData) {
+    if (globalDebugMode) console.log(`[API /auth/user] Server session file ${serverSessionFilename} not found. Invalidating cookie session.`);
+    logEvent(session.username, session.role, 'AUTH_USER_SERVER_SESSION_NOT_FOUND', 'WARN');
+    await session.destroy();
     return NextResponse.json({ error: 'Session not found on server' }, { status: 401 });
   }
 
-  // Perform inactivity check using data from serverSessionData
-  if (!serverSessionData.disableAutoLogoutOnInactivity) {
-    const timeoutMilliseconds = (serverSessionData.sessionInactivityTimeoutMinutes || 30) * 60 * 1000;
-    if (Date.now() - serverSessionData.lastActivity > timeoutMilliseconds) {
-      if (debugMode) console.log(`[API /auth/user] Session for ${session.username} timed out due to inactivity. Deleting server session file and cookie.`);
+  // Perform inactivity check using data from serverSessionFileData
+  if (!serverSessionFileData.disableAutoLogoutOnInactivity) {
+    const timeoutMilliseconds = (serverSessionFileData.sessionInactivityTimeoutMinutes || 30) * 60 * 1000;
+    if (Date.now() - serverSessionFileData.lastActivity > timeoutMilliseconds) {
+      if (globalDebugMode) console.log(`[API /auth/user] Session for ${session.username} timed out due to inactivity. Deleting server session file and cookie.`);
+      logEvent(session.username, session.role, 'AUTH_USER_INACTIVITY_TIMEOUT', 'INFO');
       try {
         const dataPath = getDataPath();
         await fs.unlink(path.join(dataPath, serverSessionFilename));
@@ -82,40 +91,52 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Update lastActivity in the server-side session file
-  serverSessionData.lastActivity = Date.now();
+  // Update lastActivity in the server-side session file & iron-session cookie
+  serverSessionFileData.lastActivity = Date.now();
+  session.lastActivity = Date.now(); // Also update in iron-session
   try {
-    await saveEncryptedData(serverSessionFilename, serverSessionData);
-    if (debugMode) console.log(`[API /auth/user] Updated lastActivity in server session file ${serverSessionFilename}.`);
+    await saveEncryptedData(serverSessionFilename, serverSessionFileData);
+    await session.save(); // This refreshes the cookie's own maxAge if set
+    if (globalDebugMode) console.log(`[API /auth/user] Updated lastActivity in server session file ${serverSessionFilename} and refreshed iron-session cookie for ${session.username}.`);
   } catch (e) {
-    console.error(`[API /auth/user] Error saving updated server session file ${serverSessionFilename}:`, e);
+    console.error(`[API /auth/user] Error saving updated server session file ${serverSessionFilename} or iron-session:`, e);
+    logEvent(session.username, session.role, 'AUTH_USER_ACTIVITY_UPDATE_FAILED', 'ERROR', { error: (e as Error).message });
     // Decide if this is a critical error, for now, proceed but log it
   }
   
-  // Also update lastActivity in the cookie session and save it to refresh cookie expiry
-  session.lastActivity = Date.now();
-  await session.save();
-  if (debugMode) console.log(`[API /auth/user] Refreshed iron-session cookie for ${session.username}.`);
-
-
-  // Now fetch the full user profile using session.userId
-  if (debugMode) console.log(`[API /auth/user] Attempting to load full user profile for userId: ${session.userId}`);
+  // Load full user profile
   const fullUser: FullUserData | null = await loadUserById(session.userId);
 
   if (!fullUser) {
-    if (debugMode) console.error(`[API /auth/user] CRITICAL: Could not load full user profile for userId: ${session.userId} (username: ${session.username}). This indicates an inconsistent state. Invalidating session.`);
+    if (globalDebugMode) console.error(`[API /auth/user] CRITICAL: User profile for userId: ${session.userId} (username: ${session.username}) not found. Invalidating session.`);
+    logEvent(session.username, session.role, 'AUTH_USER_PROFILE_NOT_FOUND', 'ERROR', { userId: session.userId });
     try {
       const dataPath = getDataPath();
-      await fs.unlink(path.join(dataPath, serverSessionFilename)); // Delete server session file
-    } catch (e) {
-      console.error(`[API /auth/user] Error deleting server session file due to missing main user profile:`, e);
-    }
-    await session.destroy(); // Destroy cookie session
+      await fs.unlink(path.join(dataPath, serverSessionFilename));
+    } catch (e) { /* ignore */ }
+    await session.destroy();
     return NextResponse.json({ error: 'User profile not found, session invalidated.' }, { status: 401 });
   }
   
-  if (debugMode) console.log(`[API /auth/user] Successfully loaded full user profile for ${fullUser.username}:`, { id: fullUser.id, username: fullUser.username, role: fullUser.role, status: fullUser.status });
-  
+  // Load user-specific settings
+  let userSpecificSettings: UserSettingsData = defaultUserSettings;
+  const userSettingsFilename = `${safeUsername}-${safeRole}-settings.json`;
+  try {
+    const loadedUserSettings = await loadEncryptedData(userSettingsFilename);
+    if (loadedUserSettings) {
+      const parsed = userSettingsSchema.safeParse(loadedUserSettings);
+      if (parsed.success) {
+        userSpecificSettings = parsed.data;
+      } else if (globalDebugMode) {
+        console.warn(`[API /auth/user] User settings file ${userSettingsFilename} for ${session.username} is invalid/corrupted. Using defaults. Errors:`, parsed.error.flatten().fieldErrors);
+      }
+    } else if (globalDebugMode) {
+       console.log(`[API /auth/user] No specific settings file ${userSettingsFilename} for ${session.username}. Defaults will be used by client.`);
+    }
+  } catch (e) {
+    if (globalDebugMode) console.error(`[API /auth/user] Error loading user settings file ${userSettingsFilename} for ${session.username}:`, e);
+  }
+
   const authenticatedUser: AuthenticatedUser = {
       id: fullUser.id,
       username: fullUser.username,
@@ -124,11 +145,12 @@ export async function GET(request: NextRequest) {
       assignedPages: fullUser.assignedPages || [],
       allowedSettingsPages: fullUser.allowedSettingsPages || [],
       status: fullUser.status,
-      // Session related info for client, if needed (though usually not sent like this)
-      // lastActivity: session.lastActivity, 
-      // sessionInactivityTimeoutMinutes: session.sessionInactivityTimeoutMinutes,
-      // disableAutoLogoutOnInactivity: session.disableAutoLogoutOnInactivity,
+      userSettings: userSpecificSettings, // Include user-specific settings
   };
+
+  if (userSpecificSettings.debugMode || globalDebugMode) { // Log if either user's debug or global debug is on
+    console.log(`[API /auth/user] Successfully returning authenticated user for ${fullUser.username}:`, { id: authenticatedUser.id, username: authenticatedUser.username, role: authenticatedUser.role, status: authenticatedUser.status, userSettingsDebug: authenticatedUser.userSettings?.debugMode });
+  }
 
   return NextResponse.json({ user: authenticatedUser }, { status: 200 });
 }

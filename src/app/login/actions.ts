@@ -3,115 +3,69 @@
 
 import { z } from "zod";
 import crypto from "crypto";
+import { cookies } from "next/headers";
+import { getIronSession } from "iron-session";
 import { redirect } from 'next/navigation';
-import { loadUsers, verifyPassword, hashPassword } from '@/app/(app)/roles/actions'; 
-import { type FileSessionData } from '@/lib/session';
-import { saveEncryptedData } from "@/backend/services/storageService";
-import { loadPanelSettings, type PanelSettingsData } from "@/app/(app)/settings/actions";
-import fs from 'fs';
-import path from 'path';
-import { getDataPath } from "@/backend/lib/config";
+import { sessionOptions, type SessionData } from '@/lib/session';
+import { 
+  loadUserById, 
+  verifyPassword, 
+  ensureOwnerFileExists, 
+  type UserData 
+} from '@/app/(app)/roles/actions';
+import { loadPanelSettings } from "@/app/(app)/settings/actions";
+import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storageService";
+import { userSettingsSchema, defaultUserSettings, type UserSettingsData } from "@/lib/user-settings";
+import { logEvent } from '@/lib/logger';
 
 const LoginSchema = z.object({
   username: z.string().min(1, "Username is required."),
   password: z.string().min(1, "Password is required."),
   redirectUrl: z.string().optional(),
-  keepLoggedIn: z.boolean().optional(), // Not directly used for session file lifetime, but kept for future if needed
+  keepLoggedIn: z.boolean().optional().default(false),
 });
 
 export interface LoginState {
   message: string;
   status: "idle" | "success" | "error" | "validation_failed";
   errors?: Partial<Record<keyof z.infer<typeof LoginSchema> | "_form", string[]>>;
-  sessionInfo?: { // Info to send back to client to store in localStorage
-    token: string;
-    userId: string;
-    username: string;
-    role: string;
-  };
 }
 
-async function getPanelSettingsForDefaults(): Promise<Partial<PanelSettingsData>> {
-    try {
-        const settingsResult = await loadPanelSettings();
-        if (settingsResult.data) {
-            return {
-                sessionInactivityTimeout: settingsResult.data.sessionInactivityTimeout,
-                disableAutoLogoutOnInactivity: settingsResult.data.disableAutoLogoutOnInactivity,
-            };
-        }
-    } catch (e) {
-        console.warn("[LoginAction] Could not load panel settings for session defaults, using hardcoded defaults:", e);
-    }
-    return {
-        sessionInactivityTimeout: 30, // Default 30 minutes
-        disableAutoLogoutOnInactivity: false, // Default to auto-logout enabled
-    };
-}
+async function ensureUserSpecificSettingsFile(username: string, role: string): Promise<UserSettingsData> {
+  const safeUsername = username.replace(/[^a-zA-Z0-9_.-]/g, '_');
+  const safeRole = role.replace(/[^a-zA-Z0-9]/g, '_');
+  const settingsFilename = `${safeUsername}-${safeRole}-settings.json`;
 
-async function createOrUpdateOwnerSessionFile(ownerUsernameEnv: string, ownerPasswordEnv: string): Promise<FileSessionData | null> {
-  const panelSettings = await loadPanelSettings();
-  const debugMode = panelSettings.data?.debugMode ?? false;
-  const defaultSessionSettings = await getPanelSettingsForDefaults();
-
-  const safeOwnerUsername = ownerUsernameEnv.replace(/[^a-zA-Z0-9_.-]/g, '_');
-  const ownerSessionFilename = `${safeOwnerUsername}-Owner-Auth.json`;
-  const dataPath = getDataPath();
-  const ownerSessionFilePath = path.join(dataPath, ownerSessionFilename);
-
-  if (debugMode) {
-    console.log(`[LoginAction - createOrUpdateOwnerSessionFile] Starting for owner: ${ownerUsernameEnv}`);
-    console.log(`[LoginAction - createOrUpdateOwnerSessionFile] Session Filename: ${ownerSessionFilename}`);
-    console.log(`[LoginAction - createOrUpdateOwnerSessionFile] Full Session File Path: ${ownerSessionFilePath}`);
-  }
-  
   try {
-    const token = crypto.randomBytes(32).toString('hex');
-    const now = Date.now();
-
-    const ownerSessionData: FileSessionData = {
-      userId: 'owner_root', 
-      username: ownerUsernameEnv, 
-      role: 'Owner',
-      token: token,
-      createdAt: now,
-      lastActivity: now,
-      sessionInactivityTimeoutMinutes: defaultSessionSettings.sessionInactivityTimeout ?? 30,
-      disableAutoLogoutOnInactivity: defaultSessionSettings.disableAutoLogoutOnInactivity ?? false,
-    };
-    
-    await saveEncryptedData(ownerSessionFilename, ownerSessionData);
-    if (debugMode) {
-        console.log(`[LoginAction - createOrUpdateOwnerSessionFile] Owner session file ${ownerSessionFilename} saved/updated.`);
-        if (fs.existsSync(ownerSessionFilePath)) {
-            console.log(`[LoginAction - createOrUpdateOwnerSessionFile] VERIFIED: Owner session file exists at ${ownerSessionFilePath}`);
-        } else {
-            console.error(`[LoginAction - createOrUpdateOwnerSessionFile] CRITICAL VERIFICATION FAILURE: Owner session file DOES NOT EXIST at ${ownerSessionFilePath} after save.`);
-        }
+    const existingSettings = await loadEncryptedData(settingsFilename);
+    if (existingSettings) {
+      const parsed = userSettingsSchema.safeParse(existingSettings);
+      if (parsed.success) {
+        return parsed.data;
+      }
+      console.warn(`[LoginAction] User-specific settings file ${settingsFilename} was corrupted. Applying defaults.`);
     }
-    return ownerSessionData;
-
   } catch (e) {
-    const error = e instanceof Error ? e : new Error(String(e));
-    console.error("[LoginAction - createOrUpdateOwnerSessionFile] CRITICAL: Failed to create/update owner session file:", error.message, error.stack);
-    return null;
+    console.warn(`[LoginAction] Could not load user-specific settings file ${settingsFilename}. Applying defaults. Error:`, e);
   }
+  // If file doesn't exist, is invalid, or error loading, create/overwrite with defaults
+  await saveEncryptedData(settingsFilename, defaultUserSettings);
+  return defaultUserSettings;
 }
 
 
 export async function login(prevState: LoginState, formData: FormData): Promise<LoginState> {
-  const panelSettings = await loadPanelSettings();
-  const debugMode = panelSettings.data?.debugMode ?? false;
+  const panelGlobalSettingsResult = await loadPanelSettings();
+  // User's debugMode isn't known yet, so use global settings debugMode for this action's logging
+  const debugModeForLoginAction = false; // For now, keep login action logging minimal unless specific need
 
   const ownerUsernameEnv = process.env.OWNER_USERNAME;
   const ownerPasswordEnv = process.env.OWNER_PASSWORD;
 
-  if(debugMode) {
-    console.log(`[LoginAction] Attempting login. Debug Mode: ${debugMode}.`);
-    console.log(`[LoginAction] Env OWNER_USERNAME: "${ownerUsernameEnv}"`);
-    console.log(`[LoginAction] Env OWNER_PASSWORD is ${ownerPasswordEnv ? 'SET' : 'NOT SET'}`);
+  if (debugModeForLoginAction) {
+    console.log(`[LoginAction] Attempting login. Owner ENV: ${ownerUsernameEnv ? 'Set' : 'Not Set'}`);
   }
-  
+
   const rawFormData = {
     username: String(formData.get("username") ?? ""),
     password: String(formData.get("password") ?? ""),
@@ -119,140 +73,120 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     keepLoggedIn: formData.get("keepLoggedIn") === "on",
   };
 
-  if (debugMode) console.log("[LoginAction] Raw form data for Zod:", rawFormData);
-
   const validatedFields = LoginSchema.safeParse(rawFormData);
 
   if (!validatedFields.success) {
     const flatErrors = validatedFields.error.flatten();
-    if (debugMode) console.error("[LoginAction] Zod validation failed. Full errors:", JSON.stringify(flatErrors));
-    
-    let message = "Please correct the highlighted fields.";
-    if (flatErrors.formErrors.length > 0 && !Object.keys(flatErrors.fieldErrors).length) {
-      message = flatErrors.formErrors.join(', ');
+    if (debugModeForLoginAction) {
+      console.error("[LoginAction] Zod validation failed:", JSON.stringify(flatErrors, null, 2));
     }
+    logEvent(rawFormData.username || 'UnknownUser', 'Unknown', 'LOGIN_VALIDATION_FAILED', 'WARN', { errors: flatErrors.fieldErrors });
     return {
-      message: message,
+      message: "Please check the form for errors.",
       status: "validation_failed",
       errors: { ...flatErrors.fieldErrors, _form: flatErrors.formErrors.length > 0 ? flatErrors.formErrors : undefined },
     };
   }
 
-  const { username, password } = validatedFields.data;
-  const defaultSessionSettings = await getPanelSettingsForDefaults();
+  const { username, password, redirectUrl, keepLoggedIn } = validatedFields.data;
+  const session = await getIronSession<SessionData>(cookies(), sessionOptions);
 
   try {
+    let authenticatedUser: UserData | null = null;
+    let authenticatedRole: SessionData['role'] | null = null;
+
     // Try .env owner login first
     if (ownerUsernameEnv && ownerPasswordEnv) {
-      if (debugMode) console.log(`[LoginAction] Comparing input "${username}" with ENV_OWNER "${ownerUsernameEnv}"`);
       if (username === ownerUsernameEnv && password === ownerPasswordEnv) {
-        if (debugMode) console.log(`[LoginAction] Matched .env.local owner: ${ownerUsernameEnv}.`);
-        
-        // Create/update owner's main user file (for roles page, etc.)
-        // This creates a {username}-{role}.json file for owner, not the -Auth.json file
-        const { hash: ownerHash, salt: ownerSalt } = await hashPassword(ownerPasswordEnv);
-        const ownerMainUserData = {
-            id: 'owner_root', username: ownerUsernameEnv, role: 'Owner', hashedPassword: ownerHash, salt: ownerSalt,
-            projects: [], assignedPages: [], allowedSettingsPages: [], status: 'Active',
-            createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), lastLogin: new Date().toISOString()
-        };
-        const ownerMainFilename = `${ownerUsernameEnv.replace(/[^a-zA-Z0-9_.-]/g, '_')}-Owner.json`;
-        await saveEncryptedData(ownerMainFilename, ownerMainUserData);
-        if (debugMode) console.log(`[LoginAction] Owner main user file ${ownerMainFilename} ensured.`);
-
-
-        const ownerSession = await createOrUpdateOwnerSessionFile(ownerUsernameEnv, ownerPasswordEnv);
-        if (ownerSession) {
-          if (debugMode) console.log("[LoginAction] Owner session file created/updated. Returning success to client.");
-          return {
-            message: "Owner login successful!",
-            status: "success",
-            sessionInfo: {
-              token: ownerSession.token,
-              userId: ownerSession.userId,
-              username: ownerSession.username,
-              role: ownerSession.role,
-            }
-          };
-        } else {
-           return { message: "Owner login succeeded but failed to create session file.", status: "error", errors: { _form: ["System error during owner session creation."] } };
+        if (debugModeForLoginAction) {
+          console.log(`[LoginAction] Matched .env.local owner: ${ownerUsernameEnv}.`);
         }
-      } else {
-        if (debugMode && username === ownerUsernameEnv) console.log("[LoginAction] Owner username matched, but password did not.");
+        await ensureOwnerFileExists(ownerUsernameEnv, ownerPasswordEnv, panelGlobalSettingsResult.data);
+        
+        authenticatedUser = {
+            id: 'owner_root',
+            username: ownerUsernameEnv,
+            hashedPassword: '', // Not needed for session, actual hash is in owner file
+            salt: '',           // Not needed for session
+            role: 'Owner',
+            status: 'Active',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        };
+        authenticatedRole = 'Owner';
+      } else if (debugModeForLoginAction && username === ownerUsernameEnv) {
+        console.log("[LoginAction] Owner username matched, but password did not.");
       }
-    } else {
-      if (debugMode) console.warn("[LoginAction] OWNER_USERNAME or OWNER_PASSWORD is not set in .env.local.");
     }
 
-    // Try regular user login from files
-    if (debugMode) console.log("[LoginAction] Attempting login for regular user:", username);
-    const usersResult = await loadUsers();
+    // If not authenticated as owner, try regular user login from files
+    if (!authenticatedUser) {
+      if (debugModeForLoginAction) console.log("[LoginAction] Attempting login for regular user:", username);
+      
+      const usersResult = await loadUsers(); // This loads all individual user files
+      if (usersResult.status !== 'success' || !usersResult.users) {
+        logEvent(username, 'Unknown', 'LOGIN_USER_LOAD_FAILED', 'ERROR', { error: usersResult.error });
+        return { message: usersResult.error || "System error: Could not load user data.", status: "error", errors: { _form: [usersResult.error || "System error: Could not load user data."] } };
+      }
+      
+      const userFromFile = usersResult.users.find(u => u.username === username);
 
-    if (usersResult.status !== 'success' || !usersResult.users) {
-      if (debugMode) console.error("[LoginAction] Error loading user data for regular users:", usersResult.error);
-      return { message: usersResult.error || "System error: Could not load user data.", status: "error", errors: { _form: [usersResult.error || "System error: Could not load user data."] } };
-    }
-    
-    const user = usersResult.users.find(u => u.username === username);
-
-    if (!user) {
-      if (debugMode) console.log("[LoginAction] Regular user not found:", username);
-      return { message: "Invalid username or password.", status: "error", errors: { _form: ["Invalid username or password."] } };
-    }
-    
-    if (user.status === 'Inactive') {
-        if (debugMode) console.log(`[LoginAction] User ${username} is inactive.`);
+      if (!userFromFile) {
+        logEvent(username, 'Unknown', 'LOGIN_USER_NOT_FOUND', 'WARN');
+        return { message: "Invalid username or password.", status: "error", errors: { _form: ["Invalid username or password."] } };
+      }
+      if (userFromFile.status === 'Inactive') {
+        logEvent(username, userFromFile.role, 'LOGIN_USER_INACTIVE', 'WARN');
         return { message: "This account is inactive. Please contact an administrator.", status: "error", errors: { _form: ["This account is inactive."] } };
+      }
+
+      const isPasswordValid = await verifyPassword(password, userFromFile.hashedPassword, userFromFile.salt);
+      if (!isPasswordValid) {
+        logEvent(username, userFromFile.role, 'LOGIN_INVALID_PASSWORD', 'WARN');
+        return { message: "Invalid username or password.", status: "error", errors: { _form: ["Invalid username or password."] } };
+      }
+      authenticatedUser = userFromFile;
+      authenticatedRole = userFromFile.role;
     }
 
-    const isPasswordValid = await verifyPassword(password, user.hashedPassword, user.salt);
-    if (!isPasswordValid) {
-      if (debugMode) console.log("[LoginAction] Invalid password for regular user:", username);
+    // If authentication successful (either owner or regular user)
+    if (authenticatedUser && authenticatedRole) {
+      await ensureUserSpecificSettingsFile(authenticatedUser.username, authenticatedRole);
+
+      session.isLoggedIn = true;
+      session.userId = authenticatedUser.id;
+      session.username = authenticatedUser.username;
+      session.role = authenticatedRole;
+      session.lastActivity = Date.now();
+      
+      // Store global panel settings for session inactivity into the iron-session
+      session.sessionInactivityTimeoutMinutes = panelGlobalSettingsResult.data?.sessionInactivityTimeout ?? 30;
+      session.disableAutoLogoutOnInactivity = panelGlobalSettingsResult.data?.disableAutoLogoutOnInactivity ?? false;
+
+      const cookieOptions = keepLoggedIn ? { maxAge: 60 * 60 * 24 * 30 } : {}; // 30 days or session
+      await session.save(cookieOptions);
+
+      logEvent(authenticatedUser.username, authenticatedRole, 'LOGIN_SUCCESS', 'INFO');
+      if (debugModeForLoginAction) {
+        console.log(`[LoginAction] User ${authenticatedUser.username} login successful. Session cookie set.`);
+      }
+      // Perform server-side redirect
+      redirect(redirectUrl || '/'); 
+      // This return is mostly for type consistency, redirect will prevent it from being sent
+      return { message: "Login successful! Redirecting...", status: "success" };
+    } else {
+      // This case should ideally be caught by earlier checks
+      logEvent(username, 'Unknown', 'LOGIN_FAILED_UNKNOWN_REASON', 'ERROR');
       return { message: "Invalid username or password.", status: "error", errors: { _form: ["Invalid username or password."] } };
     }
-
-    // Create session file for regular user
-    const token = crypto.randomBytes(32).toString('hex');
-    const now = Date.now();
-    const userSessionData: FileSessionData = {
-      userId: user.id,
-      username: user.username,
-      role: user.role,
-      token: token,
-      createdAt: now,
-      lastActivity: now,
-      sessionInactivityTimeoutMinutes: defaultSessionSettings.sessionInactivityTimeout ?? 30,
-      disableAutoLogoutOnInactivity: defaultSessionSettings.disableAutoLogoutOnInactivity ?? false,
-    };
-    const sessionFilename = `${user.username.replace(/[^a-zA-Z0-9_.-]/g, '_')}-${user.role}-Auth.json`;
-    await saveEncryptedData(sessionFilename, userSessionData);
-    if (debugMode) console.log(`[LoginAction] Session file ${sessionFilename} created for user ${user.username}.`);
-
-    // Update lastLogin for the main user file
-    const userToUpdate = {...user, lastLogin: new Date().toISOString()};
-    const userMainFilename = `${user.username.replace(/[^a-zA-Z0-9_.-]/g, '_')}-${user.role}.json`;
-    await saveEncryptedData(userMainFilename, userToUpdate);
-    if (debugMode) console.log(`[LoginAction] Updated lastLogin for user ${user.username} in file ${userMainFilename}`);
-
-
-    if (debugMode) console.log(`[LoginAction] Regular user login successful for: ${username}`);
-    return {
-      message: "Login successful!",
-      status: "success",
-      sessionInfo: {
-        token: token,
-        userId: user.id,
-        username: user.username,
-        role: user.role,
-      }
-    };
 
   } catch (error: any) {
     console.error("[LoginAction] Unexpected login error:", error.message, error.stack);
+    logEvent(username, 'Unknown', 'LOGIN_EXCEPTION', 'ERROR', { error: error.message });
     return { 
-      message: `An unexpected error occurred. ${debugMode ? error.message : ''}`, 
+      message: `An unexpected error occurred. ${debugModeForLoginAction ? error.message : ''}`, 
       status: "error", 
-      errors: { _form: [`An unexpected error occurred. ${debugMode ? error.message : ''}`] } 
+      errors: { _form: [`An unexpected error occurred. ${debugModeForLoginAction ? error.message : ''}`] } 
     };
   }
 }

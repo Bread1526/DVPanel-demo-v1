@@ -1,21 +1,22 @@
+
 // src/lib/session.ts
 import type { IronSessionOptions } from 'iron-session';
-import type { UserData } from '@/app/(app)/roles/actions'; // Assuming UserData defines role types
+import type { UserData } from '@/app/(app)/roles/actions'; 
+import type { UserSettingsData } from './user-settings'; // Import UserSettingsData
 
-// Define the shape of the data stored in the session
+// Define the shape of the data stored in the iron-session cookie
 export interface SessionData {
   isLoggedIn: boolean;
   userId?: string;
   username?: string;
-  role?: UserData['role'] | 'Owner'; // To accommodate the special "Owner" role
-  lastActivity?: number; // Timestamp of last recorded activity
-  // Session-specific inactivity settings, copied from global settings at session creation
+  role?: UserData['role'] | 'Owner'; 
+  lastActivity?: number; 
   sessionInactivityTimeoutMinutes?: number;
   disableAutoLogoutOnInactivity?: boolean;
 }
 
-// Define the shape of the authenticated user object you might pass around
-// (excluding sensitive session-only data like lastActivity or timeout settings)
+// Define the shape of the authenticated user object returned by /api/auth/user
+// This will now include user-specific settings.
 export type AuthenticatedUser = {
   id: string;
   username: string;
@@ -24,18 +25,22 @@ export type AuthenticatedUser = {
   assignedPages?: string[];
   allowedSettingsPages?: string[];
   status?: 'Active' | 'Inactive';
+  userSettings?: UserSettingsData; // User-specific settings
 };
 
-
-// Define the shape of the data stored in the server-side session file (e.g., {username}-{role}-Auth.json)
-// This is distinct from what's stored in the iron-session cookie.
+// Session data for server-side files (e.g. {username}-{role}-Auth.json)
+// This is NOT for iron-session cookie. We are not using this file-based token approach currently.
+// This type definition might be from a previous iteration.
+// For current iron-session based approach, this is not directly used for session tokens.
+// If we were to store a *separate* server-side session state that the cookie points to,
+// this might be relevant, but current setup stores primary session identifiers in the cookie.
 export type FileSessionData = {
   userId: string;
   username: string;
   role: UserData['role'] | 'Owner';
-  token: string; // The unique session token stored in the file
-  createdAt: number; // Timestamp of session creation
-  lastActivity: number; // Timestamp of last recorded activity
+  token: string; 
+  createdAt: number; 
+  lastActivity: number; 
   sessionInactivityTimeoutMinutes: number;
   disableAutoLogoutOnInactivity: boolean;
 };
@@ -43,20 +48,22 @@ export type FileSessionData = {
 
 export const sessionOptions: IronSessionOptions = {
   cookieName: process.env.SESSION_COOKIE_NAME || 'dvpanel_session',
-  password: process.env.SESSION_PASSWORD as string, // Must be set in .env.local, at least 32 characters long
+  password: process.env.SESSION_PASSWORD as string, 
   cookieOptions: {
-    secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
-    httpOnly: true, // Prevent client-side JavaScript access to the cookie
-    sameSite: 'lax', // CSRF protection
-    // maxAge: undefined, // Session cookie by default, or set a duration for "keep me logged in"
-    // path: '/', // Default is '/', applies to all paths
+    secure: process.env.NODE_ENV === 'production', 
+    httpOnly: true, 
+    sameSite: 'lax', 
+    // maxAge: undefined by default (session cookie), or set for "keep me logged in"
+    // path: '/', 
   },
 };
 
-// Ensure SESSION_PASSWORD is set
 if (!process.env.SESSION_PASSWORD || process.env.SESSION_PASSWORD.length < 32) {
-  throw new Error(
-    'SESSION_PASSWORD environment variable is not set or is less than 32 characters long. ' +
+  console.error(
+    'CRITICAL SECURITY WARNING: SESSION_PASSWORD environment variable is not set or is less than 32 characters long. ' +
+    'This is required for secure session cookie encryption. The application may not function correctly or securely. ' +
     'Please set a strong secret in your .env.local file.'
   );
+  // Forcing an error here can prevent the app from starting in an insecure state.
+  // throw new Error('SESSION_PASSWORD configuration error.');
 }

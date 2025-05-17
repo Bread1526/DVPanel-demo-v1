@@ -8,8 +8,8 @@ import {
   SlidersHorizontal, 
   HardDrive, 
   Shield, 
-  MessageSquareMore, 
-  Bug, 
+  // MessageSquareMore, // Removed
+  // Bug, // Removed
   Settings as SettingsIcon, 
   Info,
   ShieldCheck 
@@ -20,8 +20,8 @@ const settingsNavItems = [
   { href: '/settings', label: 'Panel', icon: SlidersHorizontal }, 
   { href: '/settings/daemon', label: 'Daemon', icon: HardDrive },
   { href: '/settings/security', label: 'Security', icon: Shield },
-  { href: '/settings/popups', label: 'Popups', icon: MessageSquareMore },
-  { href: '/settings/debug', label: 'Debug', icon: Bug },
+  // { href: '/settings/popups', label: 'Popups', icon: MessageSquareMore }, // Removed
+  // { href: '/settings/debug', label: 'Debug', icon: Bug }, // Removed
   { href: '/settings/license', label: 'License', icon: ShieldCheck },
   { href: '/settings/info', label: 'Info', icon: Info },
 ];
@@ -39,8 +39,6 @@ export default function SettingsLayout({
         <div className="overflow-x-auto whitespace-nowrap pb-1 no-scrollbar">
           <nav className="inline-flex gap-x-0.5 gap-y-1 p-1">
             {settingsNavItems.map((item) => {
-              // For '/settings', it should be active if pathname is exactly '/settings' or '/settings/'
-              // For other items, standard startsWith logic is fine.
               const isActive = item.href === '/settings' 
                                 ? (pathname === '/settings' || pathname === '/settings/')
                                 : pathname.startsWith(item.href);

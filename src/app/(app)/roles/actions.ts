@@ -1,3 +1,4 @@
+
 'use server';
 
 import { z } from "zod";
@@ -7,7 +8,10 @@ import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storage
 import { getDataPath } from "@/backend/lib/config";
 import path from 'path';
 import fs from 'fs/promises'; 
-import { type PanelSettingsData, loadPanelSettings as loadGeneralPanelSettings } from '@/app/(app)/settings/actions';
+import { type PanelSettingsData, loadPanelSettings as loadGlobalPanelSettings } from '@/app/(app)/settings/actions';
+import { logEvent } from '@/lib/logger'; // Import logger
+import { type UserSettingsData, userSettingsSchema, defaultUserSettings } from '@/lib/user-settings';
+
 
 const userSchema = z.object({
   id: z.union([z.string().uuid(), z.literal('owner_root')]).describe("Unique user ID or 'owner_root' for the system owner."),
@@ -16,13 +20,13 @@ const userSchema = z.object({
   hashedPassword: z.string(),
   salt: z.string(),
   role: z.enum(["Administrator", "Admin", "Custom", "Owner"]),
-  projects: z.array(z.string()).optional().default([]),
+  projects: z.array(z.string().uuid().or(z.string().startsWith("project_"))).optional().default([]), // Allow existing string IDs for projects
   assignedPages: z.array(z.string()).optional().default([]),
   allowedSettingsPages: z.array(z.string()).optional().default([]),
-  lastLogin: z.string().datetime().optional(),
+  lastLogin: z.string().datetime({ offset: true }).optional(),
   status: z.enum(["Active", "Inactive"]).default("Active"),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
+  createdAt: z.string().datetime({ offset: true }),
+  updatedAt: z.string().datetime({ offset: true }),
 });
 
 export type UserData = z.infer<typeof userSchema>;
@@ -85,38 +89,43 @@ function getUserFilePath(username: string, role: UserData["role"]): string {
   return path.join(dataPath, filename);
 }
 
-async function getPanelSettingsForDebug(): Promise<PanelSettingsData | undefined> {
-    try {
-        const settingsResult = await loadGeneralPanelSettings();
-        return settingsResult.data;
-    } catch {
-        return undefined;
+// Helper to get current user's debugMode (or global if not available)
+async function getCurrentUserDebugMode(sessionUsername?: string, sessionRole?: string): Promise<boolean> {
+    if (sessionUsername && sessionRole) {
+        try {
+            const safeUsername = sessionUsername.replace(/[^a-zA-Z0-9_.-]/g, '_');
+            const safeRole = sessionRole.replace(/[^a-zA-Z0-9]/g, '_');
+            const settingsFilename = `${safeUsername}-${safeRole}-settings.json`;
+            const userSettingsData = await loadEncryptedData(settingsFilename) as UserSettingsData | null;
+            if (userSettingsData) return userSettingsData.debugMode;
+        } catch { /* Fall through */ }
     }
+    // Fallback to global settings' debugMode is difficult as global settings no longer store it.
+    // Default to false if user-specific debugMode can't be found.
+    return false;
 }
 
+
 export async function ensureOwnerFileExists(ownerUsername: string, ownerPasswordPlain: string, panelSettings?: PanelSettingsData): Promise<void> {
-    const debugMode = panelSettings?.debugMode ?? false;
+    // User-specific debugMode isn't applicable here as this function can be called before session
+    const debugMode = false; // Keep this specific function's logging minimal
     if (debugMode) console.log(`[RolesActions - ensureOwnerFileExists] Ensuring file for Owner: ${ownerUsername}`);
 
     const safeOwnerUsername = ownerUsername.replace(/[^a-zA-Z0-9_.-]/g, '_');
     const ownerFilename = `${safeOwnerUsername}-Owner.json`;
     const ownerFilePath = path.join(getDataPath(), ownerFilename);
 
-    if (debugMode) {
-        console.log(`[RolesActions - ensureOwnerFileExists] Target owner file: ${ownerFilePath}`);
-    }
-
     let existingOwnerData: Partial<UserData> = {};
-    if (fs.existsSync(ownerFilePath)) {
-        try {
-            const loaded = await loadEncryptedData(ownerFilename);
-            if (loaded) existingOwnerData = loaded as UserData;
-            if(debugMode) console.log(`[RolesActions - ensureOwnerFileExists] Loaded existing owner file for ${ownerUsername}. Preserving createdAt: ${existingOwnerData.createdAt}`);
-        } catch (e) {
-            console.error(`[RolesActions - ensureOwnerFileExists] Error loading existing owner file ${ownerFilename}, will create anew:`, e);
-        }
+    try {
+      if (fs.existsSync(ownerFilePath)) { // Node.js fs, not fs/promises for sync check
+        const loaded = await loadEncryptedData(ownerFilename);
+        if (loaded) existingOwnerData = loaded as UserData;
+        if(debugMode) console.log(`[RolesActions - ensureOwnerFileExists] Loaded existing owner file for ${ownerUsername}. Preserving createdAt: ${existingOwnerData.createdAt}`);
+      }
+    } catch (e) {
+        console.error(`[RolesActions - ensureOwnerFileExists] Error loading existing owner file ${ownerFilename}, will create anew:`, e);
     }
-
+    
     const { hash, salt } = await hashPassword(ownerPasswordPlain);
     const now = new Date().toISOString();
 
@@ -132,7 +141,7 @@ export async function ensureOwnerFileExists(ownerUsername: string, ownerPassword
         status: 'Active',
         createdAt: existingOwnerData.createdAt || now,
         updatedAt: now,
-        lastLogin: now, // Update lastLogin on this operation
+        lastLogin: now, 
     };
 
     try {
@@ -148,14 +157,13 @@ export async function ensureOwnerFileExists(ownerUsername: string, ownerPassword
         }
     } catch (e) {
         console.error(`[RolesActions - ensureOwnerFileExists] CRITICAL: Failed to save owner file ${ownerFilename}:`, e);
-        throw e; // Re-throw to indicate failure
+        throw e; 
     }
 }
 
 
 export async function loadUsers(): Promise<LoadUsersState> {
-  const panelSettings = await getPanelSettingsForDebug();
-  const debugMode = panelSettings?.debugMode ?? false;
+  const debugMode = false; // Keep this general function's logging minimal
   if (debugMode) console.log("[RolesActions - loadUsers] Attempting to load users from individual files...");
 
   const dataPath = getDataPath();
@@ -174,14 +182,14 @@ export async function loadUsers(): Promise<LoadUsersState> {
   }
 
   for (const file of files) {
-    if (file.endsWith('.json') && file !== '.settings.json' && !file.endsWith('-Auth.json')) {
+    // Match user files like username-Role.json but not username-Role-Auth.json or username-Role-settings.json
+    if (file.endsWith('.json') && !file.includes('-Auth.json') && !file.includes('-settings.json') && file !== '.settings.json') {
       try {
         const fileData = await loadEncryptedData(file);
         if (fileData) {
           const parsedUser = userSchema.safeParse(fileData);
           if (parsedUser.success) {
-            // Filter out the owner record if it's loaded from its file, as it's handled specially.
-            if (parsedUser.data.id !== 'owner_root') {
+            if (parsedUser.data.id !== 'owner_root') { // Exclude owner from regular user list
               users.push(parsedUser.data);
             }
           } else {
@@ -193,29 +201,24 @@ export async function loadUsers(): Promise<LoadUsersState> {
       }
     }
   }
-  if (debugMode) console.log(`[RolesActions - loadUsers] Successfully loaded ${users.length} non-owner users from individual files.`);
+  if (debugMode) console.log(`[RolesActions - loadUsers] Successfully loaded ${users.length} non-owner users.`);
   return { users, status: "success" };
 }
 
 export async function loadUserById(userId: string): Promise<UserData | null> {
-  const panelSettings = await getPanelSettingsForDebug();
-  const debugMode = panelSettings?.debugMode ?? false;
+  const debugMode = false; // Keep this general function's logging minimal
   if (debugMode) console.log(`[RolesActions - loadUserById] Attempting to load user ID: ${userId}`);
-
   const dataPath = getDataPath();
   
-  // Handle Owner loading directly
   if (userId === 'owner_root') {
     const ownerUsernameEnv = process.env.OWNER_USERNAME;
     if (!ownerUsernameEnv) {
-      if (debugMode) console.error("[RolesActions - loadUserById] OWNER_USERNAME not set in .env, cannot load owner_root by ID.");
+      if (debugMode) console.error("[RolesActions - loadUserById] OWNER_USERNAME not set, cannot load owner_root by ID.");
       return null;
     }
     const safeOwnerUsername = ownerUsernameEnv.replace(/[^a-zA-Z0-9_.-]/g, '_');
     const ownerFilename = `${safeOwnerUsername}-Owner.json`;
-    const ownerFilePath = path.join(dataPath, ownerFilename);
-
-    if (debugMode) console.log(`[RolesActions - loadUserById] Attempting to load owner_root from specific file: ${ownerFilename}`);
+    if (debugMode) console.log(`[RolesActions - loadUserById] Attempting to load owner_root from: ${ownerFilename}`);
     try {
       const fileData = await loadEncryptedData(ownerFilename);
       if (fileData) {
@@ -223,44 +226,29 @@ export async function loadUserById(userId: string): Promise<UserData | null> {
         if (parsedUser.success && parsedUser.data.id === 'owner_root') {
           if (debugMode) console.log(`[RolesActions - loadUserById] Successfully loaded owner_root from ${ownerFilename}`);
           return parsedUser.data;
-        } else if (!parsedUser.success) {
-          if (debugMode) console.warn(`[RolesActions - loadUserById] Owner file ${ownerFilename} parsed with errors:`, parsedUser.error.flatten().fieldErrors);
-        } else {
-            if (debugMode) console.warn(`[RolesActions - loadUserById] Owner file ${ownerFilename} loaded, but ID was not 'owner_root'. Data:`, parsedUser.data);
         }
-      } else {
-        if(debugMode) console.log(`[RolesActions - loadUserById] Owner file ${ownerFilename} not found or empty when trying to load owner_root.`);
       }
-    } catch (e) {
-      if (debugMode) console.error(`[RolesActions - loadUserById] Error loading owner_root file ${ownerFilename}:`, e);
-    }
-    if(debugMode) console.log(`[RolesActions - loadUserById] Failed to load owner_root from specific file. It might not have been created yet.`);
-    return null; // Owner file not found or invalid
+    } catch (e) { /* ignore error, will return null */ }
+    if (debugMode) console.log(`[RolesActions - loadUserById] Failed to load owner_root from ${ownerFilename}.`);
+    return null; 
   }
 
-  // Handle regular users by scanning files
   let files: string[];
   try {
     files = await fs.readdir(dataPath);
   } catch(e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-        if (debugMode) console.warn(`[RolesActions - loadUserById] Data directory not found when searching for user ID ${userId}.`);
-    } else {
-        if (debugMode) console.warn(`[RolesActions - loadUserById] Error reading data directory for user ID ${userId}:`, e);
-    }
+    if (debugMode) console.warn(`[RolesActions - loadUserById] Error reading data directory for user ID ${userId}:`, e);
     return null;
   }
 
   for (const file of files) {
-    if (file.endsWith('.json') && file !== '.settings.json' && !file.endsWith('-Auth.json')) {
-      // Avoid trying to load the owner file again if it was already attempted and failed or for a different owner
+    if (file.endsWith('.json') && !file.includes('-Auth.json') && !file.includes('-settings.json') && file !== '.settings.json') {
+      // Skip the owner file if we know the owner's username
       const ownerUsernameEnv = process.env.OWNER_USERNAME;
       if (ownerUsernameEnv) {
           const safeOwnerUsername = ownerUsernameEnv.replace(/[^a-zA-Z0-9_.-]/g, '_');
-          const ownerFilenamePattern = `${safeOwnerUsername}-Owner.json`;
-          if (file === ownerFilenamePattern) continue; // Skip the main owner file, it's handled above
+          if (file === `${safeOwnerUsername}-Owner.json`) continue;
       }
-
       try {
         const fileData = await loadEncryptedData(file);
         if (fileData) {
@@ -270,24 +258,35 @@ export async function loadUserById(userId: string): Promise<UserData | null> {
             return parsedUser.data;
           }
         }
-      } catch (e) {
-        if (debugMode) console.error(`[RolesActions - loadUserById] Error processing file ${file} for user ID ${userId}:`, e);
-      }
+      } catch (e) { /* ignore */ }
     }
   }
   if (debugMode) console.log(`[RolesActions - loadUserById] User ID ${userId} not found in any user file.`);
   return null;
 }
 
+// Assumes actor is available from session in a real app. Here, it's passed or defaulted.
+async function getActorInfo(actor?: { username: string; role: string }): Promise<{ actorUsername: string; actorRole: string }> {
+    return {
+        actorUsername: actor?.username || 'System',
+        actorRole: actor?.role || 'System'
+    };
+}
 
-export async function addUser(prevState: UserActionState, userInput: AddUserInput): Promise<UserActionState> {
-  const panelSettings = await getPanelSettingsForDebug();
-  const debugMode = panelSettings?.debugMode ?? false;
-  if (debugMode) console.log("[RolesActions - addUser] Attempting to add user:", userInput.username);
+export async function addUser(
+    prevState: UserActionState, 
+    userInput: AddUserInput, 
+    actor?: { username: string; role: string } // Actor performing the action
+): Promise<UserActionState> {
+  const { actorUsername, actorRole } = await getActorInfo(actor);
+  const debugMode = await getCurrentUserDebugMode(actorUsername, actorRole);
+
+  if (debugMode) console.log("[RolesActions - addUser] Attempting to add user:", userInput.username, "by", actorUsername);
   const now = new Date().toISOString();
 
   const ownerUsernameEnv = process.env.OWNER_USERNAME;
   if (ownerUsernameEnv && userInput.username === ownerUsernameEnv) {
+    logEvent(actorUsername, actorRole, 'ADD_USER_FAILED_OWNER_USERNAME', 'WARN', { targetUser: userInput.username });
     return {
       message: "Cannot add a user with the same username as the Owner.",
       status: "error",
@@ -296,33 +295,21 @@ export async function addUser(prevState: UserActionState, userInput: AddUserInpu
   }
 
   const validatedFields = addUserInputSchema.safeParse(userInput);
-
   if (!validatedFields.success) {
     if (debugMode) console.error("[RolesActions - addUser] Add user validation failed:", validatedFields.error.flatten().fieldErrors);
+    logEvent(actorUsername, actorRole, 'ADD_USER_VALIDATION_FAILED', 'WARN', { targetUser: userInput.username, errors: validatedFields.error.flatten().fieldErrors });
     return {
-      message: "Validation failed for new user.",
-      status: "error",
-      errors: validatedFields.error.flatten().fieldErrors,
+      message: "Validation failed for new user.", status: "error", errors: validatedFields.error.flatten().fieldErrors,
     };
   }
 
   const { password, ...userDataToStore } = validatedFields.data;
 
   try {
-    const dataPath = getDataPath();
-    let existingFiles: string[];
-    try { existingFiles = await fs.readdir(dataPath); } catch { existingFiles = []; }
-
-    for (const file of existingFiles) {
-        if (file.endsWith('.json') && file !== '.settings.json' && !file.endsWith('-Auth.json')) {
-            const fileData = await loadEncryptedData(file);
-            if (fileData) {
-                const existingUser = userSchema.safeParse(fileData);
-                if (existingUser.success && existingUser.data.username === userDataToStore.username) {
-                    return { message: "Username already exists.", status: "error", errors: { username: ["Username already taken"] } };
-                }
-            }
-        }
+    const usersResult = await loadUsers(); // Check against existing users
+    if (usersResult.users && usersResult.users.some(u => u.username === userDataToStore.username)) {
+      logEvent(actorUsername, actorRole, 'ADD_USER_FAILED_USERNAME_EXISTS', 'WARN', { targetUser: userDataToStore.username });
+      return { message: "Username already exists.", status: "error", errors: { username: ["Username already taken"] } };
     }
 
     const { hash, salt } = await hashPassword(password);
@@ -339,73 +326,60 @@ export async function addUser(prevState: UserActionState, userInput: AddUserInpu
 
     const filename = path.basename(getUserFilePath(newUser.username, newUser.role));
     await saveEncryptedData(filename, newUser);
+    // Also create default user-specific settings file
+    const settingsFilename = `${newUser.username.replace(/[^a-zA-Z0-9_.-]/g, '_')}-${newUser.role.replace(/[^a-zA-Z0-9]/g, '_')}-settings.json`;
+    await saveEncryptedData(settingsFilename, defaultUserSettings);
 
+
+    logEvent(actorUsername, actorRole, 'ADD_USER_SUCCESS', 'INFO', { targetUser: newUser.username, targetRole: newUser.role });
     const successMessage = debugMode
         ? `User "${newUser.username}" added successfully to ${filename}.`
         : `User "${newUser.username}" added successfully.`;
-
     return { message: successMessage, status: "success", user: newUser };
   } catch (e) {
     const error = e instanceof Error ? e : new Error(String(e));
     console.error("[RolesActions - addUser] Error adding user:", error);
+    logEvent(actorUsername, actorRole, 'ADD_USER_EXCEPTION', 'ERROR', { targetUser: userInput.username, error: error.message });
     return { message: `Error adding user: ${error.message}`, status: "error" };
   }
 }
 
-export async function updateUser(prevState: UserActionState, userInput: UpdateUserInput): Promise<UserActionState> {
-  const panelSettings = await getPanelSettingsForDebug();
-  const debugMode = panelSettings?.debugMode ?? false;
+export async function updateUser(
+    prevState: UserActionState, 
+    userInput: UpdateUserInput,
+    actor?: { username: string; role: string } // Actor performing the action
+): Promise<UserActionState> {
+  const { actorUsername, actorRole } = await getActorInfo(actor);
+  const debugMode = await getCurrentUserDebugMode(actorUsername, actorRole);
 
-  if (debugMode) console.log(`[RolesActions - updateUser] Attempting to update user ID: ${userInput.id}`);
+  if (debugMode) console.log(`[RolesActions - updateUser] Attempting to update user ID: ${userInput.id} by ${actorUsername}`);
 
   if (userInput.id === 'owner_root') {
-     if (debugMode) console.warn("[RolesActions - updateUser] Attempt to update owner_root user directly.");
-     const ownerUsernameEnv = process.env.OWNER_USERNAME;
-     if (!ownerUsernameEnv) return { message: "Owner username not configured in .env", status: "error" };
-     
-     const safeOwnerUsername = ownerUsernameEnv.replace(/[^a-zA-Z0-9_.-]/g, '_');
-     const ownerFilename = `${safeOwnerUsername}-Owner.json`;
-     
-     try {
-        let ownerData = await loadEncryptedData(ownerFilename) as UserData | null;
-        if (!ownerData || ownerData.id !== 'owner_root') {
-            return { message: "Owner data file not found or invalid. Cannot update owner settings.", status: "error" };
-        }
-        
-        // Only allow updating specific fields for owner via this UI route
-        ownerData.assignedPages = userInput.assignedPages !== undefined ? userInput.assignedPages : ownerData.assignedPages;
-        ownerData.allowedSettingsPages = userInput.allowedSettingsPages !== undefined ? userInput.allowedSettingsPages : ownerData.allowedSettingsPages;
-        ownerData.projects = userInput.projects !== undefined ? userInput.projects : ownerData.projects; // Allow project assignment for owner if needed
-        ownerData.status = userInput.status || ownerData.status; 
-        ownerData.updatedAt = new Date().toISOString();
-        
-        // Owner's username, role, password cannot be changed here.
-        // Username/password sync happens via .env and ensureOwnerFileExists on login.
-        if (userInput.username && userInput.username !== ownerData.username) {
-             if(debugMode) console.warn("[RolesActions - updateUser] Attempt to change Owner's username via UI was ignored.");
-        }
-        if (userInput.password) {
-            if(debugMode) console.warn("[RolesActions - updateUser] Attempt to change Owner's password via UI was ignored. Use .env.");
-        }
-        
-        await saveEncryptedData(ownerFilename, ownerData);
-        return { message: "Owner restricted settings (like page/project assignments, status) updated successfully.", status: "success", user: ownerData };
-
-     } catch(e) {
-        const error = e instanceof Error ? e : new Error(String(e));
-        console.error(`[RolesActions - updateUser] Error updating owner_root details:`, error);
-        return { message: `Error updating owner details: ${error.message}`, status: "error" };
+     // Owner's core details (username, password, role) are managed via .env and login flow.
+     // Only allow updating specific assignable fields for owner if needed.
+     const ownerData = await loadUserById('owner_root');
+     if (!ownerData) {
+        logEvent(actorUsername, actorRole, 'UPDATE_USER_OWNER_NOT_FOUND', 'ERROR');
+        return { message: "Owner data file not found. Cannot update owner settings.", status: "error" };
      }
+     ownerData.assignedPages = userInput.assignedPages !== undefined ? userInput.assignedPages : ownerData.assignedPages;
+     ownerData.allowedSettingsPages = userInput.allowedSettingsPages !== undefined ? userInput.allowedSettingsPages : ownerData.allowedSettingsPages;
+     ownerData.projects = userInput.projects !== undefined ? userInput.projects : ownerData.projects;
+     ownerData.status = userInput.status || ownerData.status; 
+     ownerData.updatedAt = new Date().toISOString();
+     
+     const ownerFilename = path.basename(getUserFilePath(ownerData.username, ownerData.role));
+     await saveEncryptedData(ownerFilename, ownerData);
+     logEvent(actorUsername, actorRole, 'UPDATE_USER_OWNER_SETTINGS_SUCCESS', 'INFO', { targetUser: ownerData.username });
+     return { message: "Owner restricted settings updated successfully.", status: "success", user: ownerData };
   }
 
   const validatedChanges = updateUserInputSchema.safeParse(userInput);
-
   if (!validatedChanges.success) {
     if (debugMode) console.error("[RolesActions - updateUser] Update user validation failed:", validatedChanges.error.flatten().fieldErrors);
+    logEvent(actorUsername, actorRole, 'UPDATE_USER_VALIDATION_FAILED', 'WARN', { targetUserId: userInput.id, errors: validatedChanges.error.flatten().fieldErrors });
     return {
-      message: "Validation failed for user update.",
-      status: "error",
-      errors: validatedChanges.error.flatten().fieldErrors,
+      message: "Validation failed for user update.", status: "error", errors: validatedChanges.error.flatten().fieldErrors,
     };
   }
 
@@ -413,47 +387,24 @@ export async function updateUser(prevState: UserActionState, userInput: UpdateUs
   const now = new Date().toISOString();
 
   try {
-    const dataPath = getDataPath();
-    let files: string[];
-    try { files = await fs.readdir(dataPath); } catch { files = []; }
-    
-    let currentUserData: UserData | null = null;
-    let oldFilename: string | null = null;
-
-    for (const file of files) {
-      if (file.endsWith('.json') && file !== '.settings.json' && !file.endsWith('-Auth.json')) {
-        const fileData = await loadEncryptedData(file);
-        if (fileData) {
-          const parsed = userSchema.safeParse(fileData);
-          if (parsed.success && parsed.data.id === userInput.id && parsed.data.id !== 'owner_root') { 
-            currentUserData = parsed.data;
-            oldFilename = file;
-            break;
-          }
-        }
-      }
-    }
-
-    if (!currentUserData || !oldFilename) {
+    const currentUserData = await loadUserById(userInput.id);
+    if (!currentUserData || currentUserData.id === 'owner_root') { // Should be caught by above, but defensive
+      logEvent(actorUsername, actorRole, 'UPDATE_USER_NOT_FOUND', 'ERROR', { targetUserId: userInput.id });
       return { message: "User not found for update.", status: "error", errors: { _form: ["User to update not found."] } };
     }
+    const oldFilename = path.basename(getUserFilePath(currentUserData.username, currentUserData.role));
+    const oldSettingsFilename = `${currentUserData.username.replace(/[^a-zA-Z0-9_.-]/g, '_')}-${currentUserData.role.replace(/[^a-zA-Z0-9]/g, '_')}-settings.json`;
 
-    const oldFilePath = path.join(dataPath, oldFilename);
 
     if (updatesToApply.username && updatesToApply.username !== currentUserData.username) {
       if (updatesToApply.username === process.env.OWNER_USERNAME) {
+        logEvent(actorUsername, actorRole, 'UPDATE_USER_FAILED_OWNER_USERNAME_CONFLICT', 'WARN', { targetUserId: userInput.id, newUsername: updatesToApply.username });
         return { message: "Cannot change username to Owner's username.", status: "error", errors: { username: ["This username is reserved."] }};
       }
-      for (const file of files) {
-          if (file.endsWith('.json') && file !== '.settings.json' && !file.endsWith('-Auth.json') && file !== oldFilename) { 
-              const fileData = await loadEncryptedData(file);
-              if (fileData) {
-                  const existingUser = userSchema.safeParse(fileData);
-                  if (existingUser.success && existingUser.data.username === updatesToApply.username) {
-                      return { message: "New username already exists.", status: "error", errors: { username: ["New username is already taken."] } };
-                  }
-              }
-          }
+      const usersResult = await loadUsers();
+      if (usersResult.users && usersResult.users.some(u => u.username === updatesToApply.username && u.id !== userInput.id)) {
+        logEvent(actorUsername, actorRole, 'UPDATE_USER_FAILED_USERNAME_EXISTS', 'WARN', { targetUserId: userInput.id, newUsername: updatesToApply.username });
+        return { message: "New username already exists.", status: "error", errors: { username: ["New username is already taken."] } };
       }
     }
 
@@ -470,95 +421,110 @@ export async function updateUser(prevState: UserActionState, userInput: UpdateUs
       updatedUser.salt = salt;
     }
     
-    const safeNewUsername = updatedUser.username.replace(/[^a-zA-Z0-9_.-]/g, '_');
-    const safeNewRole = updatedUser.role.replace(/[^a-zA-Z0-9]/g, '_');
-    const newFilename = `${safeNewUsername}-${safeNewRole}.json`;
+    const newFilenameBase = updatedUser.username.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const newRoleBase = updatedUser.role.replace(/[^a-zA-Z0-9]/g, '_');
+    const newFilename = `${newFilenameBase}-${newRoleBase}.json`;
+    const newSettingsFilename = `${newFilenameBase}-${newRoleBase}-settings.json`;
 
-
-    if (oldFilename !== newFilename && oldFilePath) {
+    // If username or role changed, old file needs to be deleted after new one is saved
+    if (oldFilename !== newFilename) {
+      await saveEncryptedData(newFilename, updatedUser); // Save new data file first
+      // If settings file exists under old name, rename/move it
+      const dataPath = getDataPath();
+      const oldSettingsPath = path.join(dataPath, oldSettingsFilename);
+      const newSettingsPath = path.join(dataPath, newSettingsFilename);
+      if (fs.existsSync(oldSettingsPath)) {
+          try {
+              await fs.rename(oldSettingsPath, newSettingsPath);
+              if (debugMode) console.log(`[RolesActions - updateUser] Renamed settings file from ${oldSettingsFilename} to ${newSettingsFilename}`);
+          } catch (renameError) {
+              console.warn(`[RolesActions - updateUser] Could not rename settings file ${oldSettingsFilename} to ${newSettingsFilename}. User might lose settings. Error: ${renameError}`);
+              // If rename fails, new user might lose settings or get defaults on next login.
+          }
+      }
       try {
-        await fs.unlink(oldFilePath);
+        await fs.unlink(path.join(dataPath, oldFilename));
         if (debugMode) console.log(`[RolesActions - updateUser] Deleted old user file: ${oldFilename}`);
       } catch (e) {
-        console.warn(`[RolesActions - updateUser] Could not delete old user file ${oldFilename}:`, e);
+        console.warn(`[RolesActions - updateUser] Could not delete old user file ${oldFilename} after rename:`, e);
       }
+    } else {
+      await saveEncryptedData(newFilename, updatedUser); // Just save to the same file
     }
-
-    await saveEncryptedData(newFilename, updatedUser);
-
+    logEvent(actorUsername, actorRole, 'UPDATE_USER_SUCCESS', 'INFO', { targetUserId: updatedUser.id, targetUsername: updatedUser.username });
     const successMessage = debugMode
         ? `User "${updatedUser.username}" updated successfully in ${newFilename}.`
         : `User "${updatedUser.username}" updated successfully.`;
-
     return { message: successMessage, status: "success", user: updatedUser };
   } catch (e) {
     const error = e instanceof Error ? e : new Error(String(e));
     console.error(`[RolesActions - updateUser] Error updating user ID ${userInput.id}:`, error);
+    logEvent(actorUsername, actorRole, 'UPDATE_USER_EXCEPTION', 'ERROR', { targetUserId: userInput.id, error: error.message });
     return { message: `Error updating user: ${error.message}`, status: "error" };
   }
 }
 
 
-export async function deleteUser(userId: string): Promise<UserActionState> {
-  const panelSettings = await getPanelSettingsForDebug();
-  const debugMode = panelSettings?.debugMode ?? false;
-  if (debugMode) console.log(`[RolesActions - deleteUser] Attempting to delete user ID: ${userId}`);
+export async function deleteUser(
+    userId: string,
+    actor?: { username: string; role: string } // Actor performing the action
+): Promise<UserActionState> {
+  const { actorUsername, actorRole } = await getActorInfo(actor);
+  const debugMode = await getCurrentUserDebugMode(actorUsername, actorRole);
+
+  if (debugMode) console.log(`[RolesActions - deleteUser] Attempting to delete user ID: ${userId} by ${actorUsername}`);
 
   if (!userId) {
+    logEvent(actorUsername, actorRole, 'DELETE_USER_FAILED_NO_ID', 'WARN');
     return { message: "User ID is required for deletion.", status: "error" };
   }
   if (userId === 'owner_root') {
+    logEvent(actorUsername, actorRole, 'DELETE_USER_FAILED_OWNER_ACCOUNT', 'WARN');
     return { message: "Owner account cannot be deleted.", status: "error" };
   }
 
   try {
-    const dataPath = getDataPath();
-    let files: string[];
-    try { files = await fs.readdir(dataPath); } catch { files = []; }
-    
-    let userToDelete: UserData | null = null;
-    let filePathToDelete: string | null = null;
-    let filenameToDelete: string | null = null;
-
-    for (const file of files) {
-       if (file.endsWith('.json') && file !== '.settings.json' && !file.endsWith('-Auth.json')) {
-        const fileData = await loadEncryptedData(file);
-        if (fileData) {
-          const parsedUser = userSchema.safeParse(fileData);
-          if (parsedUser.success && parsedUser.data.id === userId) {
-            userToDelete = parsedUser.data;
-            filenameToDelete = file;
-            filePathToDelete = path.join(dataPath, file);
-            break;
-          } else if (!parsedUser.success && (fileData as any).id === userId) {
-             if(debugMode) console.warn(`[RolesActions - deleteUser] Found file for ID ${userId} but it failed schema validation: ${file}`, parsedUser.error);
-          }
-        }
-      }
-    }
-
-    if (!userToDelete || !filePathToDelete || !filenameToDelete) {
+    const userToDelete = await loadUserById(userId);
+    if (!userToDelete || userToDelete.id === 'owner_root') { // Defensive check
+      logEvent(actorUsername, actorRole, 'DELETE_USER_NOT_FOUND', 'ERROR', { targetUserId: userId });
       return { message: "User not found for deletion or user data is invalid.", status: "error" };
     }
 
+    const filenameToDelete = path.basename(getUserFilePath(userToDelete.username, userToDelete.role));
+    const settingsFilenameToDelete = `${userToDelete.username.replace(/[^a-zA-Z0-9_.-]/g, '_')}-${userToDelete.role.replace(/[^a-zA-Z0-9]/g, '_')}-settings.json`;
+    const dataPath = getDataPath();
+
     try {
-      await fs.unlink(filePathToDelete);
+      await fs.unlink(path.join(dataPath, filenameToDelete));
+      if (debugMode) console.log(`[RolesActions - deleteUser] Deleted user file: ${filenameToDelete}`);
     } catch (e) {
        if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-         if (debugMode) console.warn(`[RolesActions - deleteUser] File not found for user ${userToDelete.username}, assuming already deleted: ${filenameToDelete}`);
-       } else {
-         throw e; 
+         if (debugMode) console.warn(`[RolesActions - deleteUser] User file not found, assuming already deleted: ${filenameToDelete}`);
+       } else { throw e; }
+    }
+    try {
+      await fs.unlink(path.join(dataPath, settingsFilenameToDelete));
+      if (debugMode) console.log(`[RolesActions - deleteUser] Deleted user settings file: ${settingsFilenameToDelete}`);
+    } catch (e) {
+       if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+         // This is fine, user might not have had specific settings saved yet
+         if (debugMode) console.warn(`[RolesActions - deleteUser] User settings file not found, assuming not created: ${settingsFilenameToDelete}`);
+       } else { 
+            console.warn(`[RolesActions - deleteUser] Could not delete user settings file ${settingsFilenameToDelete}. It might need manual cleanup. Error: ${e}`);
+            // Don't fail the whole delete if settings file deletion fails, but log it.
        }
     }
 
+
+    logEvent(actorUsername, actorRole, 'DELETE_USER_SUCCESS', 'INFO', { targetUserId: userId, targetUsername: userToDelete.username });
     const successMessage = debugMode
         ? `User "${userToDelete.username}" (file: ${filenameToDelete}) deleted successfully.`
         : `User deleted successfully.`;
-
     return { message: successMessage, status: "success" };
   } catch (e) {
     const error = e instanceof Error ? e : new Error(String(e));
     console.error(`[RolesActions - deleteUser] Error deleting user ID ${userId}:`, error);
+    logEvent(actorUsername, actorRole, 'DELETE_USER_EXCEPTION', 'ERROR', { targetUserId: userId, error: error.message });
     return { message: `Error deleting user: ${error.message}`, status: "error" };
   }
 }
