@@ -1,4 +1,3 @@
-
 // src/lib/session.ts
 import type { IronSessionOptions } from 'iron-session';
 import type { UserData } from '@/app/(app)/roles/actions';
@@ -11,6 +10,8 @@ export interface SessionData {
   };
   isLoggedIn: boolean;
   lastActivity?: number; // Timestamp of last recorded activity
+  sessionInactivityTimeoutMinutes?: number; // User's specific timeout setting for this session
+  disableAutoLogoutOnInactivity?: boolean; // User's specific auto-logout setting for this session
 }
 
 export const sessionOptions: IronSessionOptions = {
@@ -24,6 +25,7 @@ export const sessionOptions: IronSessionOptions = {
     // By default, iron-session creates session cookies (expire when browser closes).
     // If we set maxAge, and then refresh by re-saving, it acts like a rolling session.
     // For example, maxAge: 60 * 60 * 24 (24 hours)
+    // We will primarily rely on the explicit inactivity timeout logic in the middleware.
   },
 };
 

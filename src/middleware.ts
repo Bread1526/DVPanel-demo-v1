@@ -1,4 +1,3 @@
-
 // src/middleware.ts
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
@@ -15,11 +14,11 @@ export async function middleware(request: NextRequest) {
   // Allow Next.js internals, static assets, and specific public API routes
   if (
     pathname.startsWith('/_next/') ||
-    pathname.startsWith('/static/') || // If you have a /public/static folder
+    pathname.startsWith('/static/') || 
     pathname.endsWith('.ico') ||
-    pathname.endsWith('.png') || // Add other image types if needed
-    pathname.startsWith('/images/') || // If you have a /public/images folder
-    pathname.startsWith('/api/ping') // Assuming /api/ping is public
+    pathname.endsWith('.png') || 
+    pathname.startsWith('/images/') || 
+    pathname.startsWith('/api/ping') 
   ) {
     return NextResponse.next();
   }
@@ -35,27 +34,46 @@ export async function middleware(request: NextRequest) {
   }
 
   // For all other paths, if not logged in, redirect to login
-  if (!session.isLoggedIn) {
+  if (!session.isLoggedIn || !session.user) {
     const loginUrl = new URL('/login', request.url);
-    // Preserve the originally requested path for redirection after login
-    // Avoid redirecting to '/' if that was the original path and it's also the dashboard
     if (pathname !== '/') {
         loginUrl.searchParams.set('redirect', pathname + request.nextUrl.search);
     }
     return NextResponse.redirect(loginUrl);
   }
 
-  // If logged in, initialize lastActivity if it's missing (for older sessions)
-  // and then allow access to the protected route.
-  if (session.user && typeof session.lastActivity === 'undefined') {
-    session.lastActivity = Date.now();
-    await session.save(); // This will also refresh the cookie
+  // If logged in, check for inactivity if auto-logout is enabled for this session
+  if (session.user) {
+    const currentTime = Date.now();
+    const lastActivity = session.lastActivity ?? currentTime; // Default to now if not set
+
+    if (!session.disableAutoLogoutOnInactivity) { // Check if auto-logout is enabled
+      const timeoutMinutes = session.sessionInactivityTimeoutMinutes ?? 30; // Default to 30 minutes
+      const timeoutMilliseconds = timeoutMinutes * 60 * 1000;
+
+      if (currentTime - lastActivity > timeoutMilliseconds) {
+        // User has been inactive for too long
+        session.destroy(); // Log out the user
+        const loginUrl = new URL('/login', request.url);
+        loginUrl.searchParams.set('reason', 'inactive');
+        if (pathname !== '/') {
+            loginUrl.searchParams.set('redirect', pathname + request.nextUrl.search);
+        }
+        return NextResponse.redirect(loginUrl);
+      }
+    }
+    // If lastActivity was undefined (e.g., for a session created before this feature), update it.
+    // Or, if we want to refresh it less frequently than every request for non-activity-tracked requests:
+    if (typeof session.lastActivity === 'undefined') {
+      session.lastActivity = currentTime;
+      // We don't necessarily need to save the session on every request here,
+      // as `updateSessionActivity` from client-side interaction handles active refresh.
+      // However, saving here ensures `lastActivity` is initialized.
+      // To avoid excessive writes, this could be conditional or handled by first activity.
+      // For now, let's initialize it if missing.
+      await session.save();
+    }
   }
-  
-  // Note: The actual enforcement of custom inactivity timeout from settings 
-  // is deferred due to complexity of accessing settings from middleware.
-  // iron-session's cookie maxAge (if set) or session cookie nature provides session lifetime.
-  // The activity tracker refreshes this by re-saving the session.
 
   return NextResponse.next();
 }

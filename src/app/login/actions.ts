@@ -10,9 +10,9 @@ import { sessionOptions, type SessionData } from '@/lib/session';
 import { loadUsers, verifyPassword, hashPassword, type UserData } from '@/app/(app)/roles/actions'; 
 import { getDataPath } from "@/backend/lib/config";
 import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storageService";
+import { type PanelSettingsData, loadPanelSettings as loadGeneralPanelSettings } from '@/app/(app)/settings/actions';
 import fs from 'fs';
 import path from 'path';
-import { type PanelSettingsData, loadPanelSettings } from '@/app/(app)/settings/actions';
 
 const LoginSchema = z.object({
   username: z.string().min(1, "Username is required."),
@@ -26,10 +26,9 @@ export interface LoginState {
   errors?: Partial<Record<keyof z.infer<typeof LoginSchema> | "_form", string[]>>;
 }
 
-
 async function getPanelSettingsForDebug(): Promise<PanelSettingsData | undefined> {
     try {
-        const settingsResult = await loadPanelSettings();
+        const settingsResult = await loadGeneralPanelSettings();
         return settingsResult.data;
     } catch {
         return undefined;
@@ -57,18 +56,18 @@ async function ensureOwnerFileOnLogin(ownerUsernameEnv: string, ownerPasswordEnv
     
     const now = new Date().toISOString();
     let createdAt = now;
-    let existingData = null;
+    let existingData: UserData | Partial<UserData> | null = null;
 
     try {
-      existingData = await loadEncryptedData(ownerFilename);
+      existingData = await loadEncryptedData(ownerFilename) as UserData | null;
       if (debugMode && existingData) console.log(`[LoginAction - ensureOwnerFileOnLogin] Existing data found for ${ownerFilename}.`);
       if (debugMode && !existingData) console.log(`[LoginAction - ensureOwnerFileOnLogin] No existing data found for ${ownerFilename}. Will create anew.`);
     } catch (loadErr) {
       if (debugMode) console.warn(`[LoginAction - ensureOwnerFileOnLogin] Error loading existing owner file ${ownerFilename}, will create anew:`, loadErr instanceof Error ? loadErr.message : String(loadErr));
     }
 
-    if (existingData && typeof (existingData as UserData).createdAt === 'string') {
-      createdAt = (existingData as UserData).createdAt;
+    if (existingData && typeof existingData.createdAt === 'string') {
+      createdAt = existingData.createdAt;
       if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] Preserving createdAt: ${createdAt} from existing file.`);
     } else {
       if (debugMode) console.log(`[LoginAction - ensureOwnerFileOnLogin] No existing valid createdAt found for ${ownerFilename} or file doesn't exist. Using current time.`);
@@ -83,10 +82,10 @@ async function ensureOwnerFileOnLogin(ownerUsernameEnv: string, ownerPasswordEnv
       projects: [], 
       assignedPages: [], 
       allowedSettingsPages: [], 
-      lastLogin: now, 
       status: "Active",
       createdAt: createdAt,
       updatedAt: now,
+      // lastLogin will be updated by the main login logic after session save
     };
     
     if (debugMode) {
@@ -133,7 +132,7 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
   const rawFormData = {
     username: String(formData.get("username") ?? ""),
     password: String(formData.get("password") ?? ""),
-    redirectUrl: String(formData.get("redirectUrl") ?? ""),
+    redirectUrl: String(formData.get("redirectUrl") ?? "/"), // Default to '/' if not provided
   };
 
   if (debugMode) console.log("[LoginAction] Raw form data extracted for Zod:", rawFormData);
@@ -158,6 +157,24 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
   }
 
   const { username, password, redirectUrl } = validatedFields.data;
+  let userSessionData: SessionData['user'];
+  let sessionInactivityTimeoutMinutes: number = 30; // Default
+  let disableAutoLogoutOnInactivity: boolean = false; // Default
+
+  // Attempt to load panel settings to get session timeout preferences
+  try {
+    const loadedSettings = await loadGeneralPanelSettings();
+    if (loadedSettings.data) {
+      sessionInactivityTimeoutMinutes = loadedSettings.data.sessionInactivityTimeout ?? 30;
+      disableAutoLogoutOnInactivity = loadedSettings.data.disableAutoLogoutOnInactivity ?? false;
+      if (debugMode) console.log(`[LoginAction] Loaded panel settings for session: timeout ${sessionInactivityTimeoutMinutes}m, disableAutoLogout: ${disableAutoLogoutOnInactivity}`);
+    } else {
+      if (debugMode) console.warn("[LoginAction] Could not load panel settings for session timeout, using defaults.");
+    }
+  } catch (e) {
+    if (debugMode) console.warn("[LoginAction] Error loading panel settings for session timeout, using defaults:", e);
+  }
+
 
   try {
     const session = await getIronSession<SessionData>(cookies(), sessionOptions);
@@ -167,13 +184,16 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
         if (debugMode) console.log(`[LoginAction] Matched .env.local owner: ${ownerUsernameEnv}. Proceeding to ensure owner file.`);
         await ensureOwnerFileOnLogin(ownerUsernameEnv, ownerPasswordEnv);
 
-        session.user = {
+        userSessionData = {
           id: 'owner_root',
           username: ownerUsernameEnv,
           role: 'Owner',
         };
+        session.user = userSessionData;
         session.isLoggedIn = true;
         session.lastActivity = Date.now();
+        session.sessionInactivityTimeoutMinutes = sessionInactivityTimeoutMinutes;
+        session.disableAutoLogoutOnInactivity = disableAutoLogoutOnInactivity;
         await session.save();
         if (debugMode) console.log("[LoginAction] Owner session saved successfully.");
         
@@ -195,10 +215,10 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
       return { message: usersResult.error || "System error: Could not load user data.", status: "error", errors: { _form: [usersResult.error || "System error: Could not load user data."] } };
     }
     
-    const user = usersResult.users.find(u => u.username === username && u.id !== 'owner_root');
+    const user = usersResult.users.find(u => u.username === username); // id !== 'owner_root' check is now done in loadUsers
 
     if (!user) {
-      if (debugMode) console.log("[LoginAction] Regular user not found or is owner (should have been handled above):", username);
+      if (debugMode) console.log("[LoginAction] Regular user not found:", username);
       return { message: "Invalid username or password.", status: "error", errors: { _form: ["Invalid username or password."] } };
     }
     
@@ -214,13 +234,16 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     }
 
     if (debugMode) console.log(`[LoginAction] Regular user login successful for: ${username}`);
-    session.user = {
+    userSessionData = {
       id: user.id,
       username: user.username,
       role: user.role,
     };
+    session.user = userSessionData;
     session.isLoggedIn = true;
     session.lastActivity = Date.now();
+    session.sessionInactivityTimeoutMinutes = sessionInactivityTimeoutMinutes;
+    session.disableAutoLogoutOnInactivity = disableAutoLogoutOnInactivity;
     await session.save();
     if (debugMode) console.log("[LoginAction] Regular user session saved successfully.");
     
@@ -229,7 +252,7 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     redirect(destination);
 
   } catch (error: any) {
-    if (error.digest?.startsWith('NEXT_REDIRECT')) {
+    if (error.message?.includes('NEXT_REDIRECT')) { // Check for redirect error message
       throw error; 
     }
     console.error("[LoginAction] Unexpected login error:", error.message, error.stack);
