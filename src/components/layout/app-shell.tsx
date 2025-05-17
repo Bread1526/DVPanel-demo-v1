@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useEffect, useState, useTransition, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   Sidebar,
   SidebarHeader,
@@ -27,8 +27,9 @@ import {
   UserCircle,
   LogOut,
   Replace,
-  AlertTriangle, 
-  EyeOff
+  AlertTriangle,
+  EyeOff,
+  Loader2, 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -42,12 +43,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { logout as serverLogoutAction } from '@/app/(app)/logout/actions'; 
+import { logout as serverLogoutAction } from '@/app/(app)/logout/actions';
 import { useActivityTracker } from '@/hooks/useActivityTracker';
 import { type AuthenticatedUser, type LocalSessionInfo } from '@/lib/session';
 import AccessDeniedOverlay from './access-denied-overlay';
 import { useToast } from '@/hooks/use-toast';
-
+import { loadPanelSettings } from '@/app/(app)/settings/actions'; 
 
 const navItemsBase = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, requiredPage: 'dashboard' },
@@ -61,12 +62,10 @@ const navItemsBase = [
 interface ApiAuthUserResponse {
   user: AuthenticatedUser | null;
   error?: string;
-  isImpersonating?: boolean;
-  originalUsername?: string;
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  useActivityTracker(); 
+  useActivityTracker();
   const pathname = usePathname();
   const { state: sidebarState, isMobile } = useSidebar();
   const router = useRouter();
@@ -75,9 +74,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [currentUserData, setCurrentUserData] = useState<AuthenticatedUser | null>(null);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [isPageAccessGranted, setIsPageAccessGranted] = useState<boolean | null>(null);
-  const [isImpersonating, setIsImpersonating] = useState(false);
-  const [originalUsername, setOriginalUsername] = useState<string | undefined>(undefined);
-
+  const [debugMode, setDebugMode] = useState(false);
 
   const performLogout = useCallback(async (reason?: string) => {
     const storedSession = localStorage.getItem('dvpanel-session');
@@ -88,129 +85,167 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         usernameToLogout = session.username;
         roleToLogout = session.role;
       } catch (e) {
-        console.error("Error parsing session from localStorage during logout", e);
+        console.error("[AppShell] Error parsing session from localStorage during logout", e);
       }
     }
-    
+
     localStorage.removeItem('dvpanel-session');
     setCurrentUserData(null);
-    setIsPageAccessGranted(false); 
-    setIsImpersonating(false);
-    setOriginalUsername(undefined);
-    
+    setIsPageAccessGranted(false); // Ensure access is revoked on logout
+
     try {
-      await serverLogoutAction(usernameToLogout, roleToLogout); 
+      await serverLogoutAction(usernameToLogout, roleToLogout);
     } catch (e) {
-      console.error("Error calling server logout action:", e);
+      console.error("[AppShell] Error calling server logout action:", e);
     }
-    
+    if (debugMode) console.log(`[AppShell] performLogout triggered, redirecting to /login. Reason: ${reason}`);
     router.push(`/login${reason ? `?reason=${reason}` : '?reason=logout'}`);
-  }, [router]);
+  }, [router, debugMode]);
+
+  useEffect(() => {
+    const fetchAppSettings = async () => {
+      try {
+        const settingsResult = await loadPanelSettings();
+        if (settingsResult.data) {
+          setDebugMode(settingsResult.data.debugMode ?? false);
+        }
+      } catch (e) {
+        console.error("[AppShell] Failed to load panel settings for debug mode", e);
+      }
+    };
+    fetchAppSettings();
+  }, []);
 
   useEffect(() => {
     const fetchUserAndCheckAccess = async () => {
       setIsLoadingUser(true);
-      setIsPageAccessGranted(null);
+      setIsPageAccessGranted(null); 
+      if (debugMode) console.log('[AppShell] fetchUserAndCheckAccess started. Pathname:', pathname);
+
       const storedSession = localStorage.getItem('dvpanel-session');
+      if (debugMode) console.log('[AppShell] Stored session from localStorage:', storedSession ? "Found" : "Not Found");
 
       if (!storedSession) {
+        if (debugMode) console.log('[AppShell] No session in localStorage. Performing logout.');
         setCurrentUserData(null);
         setIsLoadingUser(false);
-        if (pathname !== '/login') { // Ensure we are not already on login page
-            performLogout('unauthorized');
-        }
+        performLogout('unauthorized'); 
         return;
       }
 
+      let session: LocalSessionInfo;
       try {
-        const session: LocalSessionInfo = JSON.parse(storedSession);
+        session = JSON.parse(storedSession);
+        if (debugMode) console.log('[AppShell] Parsed session from localStorage:', { username: session.username, role: session.role, tokenExists: !!session.token });
+      } catch (e) {
+        if (debugMode) console.error('[AppShell] Failed to parse session from localStorage. Performing logout.', e);
+        performLogout('unauthorized');
+        return;
+      }
+      
+      if (!session.token || !session.username || !session.role) {
+        if (debugMode) console.log('[AppShell] Incomplete session data in localStorage. Performing logout.');
+        performLogout('unauthorized');
+        return;
+      }
+        
+      try {
+        if (debugMode) console.log('[AppShell] Fetching /api/auth/user with headers:', { 'X-Auth-Token': session.token, 'X-Auth-Username': session.username, 'X-Auth-Role': session.role });
         const response = await fetch('/api/auth/user', {
+          method: 'GET', // Explicitly GET
           headers: {
             'X-Auth-Token': session.token,
             'X-Auth-Username': session.username,
             'X-Auth-Role': session.role,
           }
         });
+        
+        if (debugMode) console.log('[AppShell] /api/auth/user response status:', response.status);
 
-        if (response.status === 401) {
-          console.warn('[AppShell] Unauthorized or session expired via /api/auth/user. Logging out.');
-          performLogout(pathname === '/login' ? undefined : 'unauthorized');
+        if (!response.ok) { 
+          const errorData = await response.json().catch(() => ({ error: "Failed to parse error response from /api/auth/user" }));
+          if (debugMode) console.warn(`[AppShell] /api/auth/user returned non-OK status: ${response.status}. Error:`, errorData?.error);
+          performLogout(response.status === 401 ? 'unauthorized' : 'session_error');
           return;
-        }
-        if (!response.ok) {
-          throw new Error(`Failed to fetch user: ${response.statusText}`);
         }
 
         const data: ApiAuthUserResponse = await response.json();
+        if (debugMode) console.log('[AppShell] Data from /api/auth/user:', data.user ? { username: data.user.username, role: data.user.role } : "No user data in response");
+
         if (data.user) {
           setCurrentUserData(data.user);
-          setIsImpersonating(data.isImpersonating ?? false);
-          setOriginalUsername(data.originalUsername);
         } else {
-          console.warn('[AppShell] No user data received from API. Logging out.');
-          performLogout(pathname === '/login' ? undefined : 'unauthorized');
-          return;
+          if (debugMode) console.warn('[AppShell] No user object in successful /api/auth/user response body. Performing logout.');
+          performLogout('unauthorized');
         }
       } catch (error) {
-        console.error("[AppShell] Error fetching user:", error);
-        performLogout(pathname === '/login' ? undefined : 'unauthorized');
-        return;
+        const e = error instanceof Error ? error : new Error(String(error));
+        console.error("[AppShell] Error in fetchUserAndCheckAccess during API call:", e.message, e.stack);
+        performLogout('session_error');
       } finally {
         setIsLoadingUser(false);
+        if (debugMode) console.log('[AppShell] fetchUserAndCheckAccess finished. isLoadingUser:', false);
       }
     };
 
     fetchUserAndCheckAccess();
-  }, [pathname, performLogout]); 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, debugMode]); // performLogout is memoized, router is stable
 
   useEffect(() => {
-    if (!isLoadingUser && currentUserData) {
-      const effectiveUser = currentUserData; // This is the currently active user (could be impersonated)
-      let hasAccess = false;
-      
-      if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') {
-        hasAccess = true;
-      } else if (effectiveUser.role === 'Admin') {
-        const currentTopLevelPath = pathname.split('/')[1] || '';
-        const adminAllowedBasePaths = ['dashboard', 'projects_page', 'files', 'ports', 'roles'];
-        
-        let baseAccess = adminAllowedBasePaths.some(basePageId => {
-            const navItem = navItemsBase.find(item => item.requiredPage === basePageId);
-            if (!navItem) return false;
-            return navItem.href === '/' ? pathname === '/' : (pathname === navItem.href || pathname.startsWith(navItem.href + '/'));
-        });
-
-        if (currentTopLevelPath === 'settings') {
-            const settingSubPage = pathname.split('/')[2] || 'panel';
-            const requiredSettingPageId = `settings_${settingSubPage === '' ? 'panel' : settingSubPage}`;
-            baseAccess = effectiveUser.allowedSettingsPages?.includes(requiredSettingPageId) ?? false;
-        }
-        hasAccess = baseAccess;
-
-      } else if (effectiveUser.role === 'Custom' && effectiveUser.assignedPages) {
-        const navItemMatch = navItemsBase.find(item => 
-          item.href === '/' ? pathname === '/' : (pathname === item.href || pathname.startsWith(item.href + '/'))
-        );
-        if (navItemMatch?.requiredPage) {
-          hasAccess = effectiveUser.assignedPages.includes(navItemMatch.requiredPage);
-          
-          if (navItemMatch.requiredPage === 'settings_area' && pathname.startsWith('/settings/')) {
-            const settingSubPage = pathname.split('/')[2] || 'panel';
-            const requiredSettingPageId = `settings_${settingSubPage === '' ? 'panel' : settingSubPage}`;
-            const hasSettingSubPageAccess = effectiveUser.allowedSettingsPages?.includes(requiredSettingPageId) ?? false;
-            hasAccess = hasAccess && hasSettingSubPageAccess;
-          }
-        } else if (pathname === '/') { 
-           hasAccess = effectiveUser.assignedPages.includes('dashboard');
-        }
-      }
-      
-      setIsPageAccessGranted(hasAccess);
-
-    } else if (!isLoadingUser && !currentUserData) {
-      setIsPageAccessGranted(false); // No user data means no access.
+    if (isLoadingUser || !currentUserData) {
+      if (debugMode && !isLoadingUser && !currentUserData) console.log('[AppShell] Page access check: No current user data or still loading, access not granted yet.');
+      return;
     }
-  }, [isLoadingUser, currentUserData, pathname]);
+
+    const effectiveUser = currentUserData;
+    let hasAccess = false;
+    let requiredPageId = 'unknown';
+
+    const currentTopLevelPath = pathname.split('/')[1] || '';
+    
+    if (pathname.startsWith('/settings')) {
+        const settingSubPage = pathname.split('/')[2] || 'panel'; 
+        requiredPageId = `settings_${settingSubPage === '' ? 'panel' : settingSubPage}`;
+    } else {
+        const navItemMatch = navItemsBase.find(item =>
+            item.href === '/' ? pathname === '/' : (pathname.startsWith(item.href) && item.href !== '/')
+        );
+        if (navItemMatch) {
+            requiredPageId = navItemMatch.requiredPage;
+        } else if (pathname === '/') {
+             requiredPageId = 'dashboard'; 
+        }
+    }
+    
+    if (debugMode) console.log(`[AppShell] Page access check for path: "${pathname}", effectiveUser role: "${effectiveUser.role}", requiredPageId: "${requiredPageId}"`);
+
+    if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') {
+      hasAccess = true;
+      if (debugMode) console.log('[AppShell] Page access: Granted (Owner/Administrator)');
+    } else if (effectiveUser.role === 'Admin') {
+      if (requiredPageId.startsWith('settings_')) {
+        hasAccess = effectiveUser.allowedSettingsPages?.includes(requiredPageId) ?? false;
+        if (debugMode) console.log(`[AppShell] Page access (Admin, settings): ${hasAccess} for ${requiredPageId}`);
+      } else {
+        const adminAllowedAppPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles']; 
+        hasAccess = adminAllowedAppPages.includes(requiredPageId);
+        if (debugMode) console.log(`[AppShell] Page access (Admin, app page): ${hasAccess} for ${requiredPageId}`);
+      }
+    } else if (effectiveUser.role === 'Custom' && effectiveUser.assignedPages) {
+      if (requiredPageId.startsWith('settings_')) {
+        hasAccess = (effectiveUser.assignedPages.includes('settings_area') && (effectiveUser.allowedSettingsPages?.includes(requiredPageId) ?? false));
+        if (debugMode) console.log(`[AppShell] Page access (Custom, settings): ${hasAccess} for ${requiredPageId}`);
+      } else {
+        hasAccess = effectiveUser.assignedPages.includes(requiredPageId);
+        if (debugMode) console.log(`[AppShell] Page access (Custom, app page): ${hasAccess} for ${requiredPageId}`);
+      }
+    }
+    
+    setIsPageAccessGranted(hasAccess);
+    if (debugMode) console.log(`[AppShell] Final isPageAccessGranted: ${hasAccess}`);
+
+  }, [isLoadingUser, currentUserData, pathname, debugMode]);
 
 
   const effectiveUser = currentUserData;
@@ -219,19 +254,45 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (!effectiveUser) return false;
     if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') return true;
     if (effectiveUser.role === 'Admin') {
-        if (item.requiredPage === 'settings_area') {
-            return effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
-        }
-        const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles'];
-        return item.requiredPage ? adminAllowedPages.includes(item.requiredPage) : true;
+      if (item.requiredPage === 'settings_area') {
+        return effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
+      }
+      const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles'];
+      return item.requiredPage ? adminAllowedPages.includes(item.requiredPage) : true;
     }
     if (effectiveUser.role === 'Custom' && item.requiredPage) {
       return effectiveUser.assignedPages?.includes(item.requiredPage) ?? false;
     }
     return false;
   });
-  
-  const menuButtonRef = React.useRef<HTMLAnchorElement>(null);
+
+  const menuButtonRef = React.useRef<HTMLSpanElement>(null);
+
+
+  let pageContent;
+  if (isLoadingUser || isPageAccessGranted === null) {
+    pageContent = (
+      <div className="flex justify-center items-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  } else if (currentUserData && isPageAccessGranted) { // Check currentUserData for truthiness before assuming logged in
+    pageContent = children;
+  } else if (currentUserData && !isPageAccessGranted) { // Logged in but no access
+    pageContent = <AccessDeniedOverlay />;
+  } else { 
+    // This state implies !currentUserData && !isLoadingUser, meaning auth check failed or user is not logged in.
+    // performLogout should have already redirected. If we reach here, it's an unexpected state.
+    // Show loader as a fallback, but this path should ideally not be hit if performLogout works.
+    if (debugMode) console.log('[AppShell] Reached unexpected content rendering state: !currentUserData && !isLoadingUser. Should have been redirected.');
+    pageContent = (
+      <div className="flex justify-center items-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="ml-2">Redirecting...</p>
+      </div>
+    );
+  }
+
 
   return (
     <>
@@ -251,7 +312,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
               const menuButton = (
                 <SidebarMenuButton
-                  ref={menuButtonRef} 
+                  // ref is no longer needed here as it's a span and TooltipTrigger wraps Link
                   isActive={isActive}
                   variant="default"
                   size="default"
@@ -272,20 +333,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   )}
                 </SidebarMenuButton>
               );
- 
-               let linkWrappedButton = (
-                 <Link href={item.href} asChild>
+
+               let linkElement = (
+                 <Link href={item.href} legacyBehavior passHref>
                    {menuButton}
                  </Link>
                );
- 
+
                if (sidebarState === 'collapsed' && !isMobile && item.label) {
                  return (
                    <SidebarMenuItem key={item.label}>
                      <TooltipProvider>
                        <Tooltip>
                          <TooltipTrigger asChild>
-                           {linkWrappedButton}
+                           {linkElement}
                          </TooltipTrigger>
                          <TooltipContent side="right" align="center">
                            <p>{item.label}</p>
@@ -298,7 +359,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
               return (
                 <SidebarMenuItem key={item.label}>
-                  {linkWrappedButton}
+                  {linkElement}
                 </SidebarMenuItem>
               );
             })}
@@ -309,96 +370,44 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="w-full justify-start gap-2 px-2">
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src="https://placehold.co/100x100.png" alt="User" data-ai-hint="user avatar" />
-                  <AvatarFallback>{isLoadingUser ? 'L' : effectiveUser?.username?.[0]?.toUpperCase() ?? 'U'}</AvatarFallback>
+                  <AvatarImage src="https://placehold.co/100x100.png" alt="User" data-ai-hint="user avatar"/>
+                  <AvatarFallback>{isLoadingUser || !effectiveUser ? 'L' : effectiveUser.username?.[0]?.toUpperCase() ?? 'U'}</AvatarFallback>
                 </Avatar>
                 <span className={cn(
                   "truncate",
                   { "hidden": sidebarState === 'collapsed' && !isMobile }
                 )}>
-                  {isLoadingUser ? "Loading..." : effectiveUser?.username ?? "Not Logged In"}
-                  {isImpersonating && originalUsername && (
-                    <span className="text-xs text-muted-foreground block">Admin: {originalUsername}</span>
-                  )}
+                  {isLoadingUser || !effectiveUser ? "Loading..." : effectiveUser.username ?? "Not Logged In"}
                 </span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="right" align="start" className="w-56">
-              <DropdownMenuLabel>
-                {isImpersonating ? `Viewing as ${effectiveUser?.username}` : "My Account"}
-              </DropdownMenuLabel>
+              <DropdownMenuLabel>My Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {/* Stop Impersonation - Placeholder until actions are ready */}
-              {/* {isImpersonating && (
-                <>
-                  <DropdownMenuItem onClick={async () => { 
-                    // Placeholder for stopImpersonation action
-                    console.log("Attempting to stop impersonation...");
-                    // const result = await stopImpersonation();
-                    // if (result.success) router.refresh(); else toast({ title: "Error", description: result.message, variant: "destructive" });
-                   }}
-                  >
-                    <EyeOff className="mr-2 h-4 w-4" />
-                    <span>Stop Impersonating</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                </>
-              )} */}
-              <DropdownMenuItem disabled={!effectiveUser || isImpersonating}>
+              <DropdownMenuItem disabled={!effectiveUser}>
                 <UserCircle className="mr-2 h-4 w-4" />
                 <span>Profile</span>
               </DropdownMenuItem>
-              <DropdownMenuItem disabled={!effectiveUser || isImpersonating} onClick={() => router.push('/settings')}>
+              <DropdownMenuItem disabled={!effectiveUser} onClick={() => router.push('/settings')}>
                 <Settings className="mr-2 h-4 w-4" />
                 <span>Settings</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => performLogout()} disabled={isLoadingUser && !effectiveUser}>
                 <LogOut className="mr-2 h-4 w-4" />
-                <span>Log out {isImpersonating ? `(as ${originalUsername})` : ""}</span>
+                <span>Log out</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
-        {isImpersonating && effectiveUser && (
-          <div className="sticky top-0 z-20 flex items-center justify-center gap-2 bg-yellow-500/90 dark:bg-yellow-600/90 text-yellow-900 dark:text-yellow-100 p-2 text-sm backdrop-blur-sm shadow">
-            <AlertTriangle className="h-4 w-4" />
-            <span>
-              You are viewing as <strong>{effectiveUser.username}</strong> (Role: {effectiveUser.role}).
-            </span>
-            {/* Stop Impersonation Button - Placeholder */}
-            {/* <Button
-              variant="ghost"
-              size="sm"
-              className="h-auto p-1 text-current hover:bg-yellow-600/30 dark:hover:bg-yellow-700/30"
-              onClick={async () => {
-                // Placeholder for stopImpersonation action
-                console.log("Attempting to stop impersonation...");
-                // const result = await stopImpersonation();
-                // if (result.success) router.refresh(); else toast({ title: "Error", description: result.message, variant: "destructive" });
-              }}
-            >
-              <EyeOff className="mr-1 h-3 w-3" /> Stop Viewing
-            </Button> */}
-          </div>
-        )}
-        <header className={cn("sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/80 px-4 backdrop-blur-sm sm:h-16 sm:px-6 md:px-8",
-          isImpersonating && "top-[40px]" 
+        <header className={cn("sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/80 px-4 backdrop-blur-sm sm:h-16 sm:px-6 md:px-8"
         )}>
           <SidebarTrigger className="md:hidden" />
         </header>
         <main className="flex-1 p-4 sm:p-6 md:p-8">
-          {isLoadingUser || isPageAccessGranted === null ? (
-            <div className="flex justify-center items-center h-64">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            </div>
-          ) : isPageAccessGranted ? (
-            children
-          ) : (
-            <AccessDeniedOverlay /> 
-          )}
+          {pageContent}
         </main>
       </SidebarInset>
     </>

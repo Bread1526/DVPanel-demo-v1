@@ -3,7 +3,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { type FileSessionData, type AuthenticatedUser } from '@/lib/session';
 import { loadEncryptedData, saveEncryptedData } from "@/backend/services/storageService";
-import { loadUserById, type FullUserData } from '@/app/(app)/roles/actions'; 
+import { loadUserById, type UserData as FullUserData } from '@/app/(app)/roles/actions';
 import { getDataPath } from '@/backend/lib/config';
 import path from 'path';
 import fs from 'fs/promises';
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   const role = request.headers.get('X-Auth-Role');
 
   if (debugMode) {
-    console.log('[API /auth/user] Received request. Token:', token ? 'Present' : 'Missing', 'Username:', username, 'Role:', role);
+    console.log('[API /auth/user] Received GET request. Headers - Token:', token ? 'Present' : 'Missing', 'Username:', username, 'Role:', role);
   }
 
   if (!token || !username || !role) {
@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
   const sessionFilePath = path.join(dataPath, sessionFilename);
 
   try {
+    if (debugMode) console.log(`[API /auth/user] Attempting to load session file: ${sessionFilePath}`);
     const sessionFileData = await loadEncryptedData(sessionFilename) as FileSessionData | null;
 
     if (!sessionFileData) {
@@ -42,8 +43,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (sessionFileData.token !== token) {
-      if (debugMode) console.log(`[API /auth/user] Token mismatch for user ${username}. Deleting session file.`);
-      // Token mismatch, invalidate session by deleting file
+      if (debugMode) console.log(`[API /auth/user] Token mismatch for user ${username}. Deleting session file: ${sessionFilePath}`);
       try { await fs.unlink(sessionFilePath); } catch (e) { console.error(`[API /auth/user] Error deleting session file on token mismatch: ${sessionFilePath}`, e); }
       return NextResponse.json({ error: 'Invalid session token' }, { status: 401 });
     }
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
     if (!sessionFileData.disableAutoLogoutOnInactivity) {
       const timeoutMilliseconds = (sessionFileData.sessionInactivityTimeoutMinutes || 30) * 60 * 1000;
       if (Date.now() - sessionFileData.lastActivity > timeoutMilliseconds) {
-        if (debugMode) console.log(`[API /auth/user] Session timed out for user ${username} due to inactivity. Deleting session file.`);
+        if (debugMode) console.log(`[API /auth/user] Session timed out for user ${username} due to inactivity. Deleting session file: ${sessionFilePath}`);
         try { await fs.unlink(sessionFilePath); } catch (e) { console.error(`[API /auth/user] Error deleting session file on inactivity timeout: ${sessionFilePath}`, e); }
         return NextResponse.json({ error: 'Session timed out due to inactivity' }, { status: 401 });
       }
@@ -61,23 +61,25 @@ export async function GET(request: NextRequest) {
     // Update lastActivity and re-save session file
     sessionFileData.lastActivity = Date.now();
     await saveEncryptedData(sessionFilename, sessionFileData);
-    if (debugMode) console.log(`[API /auth/user] Session validated and lastActivity updated for ${username}.`);
+    if (debugMode) console.log(`[API /auth/user] Session validated and lastActivity updated for ${username}. Session UserID: ${sessionFileData.userId}`);
 
     // Fetch full user details from the main user file (e.g., {username}-{role}.json)
-    // This is important because -Auth.json only stores session-related data.
+    if (debugMode) console.log(`[API /auth/user] Attempting to load full user profile for userId: ${sessionFileData.userId}`);
     const fullUser: FullUserData | null = await loadUserById(sessionFileData.userId);
 
     if (!fullUser) {
-        if (debugMode) console.error(`[API /auth/user] Could not load full user profile for userId: ${sessionFileData.userId} (username: ${username}) after session validation. Deleting inconsistent session file.`);
+        if (debugMode) console.error(`[API /auth/user] CRITICAL: Could not load full user profile for userId: ${sessionFileData.userId} (username: ${username}) after session validation. This indicates an inconsistent state. Deleting session file: ${sessionFilePath}`);
+        // Invalidate session if the main user profile is missing, as this is an inconsistent state
         try { await fs.unlink(sessionFilePath); } catch (e) { console.error(`[API /auth/user] Error deleting session file due to missing main user profile: ${sessionFilePath}`, e); }
         return NextResponse.json({ error: 'User profile not found, session invalidated.' }, { status: 401 });
     }
     
-    // Construct the AuthenticatedUser object to send back
+    if (debugMode) console.log(`[API /auth/user] Successfully loaded full user profile for ${username}:`, { id: fullUser.id, username: fullUser.username, role: fullUser.role });
+    
     const authenticatedUser: AuthenticatedUser = {
         id: fullUser.id,
         username: fullUser.username,
-        role: fullUser.role, // Role from the main user file is authoritative
+        role: fullUser.role,
         projects: fullUser.projects || [],
         assignedPages: fullUser.assignedPages || [],
         allowedSettingsPages: fullUser.allowedSettingsPages || [],
@@ -87,7 +89,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ user: authenticatedUser }, { status: 200 });
 
   } catch (error) {
-    console.error('[API /auth/user] Error processing request:', error);
+    const e = error instanceof Error ? error : new Error(String(error));
+    console.error('[API /auth/user] Error processing request:', e.message, e.stack);
     return NextResponse.json({ error: 'Internal server error during authentication' }, { status: 500 });
   }
 }
