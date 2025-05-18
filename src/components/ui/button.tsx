@@ -44,9 +44,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : "button"
     
-    // Explicitly remove `asChild` from `props` if Comp is "button"
-    // to prevent it from being passed to the native DOM element.
-    // If Comp is Slot, Slot handles the `asChild` prop from `props` correctly.
+    // If Comp is 'button', ensure 'asChild' from props is not spread onto the DOM element.
     let finalProps = props;
     if (Comp === "button") {
       const { asChild: _forwardedAsChild, ...rest } = props;
