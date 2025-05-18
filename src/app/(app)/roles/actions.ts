@@ -47,32 +47,13 @@ function getUserFilePath(username: string, role: UserData["role"]): string {
   return path.join(dataPath, filename);
 }
 
-async function getCurrentUserDebugMode(actorUsername?: string, actorRole?: string): Promise<boolean> {
-    let debugMode = false;
-    // Try user-specific settings for the actor
-    if (actorUsername && actorRole && actorUsername !== 'System' && actorUsername !== 'UnknownUser') {
-        try {
-            const safeActorUsername = actorUsername.replace(/[^a-zA-Z0-9_.-]/g, '_');
-            const safeActorRole = actorRole.replace(/[^a-zA-Z0-9]/g, '_');
-            const settingsFilename = `${safeActorUsername}-${safeActorRole}-settings.json`;
-            const userSettingsData = await loadEncryptedData(settingsFilename) as UserSettingsData | null;
-            if (userSettingsData && typeof userSettingsData.debugMode === 'boolean') {
-                return userSettingsData.debugMode;
-            }
-        } catch (e){ /* Fall through to global */ }
-    }
-    // Fallback to global settings
-    try {
-        const globalSettingsResult = await loadPanelSettings();
-        if (globalSettingsResult.data && typeof globalSettingsResult.data.debugMode === 'boolean') {
-            debugMode = globalSettingsResult.data.debugMode;
-        }
-    } catch (e){ /* Default to false if global settings also fail */ }
-    return debugMode;
+async function getPanelSettingsForDebug(): Promise<PanelSettingsData> {
+    const panelGlobalSettingsResult = await loadPanelSettings();
+    return panelGlobalSettingsResult.data ?? explicitDefaultPanelSettings;
 }
 
 export async function ensureOwnerFileExists(ownerUsernameEnv: string, ownerPasswordPlain: string, panelSettings?: PanelSettingsData): Promise<void> {
-  const debugMode = panelSettings?.debugMode ?? await getCurrentUserDebugMode('System', 'System');
+  const debugMode = panelSettings?.debugMode ?? (await getPanelSettingsForDebug()).debugMode;
   const sanitizedOwnerUsername = ownerUsernameEnv.replace(/[^a-zA-Z0-9_.-]/g, '_');
   const ownerFilename = `${sanitizedOwnerUsername}-Owner.json`;
   const ownerFilePath = path.join(getDataPath(), ownerFilename);
@@ -93,9 +74,7 @@ export async function ensureOwnerFileExists(ownerUsernameEnv: string, ownerPassw
        if (debugMode) console.log(`[RolesActions - ensureOwnerFileExists] No existing owner file ${ownerFilename} found, or it was empty. Will create anew.`);
     }
   } catch (e: any) {
-    console.error(`[RolesActions - ensureOwnerFileExists] Error loading/decrypting existing owner file ${ownerFilename}. Will create anew. Error:`, e.message);
-    // Re-throw to be caught by the caller, as this is critical
-    // throw new Error(`Failed to load existing owner file ${ownerFilename}: ${e.message || String(e)}`);
+    console.error(`[RolesActions - ensureOwnerFileExists] Error loading/decrypting existing owner file ${ownerFilename}. Will attempt to create anew. Error:`, e.message);
   }
   
   let hash: string, salt: string;
@@ -142,8 +121,8 @@ export async function ensureOwnerFileExists(ownerUsernameEnv: string, ownerPassw
 }
 
 export async function loadUsers(): Promise<LoadUsersState> {
-  const panelGlobalSettingsResult = await loadPanelSettings();
-  const debugMode = panelGlobalSettingsResult.data?.debugMode ?? false;
+  const panelGlobalSettings = await getPanelSettingsForDebug();
+  const debugMode = panelGlobalSettings.debugMode;
   if (debugMode) console.log("[RolesActions - loadUsers] Attempting to load users from individual files...");
 
   const dataPath = getDataPath();
@@ -165,7 +144,6 @@ export async function loadUsers(): Promise<LoadUsersState> {
   const safeOwnerFilename = ownerUsernameEnv ? `${ownerUsernameEnv.replace(/[^a-zA-Z0-9_.-]/g, '_')}-Owner.json` : null;
 
   for (const file of files) {
-    // Exclude settings files, Auth session files, and the specific owner's main file
     if ( file.endsWith('.json') && 
         !file.endsWith('-Auth.json') && 
         !file.endsWith('-settings.json') && 
@@ -195,8 +173,8 @@ export async function loadUsers(): Promise<LoadUsersState> {
 }
 
 export async function loadUserById(userId: string): Promise<UserData | null> {
-    const panelGlobalSettingsResult = await loadPanelSettings();
-    const debugMode = panelGlobalSettingsResult.data?.debugMode ?? false;
+    const panelGlobalSettings = await getPanelSettingsForDebug();
+    const debugMode = panelGlobalSettings.debugMode;
     if (debugMode) console.log(`[RolesActions - loadUserById] Attempting to load user ID: ${userId}`);
     const dataPath = getDataPath();
   
@@ -269,10 +247,11 @@ export async function loadUserById(userId: string): Promise<UserData | null> {
 }
 
 export async function addUser(prevState: UserActionState, userInput: AddUserInput): Promise<UserActionState> {
-  const panelGlobalSettingsResult = await loadPanelSettings();
-  const debugMode = panelGlobalSettingsResult.data?.debugMode ?? false;
-  const actorUsername = 'System'; // Placeholder, needs to be set based on current session
-  const actorRole = 'System';   // Placeholder
+  const panelGlobalSettings = await getPanelSettingsForDebug();
+  const debugMode = panelGlobalSettings.debugMode;
+  // TODO: Get actual actor username/role from session once available
+  const actorUsername = 'System'; 
+  const actorRole = 'System';   
 
   if (debugMode) console.log(`[RolesActions - addUser] Attempting to add user: ${userInput.username} by ${actorUsername}`);
   const now = new Date().toISOString();
@@ -331,10 +310,10 @@ export async function addUser(prevState: UserActionState, userInput: AddUserInpu
 }
 
 export async function updateUser(prevState: UserActionState, userInput: UpdateUserInput): Promise<UserActionState> {
-  const panelGlobalSettingsResult = await loadPanelSettings();
-  const debugMode = panelGlobalSettingsResult.data?.debugMode ?? false;
-  const actorUsername = 'System'; // Placeholder
-  const actorRole = 'System';   // Placeholder
+  const panelGlobalSettings = await getPanelSettingsForDebug();
+  const debugMode = panelGlobalSettings.debugMode;
+  const actorUsername = 'System'; 
+  const actorRole = 'System';   
 
   if (debugMode) console.log(`[RolesActions - updateUser] Attempting to update user ID: ${userInput.id} by ${actorUsername}`);
 
@@ -417,8 +396,8 @@ export async function updateUser(prevState: UserActionState, userInput: UpdateUs
           if (await fs.stat(oldSettingsPath).catch(() => null)) {
             await fs.rename(oldSettingsPath, newSettingsPath);
             if (debugMode) console.log(`[RolesActions - updateUser] Renamed settings file from ${oldSettingsFilename} to ${newSettingsFilename} for ${updatedUser.username}`);
-          } else if (debugMode) {
-            console.log(`[RolesActions - updateUser] Old settings file ${oldSettingsFilename} not found for ${currentUserData.username}, creating new one at ${newSettingsFilename}`);
+          } else {
+            if (debugMode) console.log(`[RolesActions - updateUser] Old settings file ${oldSettingsFilename} not found for ${currentUserData.username}, creating new one at ${newSettingsFilename}`);
             await saveEncryptedData(newSettingsFilename, defaultUserSettings); 
           }
         } catch (renameError: any) {
@@ -438,10 +417,10 @@ export async function updateUser(prevState: UserActionState, userInput: UpdateUs
 }
 
 export async function deleteUser(userId: string): Promise<UserActionState> {
-  const panelGlobalSettingsResult = await loadPanelSettings();
-  const debugMode = panelGlobalSettingsResult.data?.debugMode ?? false;
-  const actorUsername = 'System'; // Placeholder
-  const actorRole = 'System';   // Placeholder
+  const panelGlobalSettings = await getPanelSettingsForDebug();
+  const debugMode = panelGlobalSettings.debugMode;
+  const actorUsername = 'System'; 
+  const actorRole = 'System';   
 
   if (debugMode) console.log(`[RolesActions - deleteUser] Attempting to delete user ID: ${userId} by ${actorUsername}`);
 
@@ -544,10 +523,8 @@ export async function startImpersonation(targetUserId: string): Promise<Imperson
   session.userId = targetUser.id;
   session.username = targetUser.username;
   session.role = targetUser.role;
-  session.lastActivity = Date.now(); // Reset activity for the new impersonated session
+  session.lastActivity = Date.now(); 
 
-  // Create a server-side session file for the impersonated user
-  // Use global defaults for timeout for the impersonated session Auth file
   const defaultSessionTimeout = panelSettings.data?.sessionInactivityTimeout ?? 30;
   const defaultDisableAutoLogout = panelSettings.data?.disableAutoLogoutOnInactivity ?? false;
   const impersonationToken = crypto.randomBytes(32).toString('hex');
@@ -565,7 +542,6 @@ export async function startImpersonation(targetUserId: string): Promise<Imperson
     if (debugMode) console.log(`[RolesActions - startImpersonation] Server session file created for impersonated user ${targetUser.username}`);
   } catch (e: any) {
     console.error(`[RolesActions - startImpersonation] Failed to create server session file for impersonated user ${targetUser.username}:`, e);
-    // Revert session changes if file creation fails
     session.userId = session.originalUserId;
     session.username = session.originalUsername;
     session.role = session.originalUserRole;
@@ -582,8 +558,7 @@ export async function startImpersonation(targetUserId: string): Promise<Imperson
   logEvent(session.originalUsername!, session.originalUserRole!, 'IMPERSONATE_START_SUCCESS', 'INFO', { targetUserId: targetUser.id, targetUsername: targetUser.username, targetRole: targetUser.role });
   if (debugMode) console.log(`[RolesActions - startImpersonation] ${session.originalUsername} successfully started impersonating ${targetUser.username}. Redirecting...`);
   
-  redirect('/'); // Redirect to dashboard or a relevant page
-  // The redirect will throw NEXT_REDIRECT, so this return is mostly for type consistency if redirect fails.
+  redirect('/'); 
   return { status: "success", message: `Now impersonating ${targetUser.username}.` };
 }
 
@@ -599,10 +574,9 @@ export async function stopImpersonation(): Promise<ImpersonationState> {
     return { status: "error", message: "Not currently impersonating." };
   }
 
-  const impersonatedUsername = session.username; // User being impersonated
-  const impersonatedRole = session.role;     // Role of user being impersonated
+  const impersonatedUsername = session.username; 
+  const impersonatedRole = session.role;     
 
-  // Restore original user's data
   session.userId = session.originalUserId;
   session.username = session.originalUsername;
   session.role = session.originalUserRole;
@@ -610,25 +584,23 @@ export async function stopImpersonation(): Promise<ImpersonationState> {
   delete session.originalUserId;
   delete session.originalUsername;
   delete session.originalUserRole;
-  session.lastActivity = Date.now(); // Reset activity for the original user
+  session.lastActivity = Date.now(); 
 
   await session.save();
 
-  // Delete the server-side session file for the impersonated user
   if (impersonatedUsername && impersonatedRole) {
     try {
       await deleteServerSessionFile(impersonatedUsername, impersonatedRole, debugMode);
     } catch (e: any) {
       console.error(`[RolesActions - stopImpersonation] Failed to delete session file for ${impersonatedUsername}:`, e);
-      // Log error but continue, as session cookie is already reverted.
       logEvent(session.username, session.role, 'IMPERSONATE_STOP_SESSION_FILE_DELETE_ERROR', 'ERROR', { targetUser: impersonatedUsername, error: e.message });
     }
   }
   
   logEvent(session.username, session.role, 'IMPERSONATE_STOP_SUCCESS', 'INFO');
-  if (debugMode) console.log(`[RolesActions - stopImpersonation] ${session.username} stopped impersonating. Redirecting...`);
+  if (debugMode) console.log(`[RolesActions - stopImpersonation] ${session.username} stopped impersonating. Redirecting to /roles...`);
 
-  redirect('/'); // Redirect to dashboard or a relevant page
-  // The redirect will throw NEXT_REDIRECT
+  redirect('/roles'); 
   return { status: "success", message: "Impersonation stopped." };
 }
+
