@@ -1,7 +1,7 @@
 
 "use client";
 
-import React from 'react'; // Added React import
+import React from 'react'; 
 import dynamic from 'next/dynamic';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -9,11 +9,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { MoreHorizontal, PlusCircle, PlayCircle, Terminal, FolderOpen, Trash2 } from "lucide-react";
-// import CreateProjectDialog from "./components/create-project-dialog"; // Dynamic import below
+import { MoreHorizontal, PlusCircle, PlayCircle, Terminal, FolderOpen, Trash2, Loader2 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton"; // Import Skeleton
+
 
 const CreateProjectDialog = dynamic(() => import('./components/create-project-dialog'), {
-  loading: () => <Button disabled><PlusCircle className="mr-2 h-4 w-4" /> Create Project (Loading...)</Button>,
+  loading: () => (
+    <Button disabled className="shadow-md">
+      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Create Project (Loading...)
+    </Button>
+  ),
   ssr: false
 });
 

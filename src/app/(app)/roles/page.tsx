@@ -9,14 +9,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye } from "lucide-react";
+import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye, UserPlus } from "lucide-react";
 import { loadUsers, deleteUser, type UserData, type UserActionState } from "./actions";
 import { useToast } from "@/hooks/use-toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle as AlertDialogCoreTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogClose, DialogFooter as DialogCoreFooter, DialogContent as DialogCoreContent, DialogHeader as DialogCoreHeader, DialogTitle as DialogCoreTitle, DialogDescription as DialogCoreDescription} from "@/components/ui/dialog"; 
+import { Skeleton } from "@/components/ui/skeleton"; // Import Skeleton
 
 const AddUserRoleDialog = dynamic(() => import('./components/add-user-role-dialog'), {
-  loading: () => <p>Loading dialog...</p>,
+  loading: () => (
+    <Button disabled className="shadow-md">
+      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Add User (Loading...)
+    </Button>
+  ),
   ssr: false
 });
 
@@ -43,6 +48,7 @@ const availableAppPages = [
   { id: 'ports', name: 'Port Manager (/ports)' },
   { id: 'settings_area', name: 'Settings Area (/settings)' }, 
   { id: 'roles', name: 'User Roles (/roles)'},
+  { id: 'logs_page', name: 'Panel Logs (/logs)'},
 ];
 
 const availableSettingsPages = [
@@ -50,8 +56,7 @@ const availableSettingsPages = [
   { id: 'settings_panel', name: 'Panel' },
   { id: 'settings_daemon', name: 'Daemon' },
   { id: 'settings_security', name: 'Security' },
-  { id: 'settings_popups', name: 'Popups' },
-  { id: 'settings_debug', name: 'Debug' },
+  // Popups and Debug are user-specific now
   { id: 'settings_license', name: 'License' },
   { id: 'settings_info', name: 'Info' },
 ];
@@ -83,7 +88,7 @@ export default function RolesPage() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, []); // Empty dependency array as loadUsers doesn't change
 
   useEffect(() => {
     fetchUsers();
@@ -106,15 +111,15 @@ export default function RolesPage() {
   const handleUserChange = useCallback(async () => { 
     await fetchUsers();
     if (userToViewDetails) { 
-        const usersResult = await loadUsers();
+        const usersResult = await loadUsers(); // Re-fetch all users
         const updatedUser = usersResult.users?.find(u => u.id === userToViewDetails.id);
         if (updatedUser) {
-            setUserToViewDetails(updatedUser);
+            setUserToViewDetails(updatedUser); // Update the user being viewed if they still exist
         } else { 
-            setUserToViewDetails(null); 
+            setUserToViewDetails(null); // User might have been deleted or ID changed, close dialog
         }
     }
-  }, [fetchUsers, userToViewDetails]);
+  }, [fetchUsers, userToViewDetails]); // userToViewDetails is a dependency
 
   const findNameById = (id: string, list: {id: string, name: string}[]) => list.find(item => item.id === id)?.name || id;
 
@@ -123,7 +128,16 @@ export default function RolesPage() {
       <PageHeader 
         title="User Roles & Permissions" 
         description="Manage users and their access levels within DVPanel."
-        actions={AddUserRoleDialog && <AddUserRoleDialog onUserChange={handleUserChange} />}
+        actions={AddUserRoleDialog && (
+          <AddUserRoleDialog 
+            onUserChange={handleUserChange} 
+            triggerButton={
+              <Button className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                <UserPlus className="mr-2 h-4 w-4" /> Add User
+              </Button>
+            }
+          />
+        )}
       />
 
       {error && (
@@ -276,10 +290,10 @@ export default function RolesPage() {
                  {userToViewDetails.role === 'Owner' && (
                     <p className="text-sm text-muted-foreground text-center pt-2">Owner has full system access. No specific permissions are listed here.</p>
                  )}
-                 {(userToViewDetails.role !== 'Owner' && (userToViewDetails.role === 'Admin' || userToViewDetails.role === 'Custom') && userToViewDetails.projects?.length === 0 && userToViewDetails.assignedPages?.length === 0 && userToViewDetails.allowedSettingsPages?.length === 0) && (
+                 {(userToViewDetails.role !== 'Owner' && (userToViewDetails.role === 'Admin' || userToViewDetails.role === 'Custom') && (!userToViewDetails.projects || userToViewDetails.projects.length === 0) && (!userToViewDetails.assignedPages || userToViewDetails.assignedPages.length === 0) && (!userToViewDetails.allowedSettingsPages || userToViewDetails.allowedSettingsPages.length === 0)) && (
                   <p className="text-sm text-muted-foreground text-center pt-2">No specific project, page, or settings permissions assigned.</p>
                 )}
-                {userToViewDetails.role === 'Administrator' && userToViewDetails.allowedSettingsPages?.length === 0 && (
+                {userToViewDetails.role === 'Administrator' && (!userToViewDetails.allowedSettingsPages || userToViewDetails.allowedSettingsPages.length === 0) && (
                   <p className="text-sm text-muted-foreground text-center pt-2">No specific settings module permissions assigned. Administrator has implicit access to all application pages and projects.</p>
                 )}
 

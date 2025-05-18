@@ -1,4 +1,4 @@
-import type React from 'react';
+import React from 'react'; // Added React import
 
 interface PageHeaderProps {
   title: string;
@@ -6,7 +6,8 @@ interface PageHeaderProps {
   actions?: React.ReactNode;
 }
 
-export function PageHeader({ title, description, actions }: PageHeaderProps) {
+// Memoize PageHeader to prevent re-renders if props haven't changed
+const PageHeaderMemoized = ({ title, description, actions }: PageHeaderProps) => {
   return (
     <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
@@ -21,3 +22,6 @@ export function PageHeader({ title, description, actions }: PageHeaderProps) {
     </div>
   );
 }
+
+PageHeaderMemoized.displayName = 'PageHeader';
+export const PageHeader = React.memo(PageHeaderMemoized);
