@@ -91,13 +91,13 @@ export default function DashboardPage() {
             <CardDescription>Common tasks at your fingertips.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 sm:flex-row">
-            <Link href="/projects" passHref legacyBehavior>
+            <Link href="/projects" asChild>
               <Button className="w-full sm:w-auto shadow-md hover:scale-105 transform transition-transform duration-150">Manage Projects</Button>
             </Link>
-            <Link href="/files" passHref legacyBehavior>
+            <Link href="/files" asChild>
              <Button variant="secondary" className="w-full sm:w-auto shadow-md hover:scale-105 transform transition-transform duration-150">File Manager</Button>
             </Link>
-             <Link href="/settings" passHref legacyBehavior>
+             <Link href="/settings" asChild>
              <Button variant="outline" className="w-full sm:w-auto shadow-md hover:scale-105 transform transition-transform duration-150">Settings</Button>
             </Link>
           </CardContent>
