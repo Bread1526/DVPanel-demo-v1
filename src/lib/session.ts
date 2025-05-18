@@ -1,19 +1,21 @@
 // src/lib/session.ts
 import type { IronSessionOptions } from 'iron-session';
-import type { UserData } from '@/app/(app)/roles/types';
+import type { UserData } from '@/app/(app)/roles/types'; // Updated path
 import type { UserSettingsData } from './user-settings';
 
+// Define the shape of the data stored in the session (cookie)
 export interface SessionData {
   isLoggedIn: boolean;
   userId?: string;
   username?: string;
-  role?: UserData['role'] | 'Owner';
+  role?: UserData['role'] | 'Owner'; // Allow for the special 'Owner' role
   lastActivity?: number;
-  // Stored from global panel settings at the time of login
+  // Store global panel settings for session inactivity at the time of login
   sessionInactivityTimeoutMinutes?: number;
   disableAutoLogoutOnInactivity?: boolean;
 }
 
+// Define the shape of the user object returned by /api/auth/user
 export type AuthenticatedUser = {
   id: string;
   username: string;
@@ -26,7 +28,7 @@ export type AuthenticatedUser = {
   globalDebugMode?: boolean; // From global panel settings
 };
 
-// For the server-side session files ({username}-{role}-Auth.json)
+// Define the shape of the server-side session files ({username}-{role}-Auth.json)
 export type FileSessionData = {
   userId: string;
   username: string;
@@ -38,10 +40,11 @@ export type FileSessionData = {
   disableAutoLogoutOnInactivity: boolean; // The preference active for THIS session
 };
 
+
+// --- Session Configuration ---
 const sessionPassword = process.env.SESSION_PASSWORD;
 
-// Explicit log to see what process.env.SESSION_PASSWORD resolves to
-// This log runs once when the module is first loaded (server start)
+// Log the raw password from .env to help diagnose setup issues during startup
 console.log(
   '[SessionConfig] Raw SESSION_PASSWORD from process.env during module load:',
   sessionPassword ? `Set (length: ${sessionPassword.length})` : 'UNDEFINED or empty'
@@ -55,32 +58,33 @@ if (!sessionPassword || sessionPassword.length < 32) {
     'This is REQUIRED for secure session cookie encryption.\n' +
     'DVPanel WILL NOT START without it.\n' +
     'Please set a strong, unique secret (at least 32 characters) in your .env.local file, \n' +
-    'located in the ROOT directory of your project.\n' +
+    'located in the ROOT directory of your project (same level as package.json).\n' +
     'Example: SESSION_PASSWORD="a_very_long_random_and_secure_string_for_sessions"\n' +
-    `CURRENTLY READ VALUE (if any, might be from another .env file if .env.local is missing/wrong): ${sessionPassword ? `'${sessionPassword.substring(0, 5)}...' (length ${sessionPassword.length})` : 'UNDEFINED or empty'}\n` +
+    `CURRENTLY READ VALUE (if any): ${sessionPassword ? `'${sessionPassword.substring(0, 5)}...' (length ${sessionPassword.length})` : 'UNDEFINED or empty'}\n` +
     '-----------------------------------------------------------------------------------\n' +
     'TROUBLESHOOTING:\n' +
-    '1. Ensure .env.local is in the project ROOT (same level as package.json).\n' +
+    '1. Ensure .env.local is in the project ROOT.\n' +
     '2. Ensure SESSION_PASSWORD in .env.local is AT LEAST 32 characters long and NOT commented out.\n' +
     '3. COMPLETELY RESTART your Next.js development server after correcting .env.local.\n';
   console.error(errorMessage);
+  // This will halt server startup if the password is not configured correctly.
   throw new Error("FATAL: SESSION_PASSWORD is not configured correctly. Halting server startup. Please check your .env.local file and server logs.");
 }
 
 export const sessionOptions: IronSessionOptions = {
   cookieName: process.env.SESSION_COOKIE_NAME || 'dvpanel_session_v2',
-  password: sessionPassword as string, // Cast to string, after the check above
+  password: sessionPassword, // Ensured by the check above
   cookieOptions: {
-    secure: true, // Since your dev URL is HTTPS, set this to true always.
+    secure: true, // IMPORTANT: Must be true if sameSite='none'. Assumes HTTPS.
     httpOnly: true,
-    sameSite: 'none', // Use 'none' for cross-site contexts (requires Secure: true)
+    sameSite: 'none', // IMPORTANT: For cross-site contexts like cloud IDEs. Requires Secure=true.
     // maxAge: undefined by default (session cookie), or set for "keep me logged in" in login action
     path: '/',
   },
 };
 
-// Log the final sessionOptions object for debugging
-// This also runs once when the module is first loaded.
+// Log the final sessionOptions object for debugging, especially useful during startup
+// This runs once when the module is first loaded.
 if (process.env.NODE_ENV === 'development' || (process.env.DVSPANEL_DEBUG_LOGGING === 'true')) {
   console.log(
     '[SessionConfig] Final sessionOptions object being exported:',
