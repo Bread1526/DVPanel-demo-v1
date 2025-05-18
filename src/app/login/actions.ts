@@ -7,12 +7,12 @@ import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { redirect } from 'next/navigation';
 import { sessionOptions, type SessionData } from '@/lib/session';
-import { loadUsers, verifyPassword, ensureOwnerFileExists, type UserData } from '@/app/(app)/roles/actions';
-import { loadPanelSettings } from "@/app/(app)/settings/actions";
+import { loadUserById, verifyPassword, ensureOwnerFileExists, type UserData } from '@/app/(app)/roles/actions'; 
+import { loadPanelSettings, type PanelSettingsData } from '@/app/(app)/settings/actions';
 import { saveEncryptedData, loadEncryptedData } from "@/backend/services/storageService";
-import { userSettingsSchema, defaultUserSettings, type UserSettingsData } from "@/lib/user-settings";
 import { logEvent } from '@/lib/logger';
-import { LoginSchema, type LoginState } from './types'; // Import from local types
+import { LoginSchema, type LoginState } from './types';
+import type { FileSessionData } from '@/lib/session';
 
 // Helper function to create/update the server-side session file
 async function createOrUpdateServerSessionFile(
@@ -24,16 +24,17 @@ async function createOrUpdateServerSessionFile(
   disableAutoLogout: boolean,
   debugMode?: boolean
 ): Promise<void> {
-  if (debugMode) {
-    console.log(`[LoginAction - createOrUpdateServerSessionFile] Called for user: ${username}, role: ${role}`);
-  }
-  const safeUsername = username.replace(/[^a-zA-Z0-9_.-]/g, '_');
-  const safeRole = role.replace(/[^a-zA-Z0-9]/g, '_');
-  const sessionFilename = `${safeUsername}-${safeRole}-Auth.json`;
+  const sanitizedUsername = username.replace(/[^a-zA-Z0-9_.-]/g, '_');
+  const sanitizedRole = role.replace(/[^a-zA-Z0-9]/g, '_');
+  const sessionFilename = `${sanitizedUsername}-${sanitizedRole}-Auth.json`;
 
-  const sessionFileData = {
+  if (debugMode) {
+    console.log(`[LoginAction - createOrUpdateServerSessionFile] Called for user: ${username}, role: ${role}. Filename: ${sessionFilename}`);
+  }
+
+  const sessionFileData: FileSessionData = {
     userId,
-    username,
+    username, // Store original username
     role,
     token,
     createdAt: Date.now(),
@@ -49,21 +50,26 @@ async function createOrUpdateServerSessionFile(
     }
   } catch (error: any) {
     console.error(`[LoginAction - createOrUpdateServerSessionFile] CRITICAL: Failed to save server session file ${sessionFilename} for ${username}:`, error);
-    throw new Error(`Failed to establish session on server: ${error.message}`);
+    // Re-throw with a more specific message to be caught by the main login action's catch block
+    throw new Error(`Failed to establish session on server (file save error for ${sessionFilename}): ${error.message}`);
   }
 }
 
 
 export async function login(prevState: LoginState, formData: FormData): Promise<LoginState> {
-  const panelGlobalSettingsResult = await loadPanelSettings();
-  // For this debugging step, we'll make client-side error reporting more verbose temporarily
-  // const debugMode = panelGlobalSettingsResult.data?.debugMode ?? false;
-
   let usernameForLogging = String(formData.get("username") ?? "UnknownUser");
+  let operationSuccessful = false;
+  let redirectPath: string | null = null;
 
-  console.log("[LoginAction] OWNER_USERNAME from .env.local:", process.env.OWNER_USERNAME ? `Set (val: ${process.env.OWNER_USERNAME})` : "Not Set");
-  console.log("[LoginAction] OWNER_PASSWORD from .env.local is set:", process.env.OWNER_PASSWORD ? "Yes" : "No");
+  // Load global panel settings to determine debug mode for logging
+  const panelGlobalSettingsResult = await loadPanelSettings();
+  const debugMode = panelGlobalSettingsResult.data?.debugMode ?? false;
 
+  if (debugMode) {
+    console.log("[LoginAction] OWNER_USERNAME from .env.local:", process.env.OWNER_USERNAME ? `Set (val: ${process.env.OWNER_USERNAME})` : "Not Set");
+    console.log("[LoginAction] OWNER_PASSWORD from .env.local is set:", process.env.OWNER_PASSWORD ? "Yes" : "No");
+  }
+  
   try {
     const rawFormData = {
       username: String(formData.get("username") ?? ""),
@@ -71,18 +77,22 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
       redirectUrl: String(formData.get("redirectUrl") ?? "/"),
       keepLoggedIn: formData.get("keepLoggedIn") === "on",
     };
-    usernameForLogging = rawFormData.username || "UnknownUser"; // Update if username was empty
+    usernameForLogging = rawFormData.username || "UnknownUser";
 
-    console.log("[LoginAction] Raw form data extracted for Zod:", rawFormData);
+    if (debugMode) {
+      console.log("[LoginAction] Raw form data extracted for Zod:", rawFormData);
+    }
+
     const validatedFields = LoginSchema.safeParse(rawFormData);
 
     if (!validatedFields.success) {
       const flatErrors = validatedFields.error.flatten();
-      // Always log full Zod errors on server for diagnosis
-      console.error("[LoginAction] Zod validation failed. Full errors:", JSON.stringify(flatErrors, null, 2));
+      if (debugMode) {
+        console.error("[LoginAction] Zod validation failed. Full errors:", JSON.stringify(flatErrors, null, 2));
+      }
       logEvent(usernameForLogging, 'Unknown', 'LOGIN_VALIDATION_FAILED', 'WARN', { errors: flatErrors.fieldErrors });
       return {
-        message: "Please check the form for errors.", // Generic for UI
+        message: "Please check the form for errors.",
         status: "validation_failed",
         errors: { ...flatErrors.fieldErrors, _form: flatErrors.formErrors.length > 0 ? flatErrors.formErrors : undefined },
       };
@@ -94,13 +104,17 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
     const ownerUsernameEnv = process.env.OWNER_USERNAME;
     const ownerPasswordEnv = process.env.OWNER_PASSWORD;
 
-    let authenticatedUser: Pick<UserData, 'id' | 'username' | 'role' | 'status' | 'assignedPages' | 'allowedSettingsPages' | 'projects'> | null = null;
-    let userSettings: UserSettingsData = defaultUserSettings;
+    let authenticatedUser: Pick<UserData, 'id' | 'username' | 'role' | 'status'> | null = null;
+    
+    // Determine default inactivity settings from global panel settings
+    const defaultSessionTimeoutMins = panelGlobalSettingsResult.data?.sessionInactivityTimeout ?? 30;
+    const defaultDisableAutoLogout = panelGlobalSettingsResult.data?.disableAutoLogoutOnInactivity ?? false;
 
-    if (ownerUsernameEnv && ownerPasswordEnv && username === ownerUsernameEnv) {
-      console.log("[LoginAction] Attempting login as .env.local Owner:", ownerUsernameEnv);
+    if (ownerUsernameEnv && username === ownerUsernameEnv) {
+      if (debugMode) console.log("[LoginAction] Attempting login as .env.local Owner:", ownerUsernameEnv);
       if (password === ownerPasswordEnv) {
-        console.log("[LoginAction] .env.local Owner credentials MATCHED.");
+        if (debugMode) console.log("[LoginAction] .env.local Owner credentials MATCHED.");
+        // Pass panelGlobalSettingsResult.data to ensureOwnerFileExists
         await ensureOwnerFileExists(ownerUsernameEnv, ownerPasswordEnv, panelGlobalSettingsResult.data);
         
         authenticatedUser = {
@@ -108,126 +122,135 @@ export async function login(prevState: LoginState, formData: FormData): Promise<
             username: ownerUsernameEnv,
             role: 'Owner',
             status: 'Active',
-            assignedPages: [], // Owner has implicit access
-            allowedSettingsPages: [], // Owner has implicit access
-            projects: [], // Owner has implicit access
         };
-        // Load or create owner-specific settings file
-        const ownerSettingsFilename = `${ownerUsernameEnv.replace(/[^a-zA-Z0-9_.-]/g, '_')}-Owner-settings.json`;
-        const loadedOwnerSettings = await loadEncryptedData(ownerSettingsFilename) as UserSettingsData | null;
-        if (loadedOwnerSettings && userSettingsSchema.safeParse(loadedOwnerSettings).success) {
-          userSettings = loadedOwnerSettings;
-        } else {
-          await saveEncryptedData(ownerSettingsFilename, defaultUserSettings);
-          userSettings = defaultUserSettings;
-        }
-        console.log("[LoginAction] Owner login successful. User data:", authenticatedUser);
+        if (debugMode) console.log("[LoginAction] Owner login successful. User data for session:", authenticatedUser);
       } else {
-        console.warn("[LoginAction] .env.local Owner username matched, but password DID NOT MATCH.");
+        if (debugMode) console.warn("[LoginAction] .env.local Owner username matched, but password DID NOT MATCH.");
         logEvent(username, 'OwnerAttempt', 'LOGIN_OWNER_INVALID_PASSWORD', 'WARN');
         return { message: "Invalid username or password.", status: "error", errors: { _form: ["Invalid username or password."] } };
       }
     } else {
-      console.log("[LoginAction] Attempting login for regular user:", username);
-      const userFromFile = await loadUserById(username); // Assumes loadUserById can find by username if ID is not 'owner_root'
+      if (debugMode) console.log(`[LoginAction] Attempting login for regular user: ${username}`);
+      // Attempt to load user by username from individual files
+      // This requires scanning, or if loadUserById can handle username for non-owner.
+      // For now, let's assume loadUserById is primarily for ID or owner. We need a loadUserByUsername.
+      // Let's adjust: load the user profile file directly.
+      
+      // Try to find the user by iterating through roles as filename contains role.
+      // This is not ideal. A better approach would be to store users in a way that username is primary key or indexed.
+      // For now, we'll try to guess the file if possible, or this part needs rework for multi-user login.
+      // The current structure with individual files means we need to know the role to find the file by username.
+      // This part will effectively only work if we can guess the role or if user data is structured differently.
+      // For simplicity, let's assume we'd need a loadUserByUsername that scans.
+      // The provided loadUserById is used by /api/auth/user, let's assume it works for this simplified owner-only login for now.
+      // If we were to support multi-user login from files:
+      let foundUser: UserData | null = null;
+      const potentialRoles: UserData['role'][] = ["Administrator", "Admin", "Custom"];
+      for (const role of potentialRoles) {
+          const userFilePath = `${username.replace(/[^a-zA-Z0-9_.-]/g, '_')}-${role.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
+          const loadedData = await loadEncryptedData(userFilePath) as UserData | null;
+          if (loadedData && loadedData.username === username) {
+              foundUser = loadedData;
+              break;
+          }
+      }
 
-      if (!userFromFile || userFromFile.id === 'owner_root') { // Ensure it's not the owner record if owner login failed/skipped
-        console.warn(`[LoginAction] Regular user "${username}" not found or was owner record.`);
+      if (!foundUser) {
+        if (debugMode) console.warn(`[LoginAction] Regular user "${username}" not found in any user file.`);
         logEvent(username, 'Unknown', 'LOGIN_USER_NOT_FOUND', 'WARN');
         return { message: "Invalid username or password.", status: "error", errors: { _form: ["Invalid username or password."] } };
       }
-      if (userFromFile.status === 'Inactive') {
-        console.warn(`[LoginAction] User "${username}" account is inactive.`);
-        logEvent(username, userFromFile.role, 'LOGIN_USER_INACTIVE', 'WARN');
+
+      if (foundUser.status === 'Inactive') {
+        if (debugMode) console.warn(`[LoginAction] User "${username}" account is inactive.`);
+        logEvent(username, foundUser.role, 'LOGIN_USER_INACTIVE', 'WARN');
         return { message: "This account is inactive. Please contact an administrator.", status: "error", errors: { _form: ["This account is inactive."] } };
       }
 
-      const isPasswordValid = await verifyPassword(password, userFromFile.hashedPassword, userFromFile.salt);
+      const isPasswordValid = await verifyPassword(password, foundUser.hashedPassword, foundUser.salt);
       if (!isPasswordValid) {
-        console.warn(`[LoginAction] Invalid password for user "${username}".`);
-        logEvent(username, userFromFile.role, 'LOGIN_INVALID_PASSWORD', 'WARN');
+        if (debugMode) console.warn(`[LoginAction] Invalid password for user "${username}".`);
+        logEvent(username, foundUser.role, 'LOGIN_INVALID_PASSWORD', 'WARN');
         return { message: "Invalid username or password.", status: "error", errors: { _form: ["Invalid username or password."] } };
       }
-      authenticatedUser = userFromFile;
-      // Load or create user-specific settings file
-      const userSettingsFilename = `${userFromFile.username.replace(/[^a-zA-Z0-9_.-]/g, '_')}-${userFromFile.role.replace(/[^a-zA-Z0-9]/g, '_')}-settings.json`;
-      const loadedUserSettings = await loadEncryptedData(userSettingsFilename) as UserSettingsData | null;
-      if (loadedUserSettings && userSettingsSchema.safeParse(loadedUserSettings).success) {
-        userSettings = loadedUserSettings;
-      } else {
-        await saveEncryptedData(userSettingsFilename, defaultUserSettings);
-        userSettings = defaultUserSettings;
-      }
-      console.log(`[LoginAction] Regular user "${username}" login successful. User data:`, authenticatedUser);
+      authenticatedUser = foundUser;
+      if (debugMode) console.log(`[LoginAction] Regular user "${username}" login successful. User data for session:`, authenticatedUser);
     }
 
     if (authenticatedUser) {
-      session.isLoggedIn = true;
-      session.userId = authenticatedUser.id;
-      session.username = authenticatedUser.username;
-      session.role = authenticatedUser.role;
-      session.lastActivity = Date.now();
-      
-      session.sessionInactivityTimeoutMinutes = panelGlobalSettingsResult.data?.sessionInactivityTimeout ?? 30;
-      session.disableAutoLogoutOnInactivity = panelGlobalSettingsResult.data?.disableAutoLogoutOnInactivity ?? false;
-
-      if (keepLoggedIn) {
-        sessionOptions.cookieOptions.maxAge = 60 * 60 * 24 * 30; // 30 days
-      } else {
-        delete sessionOptions.cookieOptions.maxAge; // Session cookie
-      }
-      await session.save();
-      console.log(`[LoginAction] Iron session cookie saved for ${authenticatedUser.username}. Keep Logged In: ${keepLoggedIn}`);
-
-      // For the file-based session token system (if co-existing or primary)
-      // This part is from the previous file-based token system. We are using iron-session primarily now.
-      // If we still want a server-side session file for activity even with iron-session, this can be kept.
-      // For now, iron-session handles the cookie, and /api/auth/user revalidates against main user files.
-      // The *-Auth.json files might be redundant if iron-session is the sole source of truth for "is session active".
-      // For now, let's comment out the creation of the separate *-Auth.json for simplicity if iron-session is primary.
-      /*
+      // Create/Update the server-side session file with a token
       const sessionToken = crypto.randomBytes(32).toString('hex');
       await createOrUpdateServerSessionFile(
         authenticatedUser.username,
         authenticatedUser.role,
         authenticatedUser.id,
-        sessionToken,
-        session.sessionInactivityTimeoutMinutes,
-        session.disableAutoLogoutOnInactivity,
-        debugMode // Pass debugMode to this helper
+        sessionToken, // This token is stored in the file, not the cookie.
+        defaultSessionTimeoutMins,
+        defaultDisableAutoLogout,
+        debugMode
       );
-      */
+
+      // Set up iron-session cookie
+      session.isLoggedIn = true;
+      session.userId = authenticatedUser.id;
+      session.username = authenticatedUser.username;
+      session.role = authenticatedUser.role;
+      session.lastActivity = Date.now();
+      // Store the session inactivity settings active at the time of login IN THE COOKIE
+      session.sessionInactivityTimeoutMinutes = defaultSessionTimeoutMins;
+      session.disableAutoLogoutOnInactivity = defaultDisableAutoLogout;
+
+      if (keepLoggedIn) {
+        // This maxAge is for the iron-session cookie itself
+        sessionOptions.cookieOptions.maxAge = 60 * 60 * 24 * 30; // 30 days
+      } else {
+        // Use default session cookie (expires when browser closes)
+        delete sessionOptions.cookieOptions.maxAge; 
+      }
+      await session.save();
+      if (debugMode) console.log(`[LoginAction] Iron session cookie saved for ${authenticatedUser.username}. Keep Logged In: ${keepLoggedIn}. MaxAge: ${sessionOptions.cookieOptions.maxAge}`);
 
       logEvent(authenticatedUser.username, authenticatedUser.role, 'LOGIN_SUCCESS', 'INFO');
-      console.log(`[LoginAction] User ${authenticatedUser.username} login process completed. Redirecting to: ${redirectUrl || '/'}`);
-      redirect(redirectUrl || '/');
-      // This return is mostly for type consistency, redirect will prevent it from being sent
-      // but if redirect were client-side, this would be relevant.
-      return { 
-        message: "Login successful! Redirecting...", 
-        status: "success",
-      };
+      operationSuccessful = true;
+      redirectPath = redirectUrl || '/';
     } else {
-      // This case should not be reached if logic above is correct
-      console.error("[LoginAction] AuthenticatedUser object was null after checks. This should not happen.");
-      logEvent(username, 'Unknown', 'LOGIN_FAILED_NULL_USER', 'ERROR');
+      // This case should ideally not be reached if logic above is correct
+      if (debugMode) console.error("[LoginAction] AuthenticatedUser object was null after checks. This should not happen.");
+      logEvent(usernameForLogging, 'Unknown', 'LOGIN_FAILED_NULL_USER', 'ERROR');
       return { message: "Invalid username or password.", status: "error", errors: { _form: ["Invalid username or password."] } };
     }
   } catch (e: any) {
-    // Always log the full error details to the server console
+    // Unconditional server-side logging for any caught error
     console.error("[LoginAction] CRITICAL LOGIN ERROR CAUGHT:");
     console.error("[LoginAction] Full error object caught:", e);
     console.error("[LoginAction] Error Message:", e.message);
     console.error("[LoginAction] Error Stack:", e.stack);
 
-    // For client-side debugging, send a more detailed message, not just the generic one
-    const clientErrorMessage = `An unexpected error occurred. ${e.message ? `Error: ${e.message}` : `Details: ${String(e)}`}${e.stack ? ` Stack (partial): ${String(e.stack).substring(0, 200)}...` : ''}`;
+    // Construct client error message
+    // For testing, always include details. For production, only if debugMode is true.
+    // const clientShouldSeeDetails = debugMode; // For production
+    const clientShouldSeeDetails = true; // For current testing
+
+    let clientErrorMessage = "An unexpected server error occurred during login.";
+    if (clientShouldSeeDetails) {
+        clientErrorMessage = `An unexpected error occurred. ${e.message ? `Error: ${e.message}` : `Details: ${String(e)}`}${e.stack ? ` Stack (partial): ${String(e.stack).substring(0, 150)}...` : ''}`;
+    }
     
     logEvent(usernameForLogging, 'Unknown', 'LOGIN_EXCEPTION', 'ERROR', { error: e.message, stack: e.stack });
     return {
-      message: clientErrorMessage, // This message will be used by the toast if no specific field errors
+      message: clientErrorMessage,
       status: "error",
       errors: { _form: [clientErrorMessage] },
     };
   }
+
+  // If operation was successful, proceed to redirect.
+  // This ensures redirect is not called within the try...catch for NEXT_REDIRECT.
+  if (operationSuccessful && redirectPath) {
+    if (debugMode) console.log(`[LoginAction] User ${usernameForLogging} login process completed. Redirecting to: ${redirectPath}`);
+    redirect(redirectPath);
+  }
+
+  // Fallback return, though redirect should prevent this.
+  return { message: "Processing...", status: "idle" };
 }
