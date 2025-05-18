@@ -17,62 +17,57 @@
 # Production
 /build
 
-# Debug
+# Misc
+.DS_Store
+*.pem
+
+# Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Local Netlify folder
+.netlify
+
+# Firebase
+firebase-debug.log
+# If you have a service account key file for Firebase Admin SDK, ensure it's ignored
+# e.g., *serviceAccountKey.json
 
 # Local Environment Variables
-# Exclude local environment settings.
+# Exclude local environment variables, which may contain sensitive keys
 .env.local
-.env.development.local
-.env.production.local
-.env.test.local
+.env.*.local
+.env
 
-# Turborepo
-.turbo
+# DVPanel Data Directory
+# The default data directory for DVPanel is .dvpanel_data at the project root.
+# This line ignores it.
+/.dvpanel_data/
 
-# Drizzle
-migrations/*. LATEST_OK
-drizzle.config.ts.LATEST_OK
+# IMPORTANT: If you set a custom path for your data using the
+# DVSPANEL_DATA_PATH environment variable, you should add that
+# custom path to your own local git ignore settings (e.g., in
+# .git/info/exclude in your local repository clone) or your
+# global .gitignore file to prevent committing sensitive data.
+# The project's .gitignore cannot dynamically ignore this custom path.
 
-# IDEs and editors
-/.idea
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
+# TypeScript cache
+*.tsbuildinfo
 
-# IDE - VSCode
+# Editor directories and files
 .vscode/*
 !.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
 !.vscode/extensions.json
-.history/*
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
-# Optional: Firebase emulators data
-# firebase-data/
-# *.firebase.json
-
-# Optional: Mac files
-.DS_Store
-.AppleDouble
-.LSOverride
-
-# Optional: Windows Thumbnail cache files
-Thumbs.db
-ehthumbs.db
-ehthumbs_vista.db
-
-# Optional: Compiled files #
-# *.class
-# *.exe
-# *.o
-
-# DVPanel specific data (if you want to ensure this local data is never committed)
-# You already have .dvpanel_data in your settings, but explicitly adding it here is good practice.
-/.dvpanel_data/
+# Turbopack
+.turbo
