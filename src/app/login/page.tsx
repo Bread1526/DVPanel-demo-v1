@@ -3,7 +3,7 @@
 
 import React, { useEffect, useState, useTransition } from 'react';
 import { useActionState } from 'react';
-import Image from 'next/image'; // Added Image import
+import Image from 'next/image';
 import { login, type LoginState } from './actions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,10 +11,10 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Replace, AlertCircle, Loader2 } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react'; // Removed Replace from here
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useSearchParams, useRouter } from 'next/navigation';
-import type { LoginFormData } from './types';
+import type { LoginFormData } from './types'; // Assuming you might have this for form data type definition
 
 const initialLoginState: LoginState = { message: "", status: "idle", errors: {} };
 
@@ -36,8 +36,13 @@ export default function LoginPage() {
             setReasonMessage("You need to log in to access this page.");
         } else if (reason === 'settings_changed') {
             setReasonMessage("Settings updated. Please log in again.");
+        } else if (reason === 'session_error_api' || reason === 'session_error_catch' || reason === 'unauthorized_no_user_data') {
+            setReasonMessage("Your session has expired or is invalid. Please log in again.");
+        } else if (reason === 'account_inactive') {
+            setReasonMessage("Your account is inactive. Please contact an administrator.");
         }
         
+        // Clear the reason from URL to prevent it from showing up again on refresh
         const newUrl = new URL(window.location.href);
         newUrl.searchParams.delete('reason');
         router.replace(newUrl.toString(), { scroll: false });
@@ -54,16 +59,20 @@ export default function LoginPage() {
         title: "Login Successful",
         description: formState.message,
       });
-      // The server action now handles redirection, so client-side redirect is removed.
+      // Server action now handles redirection.
     } else if (formState.status === "error" || formState.status === "validation_failed") {
-      // Check for field-specific errors first
       const hasFieldErrors = (formState.errors?.username && formState.errors.username.length > 0) ||
                              (formState.errors?.password && formState.errors.password.length > 0);
 
-      if (!hasFieldErrors && formState.message) { // Only show generic toast if no field errors are displayed by the form
+      let mainErrorMessage = formState.message;
+      if (formState.errors?._form && formState.errors._form.length > 0) {
+        mainErrorMessage = formState.errors._form.join('; ');
+      }
+
+      if (!hasFieldErrors && mainErrorMessage) {
         toast({
           title: "Login Failed",
-          description: formState.message,
+          description: mainErrorMessage,
           variant: "destructive",
         });
       }
@@ -73,29 +82,32 @@ export default function LoginPage() {
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+    // Ensure redirectUrl is present if needed, or default
+    if (!formData.has('redirectUrl') && searchParams.get('redirect')) {
+        formData.set('redirectUrl', searchParams.get('redirect')!);
+    }
     startTransition(() => {
       formActionOriginal(formData);
     });
   };
 
+  const isFormProcessing = isActionPending || isTransitionPending;
 
   return (
     <Card className="w-full max-w-md shadow-2xl rounded-xl">
       <div className="p-6 pb-0 flex justify-center">
         <Image
-          src="https://placehold.co/300x75.png"
+          src="https://cdn.dvpanel.com/banner.png" // Updated banner image
           alt="DVPanel Banner"
           width={300}
           height={75}
-          className="rounded-md object-cover"
-          data-ai-hint="animated banner technology"
+          className="rounded-md object-contain" // Changed to object-contain for better GIF display
+          data-ai-hint="panel banner" // Updated AI hint
           priority
         />
       </div>
       <CardHeader className="space-y-1 text-center pt-4">
-        <div className="flex justify-center items-center mb-4">
-          <Replace size={48} className="text-primary" />
-        </div>
+        {/* Removed Replace icon from here */}
         <CardTitle className="text-3xl font-bold">Welcome to DVPanel</CardTitle>
         <CardDescription>Enter your credentials to access your dashboard.</CardDescription>
       </CardHeader>
@@ -108,7 +120,7 @@ export default function LoginPage() {
               <AlertDescription>{reasonMessage}</AlertDescription>
             </Alert>
           )}
-          {formState.status !== "idle" && formState.errors?._form && (
+          {formState.status !== "idle" && formState.errors?._form && formState.errors._form.length > 0 && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertTitle>Login Error</AlertTitle>
@@ -155,12 +167,11 @@ export default function LoginPage() {
           {searchParams.get('redirect') && <input type="hidden" name="redirectUrl" value={searchParams.get('redirect')!} />}
         </CardContent>
         <CardFooter className="flex flex-col">
-          <Button type="submit" className="w-full text-lg py-6 shadow-md hover:scale-105 transform transition-transform duration-150" disabled={isActionPending || isTransitionPending}>
-            {(isActionPending || isTransitionPending) ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : "Log In"}
+          <Button type="submit" className="w-full text-lg py-6 shadow-md hover:scale-105 transform transition-transform duration-150" disabled={isFormProcessing}>
+            {isFormProcessing ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : "Log In"}
           </Button>
         </CardFooter>
       </form>
     </Card>
   );
 }
-
