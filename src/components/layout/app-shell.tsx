@@ -12,7 +12,7 @@ import {
   SidebarTrigger,
   SidebarMenu,
   SidebarMenuItem,
-  SidebarMenuItemLayout,
+  SidebarMenuItemLayout, // Changed from SidebarMenuButton
   SidebarMenuBadge,
   useSidebar,
 } from '@/components/ui/sidebar';
@@ -29,14 +29,13 @@ import {
   AlertTriangle,
   Loader2,
   PanelLeft,
-  Eye,
-  Edit,
+  Eye, // For View Details
+  UserCog, // For Admin role icon & Impersonate User
   ScrollText,
-  Crown,
-  ShieldCheck,
-  UserCog,
-  SlidersHorizontal,
-  StopCircle,
+  Crown, // For Owner role icon
+  ShieldCheck, // For Administrator role icon
+  SlidersHorizontal, // For Custom role icon
+  StopCircle, // For Stop Impersonation
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -50,16 +49,17 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { logout as serverLogoutAction, LogoutState } from '@/app/(app)/logout/actions';
+import { logout as serverLogoutAction } from '@/app/(app)/logout/actions'; // Adjusted path
 import type { AuthenticatedUser } from '@/lib/session';
 import AccessDeniedOverlay from './access-denied-overlay';
 import { useToast } from "@/hooks/use-toast";
 import { cva } from 'class-variance-authority';
 import ProfileDialog from '@/app/(app)/profile/components/profile-dialog';
-import { loadPanelSettings } from '@/app/(app)/settings/actions';
+import { loadPanelSettings } from '@/app/(app)/settings/actions'; // Adjusted path
 import DebugOverlay from '@/components/debug-overlay';
-import LogsViewerDialog from '@/components/logs/LogsViewerDialog';
+import LogsViewerDialog from '@/components/logs/LogsViewerDialog'; // Corrected import
 import { Skeleton } from '../ui/skeleton';
+import { stopImpersonation as stopImpersonationAction } from '@/app/(app)/roles/actions'; // Import stopImpersonation
 
 
 const navItemsBase = [
@@ -67,10 +67,11 @@ const navItemsBase = [
   { href: '/projects', label: 'Projects', icon: Layers, count: 0, requiredPage: 'projects_page' },
   { href: '/files', label: 'File Manager', icon: FileText, requiredPage: 'files' },
   { href: '/ports', label: 'Port Manager', icon: Network, requiredPage: 'ports' },
-  { href: '/roles', label: 'User Roles', icon: Users, requiredPage: 'roles' }, // Keep for access check logic
+  { href: '/roles', label: 'User Roles', icon: Users, requiredPage: 'roles' },
   { href: '/settings', label: 'Settings', icon: Settings, requiredPage: 'settings_area' },
 ];
 
+// Variant for Link component when used as a button
 const linkAsButtonVariants = cva(
   "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md px-2 text-left text-sm outline-none ring-sidebar-ring transition-colors focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-data-[state=collapsed]:group-data-[collapsible=icon]:justify-center group-data-[state=collapsed]:group-data-[collapsible=icon]:size-8 group-data-[state=collapsed]:group-data-[collapsible=icon]:p-0",
   {
@@ -94,7 +95,6 @@ const linkAsButtonVariants = cva(
   }
 );
 
-
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { state: sidebarState, isMobile, setOpen: setSidebarOpen } = useSidebar();
@@ -106,12 +106,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [isPageAccessGranted, setIsPageAccessGranted] = useState<boolean | null>(null);
   const [effectiveDebugMode, setEffectiveDebugMode] = useState(false);
   const [isPendingLogout, startLogoutTransition] = React.useTransition();
+  const [isPendingStopImpersonation, startStopImpersonationTransition] = React.useTransition();
   const [hasMounted, setHasMounted] = useState(false);
 
   const [isDebugOverlayOpen, setIsDebugOverlayOpen] = useState(false);
   const [isLogsViewerOpen, setIsLogsViewerOpen] = useState(false);
 
-  const menuButtonRef = useRef<HTMLAnchorElement>(null);
+  const menuButtonRef = useRef<HTMLAnchorElement>(null); 
 
   useEffect(() => {
     setHasMounted(true);
@@ -121,31 +122,47 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (effectiveDebugMode) console.log('[AppShell] performLogout initiated.');
     startLogoutTransition(async () => {
       try {
-        await serverLogoutAction(); // Server action gets user from session
+        await serverLogoutAction(); // Server action gets all it needs from session
         setCurrentUserData(null);
         setIsPageAccessGranted(false);
-        // No explicit router.push needed here, as middleware should handle redirect on next auth check or page load
-        // Forcing a reload might be too abrupt, let Next.js routing handle it.
-        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
-             window.location.href = '/login?reason=user_initiated'; // Force full page reload to login
-        }
+        router.push('/login?reason=user_initiated');
       } catch (e: any) {
         const isRedirectError = e.message === 'NEXT_REDIRECT' || (typeof e.digest === 'string' && e.digest.startsWith('NEXT_REDIRECT'));
         if (isRedirectError) {
           if (effectiveDebugMode) console.log("[AppShell] Logout action triggered a redirect, which is expected.");
+          // NEXT_REDIRECT is not a true error in this context, so we don't toast.
+          // The redirect will navigate the user away.
         } else {
           const error = e instanceof Error ? e.message : String(e);
           console.error("[AppShell] Error calling server logout action:", error, e);
           toast({ title: "Logout Error", description: `Failed to logout: ${error}`, variant: "destructive" });
-          setCurrentUserData(null);
+          setCurrentUserData(null); // Clear client-side user data on error too
           setIsPageAccessGranted(false);
-          if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
-            window.location.href = '/login?reason=logout_server_error'; // Force reload
-          }
+          router.push('/login?reason=logout_server_error');
         }
       }
     });
-  }, [toast, effectiveDebugMode, startLogoutTransition]);
+  }, [router, toast, effectiveDebugMode]);
+
+  const handleStopImpersonation = useCallback(async () => {
+    if (effectiveDebugMode) console.log('[AppShell] handleStopImpersonation initiated.');
+    startStopImpersonationTransition(async () => {
+      try {
+        await stopImpersonationAction();
+        // After stopImpersonationAction redirects, AppShell will re-fetch user data
+        // No need to manually call fetchUserAndCheckAccess here as redirect handles it.
+      } catch (e: any) {
+        const isRedirectError = e.message === 'NEXT_REDIRECT' || (typeof e.digest === 'string' && e.digest.startsWith('NEXT_REDIRECT'));
+        if (isRedirectError) {
+           if (effectiveDebugMode) console.log("[AppShell] Stop impersonation action triggered a redirect, which is expected.");
+        } else {
+          const error = e instanceof Error ? e.message : String(e);
+          console.error("[AppShell] Error calling stopImpersonation action:", error, e);
+          toast({ title: "Impersonation Error", description: `Failed to stop impersonation: ${error}`, variant: "destructive" });
+        }
+      }
+    });
+  }, [toast, effectiveDebugMode]);
 
   const fetchUserAndCheckAccess = useCallback(async () => {
     if (!hasMounted) return;
@@ -159,28 +176,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       if (!response.ok) {
         const errorText = await response.text().catch(() => "Could not read error response text.");
         if (effectiveDebugMode) console.warn(`[AppShell] /api/auth/user call failed. Status: ${responseStatus}. Response text:`, errorText);
-        if (responseStatus === 401) { // Specifically handle 401
-            performLogout();
-        } else {
-            toast({ title: "Session Error", description: "Could not verify session. Please try logging in again.", variant: "destructive"});
-            performLogout(); // Fallback for other errors
-        }
+        performLogout(); // This will redirect to login
         return;
       }
 
       const data = await response.json();
-      if (data.user && data.user.status === 'Active') {
+      if (data.user && data.user.id) { // Check for user.id as a basic validity check
         setCurrentUserData(data.user);
-        setEffectiveDebugMode(data.user.globalDebugMode ?? false);
+        setEffectiveDebugMode(data.user.globalDebugMode ?? false); 
         if (data.user.globalDebugMode) {
           console.log('[AppShell] User data fetched successfully:', {
             id: data.user.id, username: data.user.username, role: data.user.role, status: data.user.status,
+            isImpersonating: data.user.isImpersonating, originalUsername: data.user.originalUsername,
             globalDebugModeApi: data.user.globalDebugMode,
-            userSettingsDebug: data.user.userSettings?.debugMode, // this is now removed, will be undefined
           });
         }
       } else {
-        if (effectiveDebugMode) console.warn('[AppShell] No active user data in response from /api/auth/user. User object:', data.user);
+        if (effectiveDebugMode) console.warn('[AppShell] No valid user data in response from /api/auth/user. Data:', data);
         performLogout();
       }
     } catch (error) {
@@ -221,7 +233,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     });
     const requiredPageId = currentMainNavItem?.requiredPage;
 
-    const userDebugLogging = effectiveUser.globalDebugMode ?? false;
+    const userDebugLogging = effectiveUser.globalDebugMode ?? false; // Use global debug mode
     if (userDebugLogging) {
         console.log(`[AppShell] Page access check for path: "${pathname}", topLevelPathSegment: "${currentTopLevelPathSegment}", effectiveUser role: "${effectiveUser.role}", requiredPageId: "${requiredPageId}"`);
     }
@@ -230,13 +242,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       hasAccess = false;
       if (userDebugLogging) console.log('[AppShell] Page access: Denied (User Inactive)');
     } else if (effectiveUser.role === 'Owner') {
-      hasAccess = true; // Owner has access to everything
+      hasAccess = true; 
       if (userDebugLogging) console.log('[AppShell] Page access: Granted (Owner)');
-    } else if (pathname.startsWith('/roles')) { // Specific check for /roles
+    } else if (pathname.startsWith('/roles')) {
         hasAccess = false; // Only Owner can access /roles
         if (userDebugLogging) console.log('[AppShell] Page access: Denied for /roles (Non-Owner)');
     } else if (effectiveUser.role === 'Administrator') {
-      hasAccess = true; // Administrator has access to all listed main pages (except /roles)
+      hasAccess = true; 
       if (userDebugLogging) console.log('[AppShell] Page access: Granted (Administrator)');
     } else if (effectiveUser.role === 'Admin') {
       const adminAllowedMainPages = ['dashboard', 'projects_page', 'files', 'ports', 'logs_page'];
@@ -277,23 +289,29 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const navItems = React.useMemo(() => {
     if (!hasMounted || !effectiveUser || effectiveUser.status === 'Inactive') return [];
 
-    return navItemsBase.filter(item => {
-      if (item.requiredPage === 'roles') { // "User Roles" link
-        return effectiveUser.role === 'Owner'; // Only Owner sees "User Roles"
-      }
-      if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') return true;
-      if (effectiveUser.role === 'Admin') {
-         const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'logs_page'];
-         if (item.requiredPage === 'settings_area') {
-             return effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
-         }
-        return item.requiredPage ? adminAllowedPages.includes(item.requiredPage) : true;
-      }
-      if (effectiveUser.role === 'Custom' && item.requiredPage) {
-        return effectiveUser.assignedPages?.includes(item.requiredPage) ?? false;
-      }
-      return false; // Default to no access if no conditions met
+    const baseFiltered = navItemsBase.filter(item => {
+        if (item.requiredPage === 'roles') {
+            return effectiveUser.role === 'Owner';
+        }
+        if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') return true;
+        if (effectiveUser.role === 'Admin') {
+            const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'logs_page'];
+            if (item.requiredPage === 'settings_area') {
+                return effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
+            }
+            return item.requiredPage ? adminAllowedPages.includes(item.requiredPage) : true;
+        }
+        if (effectiveUser.role === 'Custom' && item.requiredPage) {
+            return effectiveUser.assignedPages?.includes(item.requiredPage) ?? false;
+        }
+        return false;
     });
+    
+    // Add "Panel Logs" if user has permission
+    const canAccessLogs = effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator' || effectiveUser.role === 'Admin' || (effectiveUser.role === 'Custom' && effectiveUser.assignedPages?.includes('logs_page'));
+    
+    return baseFiltered; // Panel Logs is in user dropdown now, not main nav
+
   }, [effectiveUser, hasMounted]);
 
   const handleSettingsUpdated = useCallback(() => {
@@ -310,9 +328,22 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const [pageContent, setPageContent] = useState<React.ReactNode>(null);
 
+  const userRoleForIcon = effectiveUser?.role;
+  const UserRoleIcon = React.memo(() => {
+    if (!hasMounted || isLoadingUser || !effectiveUser) return <Skeleton className="h-4 w-4 rounded-full" />;
+    switch (userRoleForIcon) {
+      case 'Owner': return <Crown className="mr-1.5 h-4 w-4 text-yellow-400" />;
+      case 'Administrator': return <ShieldCheck className="mr-1.5 h-4 w-4 text-primary" />;
+      case 'Admin': return <UserCog className="mr-1.5 h-4 w-4 text-sky-500" />;
+      case 'Custom': return <SlidersHorizontal className="mr-1.5 h-4 w-4 text-purple-500" />;
+      default: return null;
+    }
+  });
+  UserRoleIcon.displayName = 'UserRoleIcon';
+
   useEffect(() => {
     const userDebugLogging = effectiveUser?.globalDebugMode ?? false;
-    if (userDebugLogging) {
+     if (userDebugLogging || effectiveDebugMode) { // Log if either user's debug (from settings) or panel global debug (from API) is on
         console.log('[AppShell RENDER DEBUG]', {
           pathname,
           hasMounted,
@@ -324,50 +355,36 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
 
     if (!hasMounted) {
-        setPageContent(null); // Or a global skeleton/loader for the whole page
+        setPageContent(null); 
     } else if (isLoadingUser || (effectiveUser && isPageAccessGranted === null)) {
       setPageContent(
-        <div className="flex justify-center items-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="ml-2 mt-2">Loading panel data...</p>
+        <div className="flex flex-col justify-center items-center h-full flex-grow p-8">
+          <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+          <p className="text-lg text-muted-foreground">Loading panel data...</p>
         </div>
       );
     } else if (effectiveUser && isPageAccessGranted === true) {
       setPageContent(children);
     } else if (effectiveUser && isPageAccessGranted === false) {
       setPageContent(<AccessDeniedOverlay />);
-    } else if (!effectiveUser && !isLoadingUser && hasMounted) { // Explicitly not logged in, after loading attempt
+    } else if (!effectiveUser && !isLoadingUser && hasMounted) { 
        setPageContent(
-        <div className="flex flex-col justify-center items-center h-64">
-          <AlertTriangle className="h-8 w-8 text-destructive mb-2" />
-          <p>Session invalid or expired.</p>
+        <div className="flex flex-col justify-center items-center h-full flex-grow p-8">
+          <AlertTriangle className="h-12 w-12 text-destructive mb-4" />
+          <p className="text-lg text-foreground">Session invalid or expired.</p>
           <p className="text-sm text-muted-foreground">Redirecting to login...</p>
         </div>
       );
-       // performLogout() is called by fetchUserAndCheckAccess in this case, which should trigger redirect via middleware or URL change
     } else {
-        // Default fallback if none of the above, though ideally one should match
         setPageContent(
-            <div className="flex justify-center items-center h-64">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                <p className="ml-2 mt-2">Initializing...</p>
+            <div className="flex flex-col justify-center items-center h-full flex-grow p-8">
+                <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+                <p className="text-lg text-muted-foreground">Initializing...</p>
             </div>
         );
     }
-  }, [hasMounted, isLoadingUser, effectiveUser, isPageAccessGranted, children, pathname, performLogout]);
+  }, [hasMounted, isLoadingUser, effectiveUser, isPageAccessGranted, children, pathname, effectiveDebugMode]);
 
-
-  const UserRoleIcon = React.memo(() => {
-    if (!hasMounted || isLoadingUser || !effectiveUser) return <Skeleton className="h-4 w-4 rounded-full" />;
-    switch (effectiveUser.role) {
-      case 'Owner': return <Crown className="mr-1.5 h-4 w-4 text-yellow-400" />;
-      case 'Administrator': return <ShieldCheck className="mr-1.5 h-4 w-4 text-primary" />;
-      case 'Admin': return <UserCog className="mr-1.5 h-4 w-4 text-sky-500" />;
-      case 'Custom': return <SlidersHorizontal className="mr-1.5 h-4 w-4 text-purple-500" />;
-      default: return null;
-    }
-  });
-  UserRoleIcon.displayName = 'UserRoleIcon';
 
   const onCloseDebugOverlay = useCallback(() => {
     setIsDebugOverlayOpen(false);
@@ -402,7 +419,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {navItems.map((item) => {
               const isActive = getIsActive(item.href);
               const showTextForLayout = hasMounted && (!isMobile && sidebarState === 'expanded' || isMobile);
-
               const menuButton = (
                 <SidebarMenuItemLayout
                   icon={item.icon}
@@ -413,11 +429,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               );
 
               let linkWrappedButton = (
-                 <Link href={item.href} className={cn(linkAsButtonVariants({ isActive, size: 'default', variant: 'default' }))} ref={menuButtonRef} passHref={false}>
+                 <Link href={item.href} className={cn(linkAsButtonVariants({ isActive, size: 'default', variant: 'default' }))} ref={menuButtonRef} >
                    {menuButton}
                  </Link>
                );
-
 
               if (hasMounted && sidebarState === 'collapsed' && !isMobile && item.label) {
                 return (
@@ -435,7 +450,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   </SidebarMenuItem>
                 );
               }
-
               return (
                 <SidebarMenuItem key={item.label}>
                    {linkWrappedButton}
@@ -445,6 +459,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </SidebarMenu>
         </SidebarContent>
         <SidebarFooter className="p-4 flex flex-col gap-2">
+           {currentUserData?.isImpersonating && (
+            <Button
+              variant="destructive"
+              className="w-full justify-center gap-2"
+              onClick={handleStopImpersonation}
+              disabled={isPendingStopImpersonation}
+            >
+              {isPendingStopImpersonation ? <Loader2 className="h-4 w-4 animate-spin" /> : <StopCircle className="h-4 w-4" />}
+              Stop Impersonating {currentUserData.username}
+            </Button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="w-full justify-start gap-2 px-2">
@@ -457,14 +482,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                  <div className="flex items-center truncate">
                     <UserRoleIcon />
                     <span className="truncate">
-                      {(!hasMounted || isLoadingUser || !effectiveUser) ? "Loading..." : effectiveUser.username ?? "User"}
+                      {(!hasMounted || isLoadingUser || !effectiveUser) ? "Loading..." : effectiveUser.isImpersonating ? `Viewing as ${effectiveUser.username}` : effectiveUser.username ?? "User"}
                     </span>
                   </div>
                 )}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="right" align="start" className="w-56">
-              <DropdownMenuLabel>My Account</DropdownMenuLabel>
+              <DropdownMenuLabel>
+                {currentUserData?.isImpersonating ? `Original: ${currentUserData.originalUsername}` : "My Account"}
+              </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <Suspense fallback={<DropdownMenuItem disabled><Loader2 className="mr-2 h-4 w-4 animate-spin"/>Loading Profile...</DropdownMenuItem>}>
                 <ProfileDialog currentUser={currentUserData} onSettingsUpdate={handleSettingsUpdated} />
@@ -501,6 +528,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
            <div className="md:hidden group-data-[variant=inset]/sidebar-wrapper:md:flex group-data-[variant=inset]/sidebar-wrapper:md:items-center">
           </div>
         </header>
+        {currentUserData?.isImpersonating && (
+            <div className="sticky top-0 z-20 bg-yellow-500/20 border-b border-yellow-600 text-yellow-700 dark:text-yellow-300 px-4 py-2 text-center text-sm">
+              You are viewing as <strong>{currentUserData.username}</strong> (Original: {currentUserData.originalUsername}).
+              <Button variant="link" size="sm" className="ml-2 text-yellow-700 dark:text-yellow-300 h-auto p-0 underline" onClick={handleStopImpersonation} disabled={isPendingStopImpersonation}>
+                {isPendingStopImpersonation ? <Loader2 className="h-3 w-3 animate-spin" /> : "Stop Impersonating"}
+              </Button>
+            </div>
+        )}
         <main className="flex-1 p-4 sm:p-6 md:p-8">
           {pageContent}
         </main>
@@ -537,5 +572,3 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </>
   );
 }
-
-    

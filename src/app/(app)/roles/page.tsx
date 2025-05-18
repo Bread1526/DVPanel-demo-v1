@@ -9,22 +9,21 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye, UserPlus } from "lucide-react";
-import { loadUsers, deleteUser, type UserData, type UserActionState } from "./actions";
+import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye, UserPlus, UserCog } from "lucide-react"; // Added UserCog
+import { loadUsers, deleteUser, startImpersonation as startImpersonationAction, type UserData, type UserActionState, type ImpersonationState } from "./actions"; // Adjusted path
 import { useToast } from "@/hooks/use-toast";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle as AlertDialogCoreTitle } from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription as AlertDialogCoreDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle as AlertDialogCoreTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogClose, DialogFooter as DialogCoreFooter, DialogContent as DialogCoreContent, DialogHeader as DialogCoreHeader, DialogTitle as DialogCoreTitle, DialogDescription as DialogCoreDescription} from "@/components/ui/dialog"; 
-import { Skeleton } from "@/components/ui/skeleton"; // Import Skeleton
+import { Skeleton } from "@/components/ui/skeleton"; 
 
 const AddUserRoleDialog = dynamic(() => import('./components/add-user-role-dialog'), {
   loading: () => (
     <Button disabled className="shadow-md">
-      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Add User (Loading...)
+      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Add User
     </Button>
   ),
   ssr: false
 });
-
 
 const rolesDefinitions = [
   { name: "Owner", description: "Full system access. Managed via .env.local, not listed here." },
@@ -33,7 +32,6 @@ const rolesDefinitions = [
   { name: "Custom", description: "Granular permissions assigned per module, page, or project." },
 ];
 
-// These should ideally come from a shared config or backend
 const availableProjects = [ 
   { id: 'project_ecommerce_api', name: 'E-commerce API'},
   { id: 'project_company_website', name: 'Company Website'},
@@ -47,18 +45,17 @@ const availableAppPages = [
   { id: 'files', name: 'File Manager (/files)' },
   { id: 'ports', name: 'Port Manager (/ports)' },
   { id: 'settings_area', name: 'Settings Area (/settings)' }, 
-  { id: 'roles', name: 'User Roles (/roles)'},
-  { id: 'logs_page', name: 'Panel Logs (/logs)'},
+  // { id: 'roles', name: 'User Roles (/roles)'}, // Roles page itself shouldn't be assignable here
+  { id: 'logs_page', name: 'Panel Logs (via Profile)'},
 ];
 
 const availableSettingsPages = [
-  { id: 'settings_general', name: 'General' },
-  { id: 'settings_panel', name: 'Panel' },
-  { id: 'settings_daemon', name: 'Daemon' },
-  { id: 'settings_security', name: 'Security' },
-  // Popups and Debug are user-specific now
-  { id: 'settings_license', name: 'License' },
-  { id: 'settings_info', name: 'Info' },
+  { id: 'settings_general', name: 'General Settings' },
+  { id: 'settings_panel', name: 'Panel Settings' },
+  { id: 'settings_daemon', name: 'Daemon Settings' },
+  { id: 'settings_security', name: 'Security Settings' },
+  { id: 'settings_license', name: 'License Settings' },
+  { id: 'settings_info', name: 'Info Page' },
 ];
 
 export default function RolesPage() {
@@ -66,9 +63,15 @@ export default function RolesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
+  
   const [isPendingDelete, startDeleteTransition] = useTransition();
   const [userToDelete, setUserToDelete] = useState<UserData | null>(null);
+  
   const [userToViewDetails, setUserToViewDetails] = useState<UserData | null>(null); 
+  
+  const [isPendingImpersonation, startImpersonationTransition] = useTransition();
+  const [impersonationFormState, impersonationFormAction] = React.useActionState(startImpersonationAction, { status: "idle", message: "" });
+
 
   const fetchUsers = useCallback(async () => {
     setIsLoading(true);
@@ -76,7 +79,7 @@ export default function RolesPage() {
     try {
       const result = await loadUsers();
       if (result.status === "success" && result.users) {
-        setUsers(result.users);
+        setUsers(result.users.filter(user => user.id !== 'owner_root')); // Ensure owner is not in this list
       } else {
         setError(result.error || "Failed to load users.");
         setUsers([]);
@@ -88,7 +91,7 @@ export default function RolesPage() {
     } finally {
       setIsLoading(false);
     }
-  }, []); // Empty dependency array as loadUsers doesn't change
+  }, []); 
 
   useEffect(() => {
     fetchUsers();
@@ -102,24 +105,33 @@ export default function RolesPage() {
         toast({ title: "User Deleted", description: result.message, duration: 5000 });
         fetchUsers(); 
       } else {
-        toast({ title: "Error Deleting User", description: result.message, variant: "destructive", duration: 5000 });
+        toast({ title: "Error Deleting User", description: result.message || "An unknown error occurred.", variant: "destructive", duration: 5000 });
       }
       setUserToDelete(null); 
+    });
+  };
+
+  const handleStartImpersonation = (userId: string) => {
+    startImpersonationTransition(async () => {
+        const result = await startImpersonationAction(userId);
+        if (result.status === "error") {
+            toast({ title: "Impersonation Failed", description: result.message, variant: "destructive" });
+        }
+        // If successful, the action handles redirect.
     });
   };
 
   const handleUserChange = useCallback(async () => { 
     await fetchUsers();
     if (userToViewDetails) { 
-        const usersResult = await loadUsers(); // Re-fetch all users
-        const updatedUser = usersResult.users?.find(u => u.id === userToViewDetails.id);
+        const updatedUser = users.find(u => u.id === userToViewDetails.id);
         if (updatedUser) {
-            setUserToViewDetails(updatedUser); // Update the user being viewed if they still exist
+            setUserToViewDetails(updatedUser);
         } else { 
-            setUserToViewDetails(null); // User might have been deleted or ID changed, close dialog
+            setUserToViewDetails(null); 
         }
     }
-  }, [fetchUsers, userToViewDetails]); // userToViewDetails is a dependency
+  }, [fetchUsers, userToViewDetails, users]);
 
   const findNameById = (id: string, list: {id: string, name: string}[]) => list.find(item => item.id === id)?.name || id;
 
@@ -155,8 +167,10 @@ export default function RolesPage() {
           </CardHeader>
           <CardContent>
             {isLoading ? (
-              <div className="flex justify-center items-center h-32">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <div className="space-y-3 py-4">
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-8 w-full" />
               </div>
             ) : users.length === 0 && !error ? (
               <p className="text-center text-muted-foreground py-8">No users found. Add a user to get started.</p>
@@ -190,13 +204,13 @@ export default function RolesPage() {
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={user.id === 'owner_root'}>
+                            <Button variant="ghost" size="icon" className="shadow-md hover:scale-105 transform transition-transform duration-150">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onSelect={() => setUserToViewDetails(user)}>
-                              <Eye className="mr-2 h-4 w-4" /> View Role Details
+                              <Eye className="mr-2 h-4 w-4" /> View Details
                             </DropdownMenuItem>
                              
                             {AddUserRoleDialog && <AddUserRoleDialog 
@@ -204,17 +218,24 @@ export default function RolesPage() {
                               userData={user} 
                               onUserChange={handleUserChange}
                               triggerButton={
-                                <DropdownMenuItem onSelect={(e) => e.preventDefault()} disabled={user.id === 'owner_root'}> 
+                                <DropdownMenuItem onSelect={(e) => e.preventDefault()}> 
                                   <Edit className="mr-2 h-4 w-4" /> Edit User / Role
                                 </DropdownMenuItem>
                               }
                             />}
                             
+                            <DropdownMenuItem 
+                                onSelect={() => handleStartImpersonation(user.id)}
+                                disabled={user.status === 'Inactive' || user.role === 'Owner' || isPendingImpersonation}
+                            >
+                                {isPendingImpersonation ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserCog className="mr-2 h-4 w-4" />}
+                                Impersonate User
+                            </DropdownMenuItem>
+
                             <DropdownMenuSeparator />
                             <DropdownMenuItem 
                               className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground"
                               onSelect={(e) => { e.preventDefault(); setUserToDelete(user); }}
-                              disabled={user.id === 'owner_root'}
                             >
                               <Trash2 className="mr-2 h-4 w-4" /> Delete User
                             </DropdownMenuItem>
@@ -286,27 +307,20 @@ export default function RolesPage() {
                     </ul>
                   </div>
                 )}
-
-                 {userToViewDetails.role === 'Owner' && (
-                    <p className="text-sm text-muted-foreground text-center pt-2">Owner has full system access. No specific permissions are listed here.</p>
-                 )}
                  {(userToViewDetails.role !== 'Owner' && (userToViewDetails.role === 'Admin' || userToViewDetails.role === 'Custom') && (!userToViewDetails.projects || userToViewDetails.projects.length === 0) && (!userToViewDetails.assignedPages || userToViewDetails.assignedPages.length === 0) && (!userToViewDetails.allowedSettingsPages || userToViewDetails.allowedSettingsPages.length === 0)) && (
                   <p className="text-sm text-muted-foreground text-center pt-2">No specific project, page, or settings permissions assigned.</p>
                 )}
                 {userToViewDetails.role === 'Administrator' && (!userToViewDetails.allowedSettingsPages || userToViewDetails.allowedSettingsPages.length === 0) && (
                   <p className="text-sm text-muted-foreground text-center pt-2">No specific settings module permissions assigned. Administrator has implicit access to all application pages and projects.</p>
                 )}
-
               </div>
               <DialogCoreFooter className="sm:justify-between gap-2 pt-4 border-t">
                 {AddUserRoleDialog && <AddUserRoleDialog 
                     isEditing={true} 
                     userData={userToViewDetails} 
-                    onUserChange={() => {
-                        handleUserChange(); 
-                    }}
+                    onUserChange={handleUserChange}
                     triggerButton={
-                        <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={userToViewDetails.id === 'owner_root'}>
+                        <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
                             <Edit className="mr-2 h-4 w-4" /> Edit This Role
                         </Button>
                     }
@@ -330,14 +344,14 @@ export default function RolesPage() {
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogCoreTitle>Are you absolutely sure?</AlertDialogCoreTitle>
-                <AlertDialogDescription>
+                <AlertDialogCoreDescription>
                   This action cannot be undone. This will permanently delete the user account for 
-                  <span className="font-semibold"> {userToDelete.username}</span>.
-                </AlertDialogDescription>
+                  <span className="font-semibold"> {userToDelete.username}</span> and all associated data files.
+                </AlertDialogCoreDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel onClick={() => setUserToDelete(null)} disabled={isPendingDelete}>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDeleteUser} disabled={isPendingDelete || userToDelete.id === 'owner_root'} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+                <AlertDialogAction onClick={handleDeleteUser} disabled={isPendingDelete} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
                   {isPendingDelete ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
                   Delete User
                 </AlertDialogAction>

@@ -1,6 +1,7 @@
+
 // src/lib/session.ts
 import type { IronSessionOptions } from 'iron-session';
-import type { UserData } from '@/app/(app)/roles/types';
+import type { UserData } from '@/app/(app)/roles/types'; // Adjusted path
 import type { UserSettingsData } from './user-settings';
 
 // Define the shape of the data stored in the session (cookie)
@@ -13,6 +14,12 @@ export interface SessionData {
   // Store global panel settings for session inactivity at the time of login
   sessionInactivityTimeoutMinutes?: number;
   disableAutoLogoutOnInactivity?: boolean;
+
+  // Impersonation fields
+  isImpersonating?: boolean;
+  originalUserId?: string;
+  originalUsername?: string;
+  originalUserRole?: UserData['role'] | 'Owner';
 }
 
 // Define the shape of the user object returned by /api/auth/user
@@ -26,14 +33,19 @@ export type AuthenticatedUser = {
   status?: 'Active' | 'Inactive';
   userSettings?: UserSettingsData;
   globalDebugMode?: boolean; // From global panel settings
+
+  // Impersonation fields for client
+  isImpersonating?: boolean;
+  originalUsername?: string;
 };
 
 // Define the shape of the server-side session files ({username}-{role}-Auth.json)
+// These files store the actual session token and activity details.
 export type FileSessionData = {
-  userId: string;
-  username: string;
-  role: string;
-  token: string; // A unique session token stored in this file
+  userId: string; // ID of the user this session file pertains to (could be original or impersonated)
+  username: string; // Username of the user this session file pertains to
+  role: string;     // Role of the user this session file pertains to
+  token: string;    // A unique session token stored in this file, validated by API
   createdAt: number;
   lastActivity: number;
   sessionInactivityTimeoutMinutes: number;
@@ -44,8 +56,7 @@ export type FileSessionData = {
 // --- Session Configuration ---
 const sessionPassword = process.env.SESSION_PASSWORD;
 
-// Log the raw password from .env to help diagnose setup issues during startup
-// This runs once when the module is first loaded.
+// This console.log runs once when the module is first loaded.
 console.log(
   '[SessionConfig] Raw SESSION_PASSWORD from process.env during module load:',
   sessionPassword ? `Set (length: ${sessionPassword.length})` : 'UNDEFINED or empty'
@@ -61,7 +72,7 @@ if (!sessionPassword || sessionPassword.length < 32) {
     'Please set a strong, unique secret (at least 32 characters) in your .env.local file, \n' +
     'located in the ROOT directory of your project (same level as package.json).\n' +
     'Example: SESSION_PASSWORD="a_very_long_random_and_secure_string_for_sessions"\n' +
-    `CURRENTLY READ VALUE (if any): ${sessionPassword ? `'${sessionPassword.substring(0, 5)}...' (length ${sessionPassword.length})` : 'UNDEFINED or empty'}\n` +
+    `CURRENTLY READ VALUE (if any): ${sessionPassword ? `'${sessionPassword.substring(0, 5)}...' (length ${sessionPassword.length})` : 'UNDEFINED or empty'}\n`+
     '-----------------------------------------------------------------------------------\n' +
     'TROUBLESHOOTING:\n' +
     '1. Ensure .env.local is in the project ROOT.\n' +
