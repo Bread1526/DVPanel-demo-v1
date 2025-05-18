@@ -2,7 +2,6 @@
 import type { IronSessionOptions } from 'iron-session';
 import type { UserData } from '@/app/(app)/roles/types';
 import type { UserSettingsData } from './user-settings';
-import type { PanelSettingsData } from '@/app/(app)/settings/types';
 
 // Define the shape of the data stored in the session (cookie)
 export interface SessionData {
@@ -25,23 +24,20 @@ export type AuthenticatedUser = {
   assignedPages?: string[];
   allowedSettingsPages?: string[];
   status?: 'Active' | 'Inactive';
-  userSettings?: UserSettingsData; // User-specific settings
+  userSettings?: UserSettingsData;
   globalDebugMode?: boolean; // From global panel settings
-  panelSettings?: PanelSettingsData; // Include global panel settings
 };
 
 // Define the shape of the server-side session files ({username}-{role}-Auth.json)
-// This file primarily tracks activity and specific session timeout settings.
-// The iron-session cookie acts as the proof of an active session.
 export type FileSessionData = {
-  userId: string; // To link back to the main user profile
+  userId: string;
   username: string;
   role: string;
   token: string; // A unique session token stored in this file
   createdAt: number;
   lastActivity: number;
-  sessionInactivityTimeoutMinutes: number; // The timeout active for THIS session
-  disableAutoLogoutOnInactivity: boolean; // The preference active for THIS session
+  sessionInactivityTimeoutMinutes: number;
+  disableAutoLogoutOnInactivity: boolean;
 };
 
 
@@ -49,6 +45,7 @@ export type FileSessionData = {
 const sessionPassword = process.env.SESSION_PASSWORD;
 
 // Log the raw password from .env to help diagnose setup issues during startup
+// This runs once when the module is first loaded.
 console.log(
   '[SessionConfig] Raw SESSION_PASSWORD from process.env during module load:',
   sessionPassword ? `Set (length: ${sessionPassword.length})` : 'UNDEFINED or empty'
