@@ -1,9 +1,10 @@
 
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button"; // Import buttonVariants
 import { Activity, Layers, AlertTriangle, CheckCircle } from "lucide-react";
 import Link from "next/link";
+import { cn } from "@/lib/utils"; // Import cn
 
 export default function DashboardPage() {
   return (
@@ -92,14 +93,32 @@ export default function DashboardPage() {
             <CardDescription>Common tasks at your fingertips.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 sm:flex-row">
-            <Link href="/projects" asChild>
-              <Button className="w-full sm:w-auto shadow-md hover:scale-105 transform transition-transform duration-150">Manage Projects</Button>
+            <Link 
+              href="/projects" 
+              className={cn(
+                buttonVariants({ variant: 'default' }),
+                "w-full sm:w-auto shadow-md hover:scale-105 transform transition-transform duration-150"
+              )}
+            >
+              Manage Projects
             </Link>
-            <Link href="/files" asChild>
-             <Button variant="secondary" className="w-full sm:w-auto shadow-md hover:scale-105 transform transition-transform duration-150">File Manager</Button>
+            <Link 
+              href="/files" 
+              className={cn(
+                buttonVariants({ variant: 'secondary' }),
+                "w-full sm:w-auto shadow-md hover:scale-105 transform transition-transform duration-150"
+              )}
+            >
+              File Manager
             </Link>
-             <Link href="/settings" asChild>
-             <Button variant="outline" className="w-full sm:w-auto shadow-md hover:scale-105 transform transition-transform duration-150">Settings</Button>
+             <Link 
+              href="/settings" 
+              className={cn(
+                buttonVariants({ variant: 'outline' }),
+                "w-full sm:w-auto shadow-md hover:scale-105 transform transition-transform duration-150"
+              )}
+            >
+              Settings
             </Link>
           </CardContent>
         </Card>
