@@ -1,6 +1,4 @@
 
-// REMOVED: "use server"; // This file exports schemas and types, not server actions.
-
 import { z } from "zod";
 
 export const userPopupSettingsSchema = z.object({
@@ -12,7 +10,7 @@ export const userPopupSettingsSchema = z.object({
 });
 
 export const userSettingsSchema = z.object({
-  debugMode: z.boolean().default(false),
+  // debugMode is now global, removed from user-specific settings
   popup: userPopupSettingsSchema.default({
     notificationDuration: 5,
     disableAllNotifications: false,
@@ -25,4 +23,5 @@ export const userSettingsSchema = z.object({
 export type UserSettingsData = z.infer<typeof userSettingsSchema>;
 export type UserPopupSettingsData = z.infer<typeof userPopupSettingsSchema>;
 
+// defaultUserSettings will be derived from the schema's defaults
 export const defaultUserSettings: UserSettingsData = userSettingsSchema.parse({});
