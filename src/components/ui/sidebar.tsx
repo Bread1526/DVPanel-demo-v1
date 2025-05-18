@@ -516,20 +516,21 @@ const SidebarMenuItem = React.forwardRef<
 ))
 SidebarMenuItem.displayName = "SidebarMenuItem"
 
-// Props for the new SidebarMenuItemLayout component
-interface SidebarMenuItemLayoutProps
-  extends React.ComponentPropsWithoutRef<"a"> { // Changed to extend <a> props
-  icon?: React.ElementType
-  label?: string
-  badgeContent?: React.ReactNode
-  showText?: boolean
-  isActive?: boolean // To control active styling
-  // asChild prop is explicitly destructured and ignored
-  asChild?: never; 
+// Props for the SidebarMenuItemLayout component
+interface SidebarMenuItemLayoutProps extends React.HTMLAttributes<HTMLDivElement> {
+  icon?: React.ElementType;
+  label?: string;
+  badgeContent?: React.ReactNode;
+  showText?: boolean;
+  // Explicitly remove props that should not be spread to the div
+  href?: never;
+  asChild?: never;
 }
 
+// This component is purely presentational, rendering a div.
+// The parent Link component will handle navigation and interactivity.
 export const SidebarMenuItemLayout = React.forwardRef<
-  HTMLAnchorElement, // Ref is for an anchor element
+  HTMLDivElement,
   SidebarMenuItemLayoutProps
 >(
   (
@@ -538,40 +539,33 @@ export const SidebarMenuItemLayout = React.forwardRef<
       label,
       badgeContent,
       showText,
-      isActive,
-      className,
-      children, // Children from Link asChild will be the content
-      asChild: _asChild, // Destructure and ignore asChild
-      ...props // Spread remaining props (like href, onClick from Link) onto the <a>
+      className, 
+      // Explicitly destructure and ignore Link/interactive props
+      href: _hrefIgnored,
+      asChild: _asChildIgnored,
+      ...otherProps // Spread any other valid div props
     },
     ref
   ) => {
-    // Renders an <a> tag, designed to work with Link asChild
     return (
-      <a 
+      <div
         ref={ref}
-        data-sidebar="menu-button" // Keep for potential styling hooks
-        data-active={isActive ? 'true' : undefined}
-        className={className} // className will be applied by AppShell's cva
-        {...props} // Spread href, onClick, etc. from Link
+        className={cn(
+          "flex w-full items-center gap-2 overflow-hidden", 
+          className 
+        )}
+        data-sidebar="menu-item-inner-layout" 
+        {...otherProps} 
       >
-        {/* Inner layout for icon, label, badge */}
-        <div
-          className={cn(
-            "flex w-full items-center gap-2 overflow-hidden",
-          )}
-          data-sidebar="menu-item-inner-layout" 
-        >
-          {Icon && <Icon className={cn("shrink-0 size-4")} />}
-          {showText && label && <span className="truncate">{label}</span>}
-          {showText && badgeContent}
-        </div>
-        {children} {/* This allows Link to correctly inject its functionality */}
-      </a>
+        {Icon && <Icon className={cn("shrink-0 size-4")} />}
+        {showText && label && <span className="truncate">{label}</span>}
+        {showText && badgeContent && <div className="ml-auto">{badgeContent}</div>}
+      </div>
     );
   }
 );
 SidebarMenuItemLayout.displayName = "SidebarMenuItemLayout";
+
 
 const SidebarMenuAction = React.forwardRef<
   HTMLButtonElement,
@@ -612,7 +606,7 @@ const SidebarMenuBadge = React.forwardRef<
     ref={ref}
     data-sidebar="menu-badge"
     className={cn(
-      "ml-auto flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-sidebar-foreground select-none pointer-events-none", // Added ml-auto
+      "flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums text-sidebar-foreground select-none pointer-events-none", 
       // These peer-data attributes refer to the parent Link/<a> tag
       "peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[active=true]/menu-button:text-sidebar-accent-foreground",
       "group-data-[state=collapsed]:group-data-[collapsible=icon]:hidden", 
@@ -728,6 +722,7 @@ export {
   SidebarMenuAction,
   SidebarMenuBadge,
   SidebarMenuItem,
+  SidebarMenuItemLayout, 
   SidebarMenuSkeleton,
   SidebarMenuSub,
   SidebarMenuSubButton,

@@ -12,7 +12,7 @@ import {
   SidebarTrigger,
   SidebarMenu,
   SidebarMenuItem,
-  SidebarMenuItemLayout, // Use the layout component
+  SidebarMenuItemLayout, // Using the presentational layout component
   SidebarMenuBadge,
   useSidebar,
 } from '@/components/ui/sidebar';
@@ -58,8 +58,7 @@ import { cva } from 'class-variance-authority';
 import ProfileDialog from '@/app/(app)/profile/components/profile-dialog';
 import { loadPanelSettings } from '@/app/(app)/settings/actions';
 import DebugOverlay from '@/components/debug-overlay';
-import LogsViewerDialog from '@/components/logs/LogsViewerDialog';
-import Image from 'next/image';
+import LogsViewerDialog from '@/components/logs/LogsViewerDialog'; 
 
 
 const navItemsBase = [
@@ -71,16 +70,16 @@ const navItemsBase = [
   { href: '/settings', label: 'Settings', icon: Settings, requiredPage: 'settings_area' },
 ];
 
-// Define CVA for Link styling here
+// CVA for Link styling (this will style the <a> tag rendered by Link)
 const linkAsButtonVariants = cva(
-  "flex w-full items-center gap-2 overflow-hidden rounded-md px-2 text-left text-sm outline-none ring-sidebar-ring transition-colors focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-data-[state=collapsed]:group-data-[collapsible=icon]:justify-center group-data-[state=collapsed]:group-data-[collapsible=icon]:size-8 group-data-[state=collapsed]:group-data-[collapsible=icon]:p-0",
+  "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md px-2 text-left text-sm outline-none ring-sidebar-ring transition-colors focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-data-[state=collapsed]:group-data-[collapsible=icon]:justify-center group-data-[state=collapsed]:group-data-[collapsible=icon]:size-8 group-data-[state=collapsed]:group-data-[collapsible=icon]:p-0",
   {
     variants: {
       variant: {
         default: "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
       },
       size: {
-        default: "h-8", // Default height
+        default: "h-8", 
       },
       isActive: {
         true: "bg-sidebar-primary text-sidebar-primary-foreground font-medium hover:bg-sidebar-primary/90",
@@ -112,6 +111,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const [isDebugOverlayOpen, setIsDebugOverlayOpen] = useState(false);
   const [isLogsViewerOpen, setIsLogsViewerOpen] = useState(false);
+  
+  const menuButtonRef = useRef<HTMLAnchorElement>(null); // Ref for the <a> tag rendered by Link
 
   useEffect(() => {
     setHasMounted(true);
@@ -121,25 +122,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (effectiveDebugMode) console.log('[AppShell] performLogout initiated.');
     startLogoutTransition(async () => {
       try {
-        await serverLogoutAction();
-        // Client-side state updates after server action
+        await serverLogoutAction(); // Server action now gets user info from session
         setCurrentUserData(null);
         setIsPageAccessGranted(false);
         if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
           router.push('/login?reason=user_initiated');
         }
       } catch (e: any) {
-        const isRedirectError = e.message === 'NEXT_REDIRECT' || (typeof e.digest === 'string' && e.digest.startsWith('NEXT_REDIRECT'));
+         const isRedirectError = e.message === 'NEXT_REDIRECT' || (typeof e.digest === 'string' && e.digest.startsWith('NEXT_REDIRECT'));
         if (isRedirectError) {
           if (effectiveDebugMode) console.log("[AppShell] Logout action triggered a redirect, which is expected.");
-           // NEXT_REDIRECT error means server handled the redirect, common in App Router.
-           // Client-side router.push might be redundant or even conflict if server already redirected.
-           // We still might want to clear client state.
         } else {
           const error = e instanceof Error ? e.message : String(e);
           console.error("[AppShell] Error calling server logout action:", error, e);
           toast({ title: "Logout Error", description: `Failed to logout: ${error}`, variant: "destructive" });
-           // Fallback cleanup and redirect if server action fails to redirect
           setCurrentUserData(null);
           setIsPageAccessGranted(false);
           if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
@@ -148,7 +144,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         }
       }
     });
-  }, [router, toast, effectiveDebugMode]);
+  }, [router, toast, effectiveDebugMode, startLogoutTransition]);
 
 
   const fetchUserAndCheckAccess = useCallback(async () => {
@@ -161,36 +157,35 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     try {
       const response = await fetch('/api/auth/user');
       const responseStatus = response.status;
-      if (effectiveDebugMode) console.log('[AppShell] /api/auth/user response status:', responseStatus);
+       if (effectiveDebugMode) console.log('[AppShell] /api/auth/user response status:', responseStatus);
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => "Could not read error response text.");
         if (effectiveDebugMode) console.warn(`[AppShell] /api/auth/user call failed. Status: ${responseStatus}. Response text:`, errorText);
-        performLogout(responseStatus === 401 ? 'unauthorized_api' : 'session_error_api');
+        performLogout(); 
         return;
       }
 
       const data = await response.json();
       if (data.user && data.user.status === 'Active') {
         setCurrentUserData(data.user);
-        setEffectiveDebugMode(data.user.globalDebugMode ?? false);
+        setEffectiveDebugMode(data.user.globalDebugMode ?? false); 
         setShowDebugOverlayToggle(data.user.globalDebugMode ?? false);
         if (effectiveDebugMode || data.user.globalDebugMode) {
           console.log('[AppShell] User data fetched successfully:', {
             id: data.user.id, username: data.user.username, role: data.user.role, status: data.user.status,
-            userSettingsDebug: data.user.userSettings?.debugMode,
             globalDebugModeApi: data.user.globalDebugMode,
           });
         }
       } else {
         if (effectiveDebugMode) console.warn('[AppShell] No active user data in response from /api/auth/user. User object:', data.user);
-        performLogout(data.user?.status === 'Inactive' ? 'account_inactive' : 'unauthorized_no_user_data');
+        performLogout();
       }
     } catch (error) {
       const e = error instanceof Error ? error : new Error(String(error));
       if (effectiveDebugMode) console.error("[AppShell] Error in fetchUserAndCheckAccess during API call:", e.message, e.stack);
       toast({ title: "Session Error", description: "Could not verify session. Please log in again.", variant: "destructive" });
-      performLogout('session_error_catch');
+      performLogout();
     } finally {
       setIsLoadingUser(false);
       if (effectiveDebugMode) console.log('[AppShell] fetchUserAndCheckAccess finished. isLoadingUser:', false);
@@ -209,7 +204,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!hasMounted || isLoadingUser || !effectiveUser) {
       if (effectiveDebugMode && !isLoadingUser && !effectiveUser && hasMounted) console.log('[AppShell] Page access check: No current user data or still loading, access not determined yet.');
-      setIsPageAccessGranted(null); // Set to null if still loading or no user
+      setIsPageAccessGranted(null); 
       return;
     }
     
@@ -224,19 +219,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     });
     const requiredPageId = currentNavItem?.requiredPage;
     
-    const globalDebugSetting = currentUserData?.globalDebugMode ?? false; 
-    if (globalDebugSetting) {
+    const userDebugMode = effectiveUser.globalDebugMode ?? false;
+    if (userDebugMode) {
         console.log(`[AppShell] Page access check for path: "${pathname}", topLevelPath: "${currentTopLevelPath}", effectiveUser role: "${effectiveUser.role}", requiredPageId: "${requiredPageId}"`);
     }
 
     if (effectiveUser.status === 'Inactive') {
       hasAccess = false;
-      if (globalDebugSetting) console.log('[AppShell] Page access: Denied (User Inactive)');
+      if (userDebugMode) console.log('[AppShell] Page access: Denied (User Inactive)');
     } else if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') {
       hasAccess = true;
-      if (globalDebugSetting) console.log('[AppShell] Page access: Granted (Owner/Administrator)');
+      if (userDebugMode) console.log('[AppShell] Page access: Granted (Owner/Administrator)');
     } else if (effectiveUser.role === 'Admin') {
-      const adminAllowedMainPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles'];
+      const adminAllowedMainPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles', 'logs_page']; 
       if (requiredPageId && requiredPageId === 'settings_area') {
         hasAccess = effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
          if (hasAccess && pathSegments[0] === 'settings' && pathSegments[1]) {
@@ -246,7 +241,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       } else {
         hasAccess = requiredPageId ? adminAllowedMainPages.includes(requiredPageId) : pathname === '/';
       }
-      if (globalDebugSetting) console.log(`[AppShell] Page access (Admin for ${requiredPageId || pathname}): ${hasAccess}`);
+      if (userDebugMode) console.log(`[AppShell] Page access (Admin for ${requiredPageId || pathname}): ${hasAccess}`);
     } else if (effectiveUser.role === 'Custom' && effectiveUser.assignedPages) {
       if (requiredPageId && requiredPageId === 'settings_area') {
         hasAccess = effectiveUser.assignedPages.includes('settings_area');
@@ -259,16 +254,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       } else {
          hasAccess = pathname === '/' && effectiveUser.assignedPages.includes('dashboard');
       }
-      if (globalDebugSetting) console.log(`[AppShell] Page access (Custom for ${requiredPageId || pathname}): ${hasAccess}`);
+      if (userDebugMode) console.log(`[AppShell] Page access (Custom for ${requiredPageId || pathname}): ${hasAccess}`);
     } else {
       hasAccess = false;
-      if (globalDebugSetting) console.log('[AppShell] Page access: Denied (Unknown role or no assigned pages)');
+      if (userDebugMode) console.log('[AppShell] Page access: Denied (Unknown role or no assigned pages)');
     }
 
     setIsPageAccessGranted(hasAccess);
-     if (globalDebugSetting) console.log(`[AppShell] Final isPageAccessGranted set to: ${hasAccess} for path ${pathname}`);
+     if (userDebugMode) console.log(`[AppShell] Final isPageAccessGranted set to: ${hasAccess} for path ${pathname}`);
 
-  }, [isLoadingUser, effectiveUser, pathname, hasMounted, currentUserData?.globalDebugMode]);
+  }, [isLoadingUser, effectiveUser, pathname, hasMounted]);
 
 
   const navItems = React.useMemo(() => {
@@ -277,9 +272,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return navItemsBase.filter(item => {
       if (effectiveUser.role === 'Owner' || effectiveUser.role === 'Administrator') return true;
       if (effectiveUser.role === 'Admin') {
-         const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles'];
+         const adminAllowedPages = ['dashboard', 'projects_page', 'files', 'ports', 'roles', 'logs_page'];
          if (item.requiredPage === 'settings_area') {
-             return false; 
+             return effectiveUser.allowedSettingsPages && effectiveUser.allowedSettingsPages.length > 0;
          }
         return item.requiredPage ? adminAllowedPages.includes(item.requiredPage) : true;
       }
@@ -289,8 +284,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       return false;
     });
   }, [effectiveUser, hasMounted]);
-  
-  const menuButtonRef = useRef<HTMLAnchorElement>(null);
 
   const handleSettingsUpdated = useCallback(() => {
     if (effectiveDebugMode) console.log("[AppShell] Profile settings updated, refetching user data.");
@@ -299,7 +292,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const getIsActive = useCallback((itemHref: string): boolean => {
     if (!hasMounted) return false;
-    // For dashboard, exact match. For settings, match prefix. For others, prefix match.
     if (itemHref === '/') return pathname === '/';
     if (itemHref === '/settings') return pathname === '/settings' || pathname.startsWith('/settings/');
     return pathname.startsWith(itemHref);
@@ -365,9 +357,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
            <Link href="/" className="block group mx-auto">
              <motion.div
                 className="w-full max-w-[200px] rounded-lg flex flex-col items-center justify-center cursor-pointer text-center transition-all duration-150 ease-out group-hover:tracking-normal"
-                whileHover={{
-                  scale: 1.03,
-                }}
+                whileHover={{ scale: 1.03, }}
                 transition={{ duration: 0.2, ease: "circOut" }}
               >
                 <h2 className="text-sm font-medium text-slate-300 group-hover:text-slate-200 transition-colors duration-200 mb-0.5">
@@ -390,28 +380,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               const showTextForLayout = hasMounted && (!isMobile && sidebarState === 'expanded' || isMobile);
               const showTooltip = hasMounted && sidebarState === 'collapsed' && !isMobile && item.label;
 
-              const menuButtonContent = (
-                <SidebarMenuItemLayout
-                  icon={item.icon}
-                  label={item.label}
-                  badgeContent={item.count != null && item.count > 0 ? <SidebarMenuBadge>{item.count}</SidebarMenuBadge> : undefined}
-                  showText={showTextForLayout}
-                />
-              );
-
-              const linkElement = (
-                 <Link
+              // Link now renders its own <a> and takes styling.
+              // SidebarMenuItemLayout is a child for content.
+              const linkComponent = (
+                <Link
                   href={item.href}
-                  asChild // Link will pass props to SidebarMenuItemLayout
-                  className={cn(linkAsButtonVariants({ isActive }))} 
+                  ref={menuButtonRef} // Apply ref to Link, which forwards to its <a>
+                  className={cn(linkAsButtonVariants({ isActive, size: 'default', variant: 'default' }))}
+                  // No asChild, Link renders its own <a>
                 >
                   <SidebarMenuItemLayout
                     icon={item.icon}
                     label={item.label}
                     badgeContent={item.count != null && item.count > 0 ? <SidebarMenuBadge>{item.count}</SidebarMenuBadge> : undefined}
                     showText={showTextForLayout}
-                    isActive={isActive} // Pass isActive for internal styling if SidebarMenuItemLayout handles it
-                    // Spread other Link props if SidebarMenuItemLayout is an <a>
                   />
                 </Link>
               );
@@ -421,8 +403,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <SidebarMenuItem key={item.label}>
                     <TooltipProvider>
                       <Tooltip>
-                        <TooltipTrigger asChild>
-                           {linkElement}
+                        <TooltipTrigger asChild> 
+                           {linkComponent}
                         </TooltipTrigger>
                         <TooltipContent side="right" align="center">
                           <p>{item.label}</p>
@@ -435,7 +417,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
               return (
                 <SidebarMenuItem key={item.label}>
-                   {linkElement}
+                   {linkComponent}
                 </SidebarMenuItem>
               );
             })}
