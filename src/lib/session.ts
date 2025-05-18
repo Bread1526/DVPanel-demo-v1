@@ -1,14 +1,15 @@
 // src/lib/session.ts
 import type { IronSessionOptions } from 'iron-session';
-import type { UserData } from '@/app/(app)/roles/types'; // Updated path
+import type { UserData } from '@/app/(app)/roles/types';
 import type { UserSettingsData } from './user-settings';
+import type { PanelSettingsData } from '@/app/(app)/settings/types';
 
 // Define the shape of the data stored in the session (cookie)
 export interface SessionData {
   isLoggedIn: boolean;
   userId?: string;
   username?: string;
-  role?: UserData['role'] | 'Owner'; // Allow for the special 'Owner' role
+  role?: UserData['role'] | 'Owner';
   lastActivity?: number;
   // Store global panel settings for session inactivity at the time of login
   sessionInactivityTimeoutMinutes?: number;
@@ -24,16 +25,19 @@ export type AuthenticatedUser = {
   assignedPages?: string[];
   allowedSettingsPages?: string[];
   status?: 'Active' | 'Inactive';
-  userSettings?: UserSettingsData;
+  userSettings?: UserSettingsData; // User-specific settings
   globalDebugMode?: boolean; // From global panel settings
+  panelSettings?: PanelSettingsData; // Include global panel settings
 };
 
 // Define the shape of the server-side session files ({username}-{role}-Auth.json)
+// This file primarily tracks activity and specific session timeout settings.
+// The iron-session cookie acts as the proof of an active session.
 export type FileSessionData = {
-  userId: string;
+  userId: string; // To link back to the main user profile
   username: string;
-  role: UserData['role'] | 'Owner';
-  token: string; // The unique session token stored in this file
+  role: string;
+  token: string; // A unique session token stored in this file
   createdAt: number;
   lastActivity: number;
   sessionInactivityTimeoutMinutes: number; // The timeout active for THIS session
@@ -65,7 +69,8 @@ if (!sessionPassword || sessionPassword.length < 32) {
     'TROUBLESHOOTING:\n' +
     '1. Ensure .env.local is in the project ROOT.\n' +
     '2. Ensure SESSION_PASSWORD in .env.local is AT LEAST 32 characters long and NOT commented out.\n' +
-    '3. COMPLETELY RESTART your Next.js development server after correcting .env.local.\n';
+    '3. COMPLETELY RESTART your Next.js development server after correcting .env.local.\n' +
+    '-----------------------------------------------------------------------------------\n';
   console.error(errorMessage);
   // This will halt server startup if the password is not configured correctly.
   throw new Error("FATAL: SESSION_PASSWORD is not configured correctly. Halting server startup. Please check your .env.local file and server logs.");
@@ -75,9 +80,9 @@ export const sessionOptions: IronSessionOptions = {
   cookieName: process.env.SESSION_COOKIE_NAME || 'dvpanel_session_v2',
   password: sessionPassword, // Ensured by the check above
   cookieOptions: {
-    secure: true, // IMPORTANT: Must be true if sameSite='none'. Assumes HTTPS.
+    secure: true, // FORCE TRUE: Required for SameSite=None, and dev URL is HTTPS.
     httpOnly: true,
-    sameSite: 'none', // IMPORTANT: For cross-site contexts like cloud IDEs. Requires Secure=true.
+    sameSite: 'none', // FORCE 'none': Critical for cross-site contexts like cloud IDEs. Requires Secure=true.
     // maxAge: undefined by default (session cookie), or set for "keep me logged in" in login action
     path: '/',
   },
@@ -95,4 +100,5 @@ if (process.env.NODE_ENV === 'development' || (process.env.DVSPANEL_DEBUG_LOGGIN
         : 'NOT SET IN OPTIONS OBJECT (this should not happen if startup checks passed)',
     }
   );
+  console.log('[SessionConfig] Effective cookieOptions being used:', sessionOptions.cookieOptions);
 }
