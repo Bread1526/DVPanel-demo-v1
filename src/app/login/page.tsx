@@ -1,8 +1,9 @@
 
 "use client";
 
-import React, { useEffect, useState } from 'react'; // Added useState
+import React, { useEffect, useState, useTransition } from 'react';
 import { useActionState } from 'react';
+import Image from 'next/image'; // Added Image import
 import { login, type LoginState } from './actions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,19 +14,20 @@ import { useToast } from '@/hooks/use-toast';
 import { Replace, AlertCircle, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useSearchParams, useRouter } from 'next/navigation';
+import type { LoginFormData } from './types';
 
 const initialLoginState: LoginState = { message: "", status: "idle", errors: {} };
 
 export default function LoginPage() {
-  const [formState, formAction, isPending] = useActionState(login, initialLoginState);
+  const [formState, formActionOriginal, isActionPending] = useActionState(login, initialLoginState);
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const router = useRouter();
   
   const [reasonMessage, setReasonMessage] = useState<string | null>(null);
+  const [isTransitionPending, startTransition] = useTransition();
 
   useEffect(() => {
-    // Handle redirect reasons from URL
     const reason = searchParams.get('reason');
     if (reason) {
         if (reason === 'inactive') {
@@ -35,7 +37,7 @@ export default function LoginPage() {
         } else if (reason === 'settings_changed') {
             setReasonMessage("Settings updated. Please log in again.");
         }
-        // Clean the reason from URL to prevent re-showing on refresh/re-render without a new redirect
+        
         const newUrl = new URL(window.location.href);
         newUrl.searchParams.delete('reason');
         router.replace(newUrl.toString(), { scroll: false });
@@ -44,21 +46,21 @@ export default function LoginPage() {
 
 
   useEffect(() => {
-    if (formState.status === "success" && formState.sessionInfo) {
+    // Client-side console log for debugging formState changes
+    console.log('Login formState changed:', formState);
+
+    if (formState.status === "success") {
       toast({
         title: "Login Successful",
         description: formState.message,
       });
-      // Store session info in localStorage
-      localStorage.setItem('dvpanel-session', JSON.stringify(formState.sessionInfo));
-      
-      const redirectUrlParam = searchParams.get('redirect'); // Get redirect from current searchParams
-      const destination = redirectUrlParam || '/'; // Default to dashboard
-      router.push(destination);
+      // The server action now handles redirection, so client-side redirect is removed.
+    } else if (formState.status === "error" || formState.status === "validation_failed") {
+      // Check for field-specific errors first
+      const hasFieldErrors = (formState.errors?.username && formState.errors.username.length > 0) ||
+                             (formState.errors?.password && formState.errors.password.length > 0);
 
-    } else if ((formState.status === "error" || formState.status === "validation_failed") && formState.message) {
-      // Display field-specific errors if available, otherwise the general message
-      if (!formState.errors?.username && !formState.errors?.password && !formState.errors?._form) {
+      if (!hasFieldErrors && formState.message) { // Only show generic toast if no field errors are displayed by the form
         toast({
           title: "Login Failed",
           description: formState.message,
@@ -66,18 +68,38 @@ export default function LoginPage() {
         });
       }
     }
-  }, [formState, toast, router, searchParams]);
+  }, [formState, toast, router]);
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    startTransition(() => {
+      formActionOriginal(formData);
+    });
+  };
+
 
   return (
     <Card className="w-full max-w-md shadow-2xl rounded-xl">
-      <CardHeader className="space-y-1 text-center">
+      <div className="p-6 pb-0 flex justify-center">
+        <Image
+          src="https://placehold.co/300x75.png"
+          alt="DVPanel Banner"
+          width={300}
+          height={75}
+          className="rounded-md object-cover"
+          data-ai-hint="animated banner technology"
+          priority
+        />
+      </div>
+      <CardHeader className="space-y-1 text-center pt-4">
         <div className="flex justify-center items-center mb-4">
           <Replace size={48} className="text-primary" />
         </div>
         <CardTitle className="text-3xl font-bold">Welcome to DVPanel</CardTitle>
         <CardDescription>Enter your credentials to access your dashboard.</CardDescription>
       </CardHeader>
-      <form action={formAction}>
+      <form onSubmit={handleSubmit}>
         <CardContent className="space-y-6">
           {reasonMessage && (
             <Alert variant="default" className="bg-primary/10 border-primary/30">
@@ -90,7 +112,7 @@ export default function LoginPage() {
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertTitle>Login Error</AlertTitle>
-              <AlertDescription>{formState.errors._form.join(', ')}</AlertDescription>
+              <AlertDescription>{formState.errors._form.join('; ')}</AlertDescription>
             </Alert>
           )}
           <div className="space-y-2">
@@ -127,17 +149,18 @@ export default function LoginPage() {
               htmlFor="keepLoggedIn"
               className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
             >
-              Keep me logged in (Not functional with file-based sessions)
+              Keep me logged in
             </Label>
           </div>
           {searchParams.get('redirect') && <input type="hidden" name="redirectUrl" value={searchParams.get('redirect')!} />}
         </CardContent>
         <CardFooter className="flex flex-col">
-          <Button type="submit" className="w-full text-lg py-6 shadow-md hover:scale-105 transform transition-transform duration-150" disabled={isPending}>
-            {isPending ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : "Log In"}
+          <Button type="submit" className="w-full text-lg py-6 shadow-md hover:scale-105 transform transition-transform duration-150" disabled={isActionPending || isTransitionPending}>
+            {(isActionPending || isTransitionPending) ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : "Log In"}
           </Button>
         </CardFooter>
       </form>
     </Card>
   );
 }
+
