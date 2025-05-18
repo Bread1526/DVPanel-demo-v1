@@ -38,11 +38,10 @@ export default function LoginPage() {
       setEasterEggActive(true);
       setTimeout(() => {
         setEasterEggActive(false);
-        setClickCount(0); // Reset click count after easter egg
-      }, 1000); // Flash duration
+        setClickCount(0); 
+      }, 1000); 
     }
   };
-
 
   useEffect(() => {
     const reason = searchParams.get('reason');
@@ -69,15 +68,11 @@ export default function LoginPage() {
 
   useEffect(() => {
     // Client-side console log for debugging formState changes
-    if (process.env.NODE_ENV === 'development') {
-     // console.log('Login formState changed:', formState);
-    }
+     if (process.env.NODE_ENV === 'development') {
+      console.log('Login formState changed:', formState);
+     }
 
-    if (formState.status === "success" && formState.message.startsWith("Login successful!")) {
-        // Redirect is handled by the server action itself. No client-side redirect needed here.
-        // Toast might be redundant if redirect happens quickly.
-        // toast({ title: "Login Success", description: formState.message });
-    } else if (formState.status === "error" || formState.status === "validation_failed") {
+    if (formState.status === "error" || formState.status === "validation_failed") {
       let mainErrorMessage = formState.message;
       let hasFieldErrors = false;
 
@@ -85,11 +80,10 @@ export default function LoginPage() {
         if (formState.errors.username && formState.errors.username.length > 0) hasFieldErrors = true;
         if (formState.errors.password && formState.errors.password.length > 0) hasFieldErrors = true;
         if (formState.errors._form && formState.errors._form.length > 0) {
-          mainErrorMessage = formState.errors._form.join('; ');
+           mainErrorMessage = formState.errors._form.join('; ');
         }
       }
       
-      // Only show generic toast if there are no specific field errors displayed OR if it's a form-level error
       if ((!hasFieldErrors && mainErrorMessage) || (formState.errors?._form && formState.errors._form.length > 0)) {
         toast({
           title: "Login Failed",
@@ -103,11 +97,10 @@ export default function LoginPage() {
   const handleSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    // Get form values directly for clarity if not using FormData for all fields
     const username = String(formData.get("username") ?? "");
     const password = String(formData.get("password") ?? "");
     const keepLoggedIn = formData.get("keepLoggedIn") === "on";
-    const redirect = searchParams.get('redirect') || "/"; // Get redirectUrl from searchParams
+    const redirect = searchParams.get('redirect') || "/";
 
     const dataToSubmit = new FormData();
     dataToSubmit.append("username", username);
@@ -116,7 +109,6 @@ export default function LoginPage() {
         dataToSubmit.append("keepLoggedIn", "on");
     }
     dataToSubmit.append("redirectUrl", redirect);
-
 
     startTransition(() => {
       formAction(dataToSubmit);
@@ -129,21 +121,19 @@ export default function LoginPage() {
     <Card className="w-full max-w-md shadow-2xl rounded-xl bg-card/80 backdrop-blur-sm border-border/30">
       <CardHeader className="space-y-2 text-center pt-6 pb-4">
         <motion.div
-          className="w-full max-w-[350px] h-[80px] rounded-lg bg-gradient-to-br from-slate-800 via-slate-900 to-background p-4 shadow-lg flex flex-col items-center justify-center cursor-pointer group opacity-90"
+          className="w-full max-w-[350px] rounded-lg flex flex-col items-center justify-center cursor-pointer group mx-auto" // Centered, no fixed height, no bg, no shadow, no padding
           whileHover={{
-            scale: 1.02,
-            boxShadow: "0px 10px 25px -5px rgba(0,0,0,0.4)",
+            // Removed box shadow hover from the container
           }}
           transition={{ duration: 0.2, ease: "circOut" }}
-          initial={{ boxShadow: "0px 5px 15px -3px rgba(0,0,0,0.3)" }}
           onClick={handleBannerClick}
         >
-          <h2 className="text-sm font-medium text-slate-400 group-hover:text-slate-300 transition-colors duration-200">
+          <h2 className="text-lg font-medium text-slate-300 group-hover:text-slate-200 transition-colors duration-200 mb-1">
             Welcome to
           </h2>
           <h1 
             className={cn(
-              "text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary via-sky-400 to-cyan-300 tracking-tight select-none text-center transition-all duration-150 ease-out group-hover:scale-110 group-hover:tracking-normal group-hover:drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]",
+              "text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary via-sky-400 to-cyan-300 tracking-tight select-none text-center transition-all duration-150 ease-out group-hover:scale-110 group-hover:tracking-normal group-hover:drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]", // Enhanced hover
               easterEggActive && "animate-pulse !bg-gradient-to-r !from-purple-500 !via-pink-500 !to-accent"
             )}
           >
@@ -215,4 +205,3 @@ export default function LoginPage() {
     </Card>
   );
 }
-
