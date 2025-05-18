@@ -9,13 +9,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { MoreHorizontal, Edit, Trash2, AlertCircle, Loader2, Eye, UserPlus, UserCog, Menu, X } from "lucide-react";
+import { Edit, Trash2, AlertCircle, Loader2, Eye, UserPlus, UserCog } from "lucide-react";
 import { loadUsers, deleteUser, startImpersonation as startImpersonationAction, type UserData, type UserActionState } from "./actions";
 import { useToast } from "@/hooks/use-toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription as AlertDialogCoreDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle as AlertDialogCoreTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogClose, DialogFooter as DialogCoreFooter, DialogContent as DialogCoreContent, DialogHeader as DialogCoreHeader, DialogTitle as DialogCoreTitle, DialogDescription as DialogCoreDescription} from "@/components/ui/dialog"; 
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 const AddUserRoleDialog = dynamic(() => import('./components/add-user-role-dialog'), {
   loading: () => (
@@ -66,8 +66,6 @@ export default function RolesPage() {
 
   const [primedUserId, setPrimedUserId] = useState<string | null>(null);
   const [openDropdownUserId, setOpenDropdownUserId] = useState<string | null>(null);
-  const dropdownMenuRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map());
-
 
   const fetchUsers = useCallback(async () => {
     setIsLoading(true);
@@ -118,39 +116,62 @@ export default function RolesPage() {
   };
 
   const handleUserChange = useCallback(async () => { 
-    await fetchUsers(); // Refetch all users
-    if (userToViewDetails) { 
+    await fetchUsers(); 
+    if (userToViewDetails && users.length > 0) { 
         const updatedUser = users.find(u => u.id === userToViewDetails.id);
         setUserToViewDetails(updatedUser || null); 
+    } else if (userToViewDetails && users.length === 0) {
+      setUserToViewDetails(null); // Clear if users list became empty
     }
-  }, [fetchUsers, userToViewDetails, users]); // Added users to dependency array
+  }, [fetchUsers, userToViewDetails, users]); 
 
   const findNameById = (id: string, list: {id: string, name: string}[]) => list.find(item => item.id === id)?.name || id;
 
-  const handleActionButtonClick = (userId: string) => {
+  const handleRowClick = (userId: string) => {
+    const targetUser = users.find(u => u.id === userId);
+    if (!targetUser) return;
+
+    if (openDropdownUserId === userId) {
+      // If clicking the row whose menu is already open, let onOpenChange handle closing.
+      // Or, if we want click on row to toggle:
+      // setOpenDropdownUserId(null); 
+      // setPrimedUserId(null);
+      return;
+    }
+  
     if (primedUserId === userId) {
-      // This is the second click on the same button
-      setOpenDropdownUserId(userId); // Open the dropdown
-      setPrimedUserId(null); // Reset primed state
+      // Second click on a primed row: open its menu
+      setOpenDropdownUserId(userId);
+      setPrimedUserId(null); // Unprime after opening
     } else {
-      // This is the first click, or a click on a different button
-      setOpenDropdownUserId(null); // Close any other open dropdown
-      setPrimedUserId(userId); // Prime this button
+      // First click on a new row (or different row)
+      setOpenDropdownUserId(null); // Close any currently open menu
+      setPrimedUserId(userId);     // Prime the new row
+      toast({
+        title: `User: ${targetUser.username}`,
+        description: "Click row again for actions.",
+        duration: 2000,
+      });
     }
   };
 
   const onDropdownOpenChange = (isOpen: boolean, userId: string) => {
     if (!isOpen) {
-      setOpenDropdownUserId(null);
-      if (primedUserId === userId) { // If it was primed and closed without opening fully via second click
-         setPrimedUserId(null);
+      if (openDropdownUserId === userId) { 
+          setOpenDropdownUserId(null);
       }
+      // If a menu is closed by clicking outside or pressing Esc,
+      // and it was the primed one, unprime it.
+      // If another row was primed, this will keep it primed.
+      // For simplicity, if any menu closes, and it wasn't just opened by a second click, clear priming.
+      setPrimedUserId(null); 
+    } else {
+      setOpenDropdownUserId(userId);
+      setPrimedUserId(null); // Unprime once menu is opened
     }
   };
 
-
   return (
-    <TooltipProvider>
       <div>
         <PageHeader 
           title="User Roles & Permissions" 
@@ -178,7 +199,7 @@ export default function RolesPage() {
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle>User List</CardTitle>
-              <CardDescription>All registered users and their assigned roles (excluding the system Owner).</CardDescription>
+              <CardDescription>All registered users and their assigned roles (excluding the system Owner). Click a row twice for actions.</CardDescription>
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -196,87 +217,81 @@ export default function RolesPage() {
                       <TableHead>Username</TableHead>
                       <TableHead>Role</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                      {/* Removed Actions TableHead */}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {users.map((user) => (
-                      <TableRow key={user.id}>
-                        <TableCell className="font-medium">{user.username}</TableCell>
-                        <TableCell>
-                          <Badge variant={user.role === 'Administrator' ? 'secondary' : 'outline'}>
-                            {user.role}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge 
-                            variant={user.status === 'Active' ? 'default' : 'destructive'} 
-                            className={user.status === 'Active' ? 'bg-green-500/20 text-green-700 dark:bg-green-500/10 dark:text-green-400 border-green-500/30' : ''}
+                      <DropdownMenu
+                        key={user.id}
+                        open={openDropdownUserId === user.id}
+                        onOpenChange={(isOpen) => onDropdownOpenChange(isOpen, user.id)}
+                      >
+                        <DropdownMenuTrigger asChild>
+                          <TableRow
+                            onClick={() => handleRowClick(user.id)}
+                            className={cn(
+                              "cursor-pointer transition-colors",
+                              primedUserId === user.id && openDropdownUserId !== user.id && "bg-muted/70 ring-1 ring-primary/50",
+                              openDropdownUserId === user.id && "bg-accent hover:bg-accent/90"
+                            )}
                           >
-                            {user.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                           <DropdownMenu open={openDropdownUserId === user.id} onOpenChange={(isOpen) => onDropdownOpenChange(isOpen, user.id)}>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <DropdownMenuTrigger asChild>
-                                  <Button 
-                                    variant="ghost" 
-                                    size="icon" 
-                                    className="shadow-md hover:scale-105 transform transition-transform duration-150"
-                                    onClick={() => handleActionButtonClick(user.id)}
-                                    ref={el => dropdownMenuRefs.current.set(user.id, el)}
-                                  >
-                                    {primedUserId === user.id && openDropdownUserId !== user.id ? <Menu className="h-4 w-4" /> : <MoreHorizontal className="h-4 w-4" />}
-                                  </Button>
-                                </DropdownMenuTrigger>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{primedUserId === user.id && openDropdownUserId !== user.id ? "Click again to open actions" : "View actions"}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onSelect={() => { setUserToViewDetails(user); setOpenDropdownUserId(null); setPrimedUserId(null); }}>
-                                <Eye className="mr-2 h-4 w-4" /> View Details
-                              </DropdownMenuItem>
-                              
-                              {AddUserRoleDialog && <AddUserRoleDialog 
-                                isEditing={true} 
-                                userData={user} 
-                                onUserChange={() => { handleUserChange(); setOpenDropdownUserId(null); setPrimedUserId(null); }}
-                                triggerButton={
-                                  <DropdownMenuItem onSelect={(e) => e.preventDefault()}> 
-                                    <Edit className="mr-2 h-4 w-4" /> Edit User / Role
-                                  </DropdownMenuItem>
-                                }
-                              />}
-                              
-                              {user.role !== 'Owner' && user.status === 'Active' && ( // Owners cannot be impersonated, inactive users cannot be impersonated
-                                <DropdownMenuItem 
-                                    onSelect={() => { handleStartImpersonation(user.id); setOpenDropdownUserId(null); setPrimedUserId(null); }}
-                                    disabled={isPendingImpersonation}
-                                >
-                                    {isPendingImpersonation ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserCog className="mr-2 h-4 w-4" />}
-                                    Impersonate User
+                            <TableCell className="font-medium">{user.username}</TableCell>
+                            <TableCell>
+                              <Badge variant={user.role === 'Administrator' ? 'secondary' : 'outline'}>
+                                {user.role}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge 
+                                variant={user.status === 'Active' ? 'default' : 'destructive'} 
+                                className={user.status === 'Active' ? 'bg-green-500/20 text-green-700 dark:bg-green-500/10 dark:text-green-400 border-green-500/30' : ''}
+                              >
+                                {user.status}
+                              </Badge>
+                            </TableCell>
+                            {/* Removed original action button TableCell */}
+                          </TableRow>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                          <DropdownMenuItem onSelect={() => { setUserToViewDetails(user); setOpenDropdownUserId(null); setPrimedUserId(null); }}>
+                            <Eye className="mr-2 h-4 w-4" /> View Details
+                          </DropdownMenuItem>
+                          
+                          {AddUserRoleDialog && (
+                            <AddUserRoleDialog 
+                              isEditing={true} 
+                              userData={user} 
+                              onUserChange={() => { handleUserChange(); setOpenDropdownUserId(null); setPrimedUserId(null); }}
+                              triggerButton={
+                                <DropdownMenuItem onSelect={(e) => e.preventDefault()}> 
+                                  <Edit className="mr-2 h-4 w-4" /> Edit User / Role
                                 </DropdownMenuItem>
-                              )}
+                              }
+                            />
+                          )}
+                          
+                          {user.status === 'Active' && (
+                            <DropdownMenuItem 
+                                onSelect={() => { handleStartImpersonation(user.id); setOpenDropdownUserId(null); setPrimedUserId(null); }}
+                                disabled={isPendingImpersonation}
+                            >
+                                {isPendingImpersonation ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserCog className="mr-2 h-4 w-4" />}
+                                Impersonate User
+                            </DropdownMenuItem>
+                          )}
 
-                              {user.role !== 'Owner' && ( // Owner cannot be deleted
-                                <>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem 
-                                    className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground"
-                                    onSelect={(e) => { e.preventDefault(); setUserToDelete(user); setOpenDropdownUserId(null); setPrimedUserId(null); }}
-                                  >
-                                    <Trash2 className="mr-2 h-4 w-4" /> Delete User
-                                  </DropdownMenuItem>
-                                </>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem 
+                              className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground"
+                              onSelect={(e) => { e.preventDefault(); setUserToDelete(user); setOpenDropdownUserId(null); setPrimedUserId(null); }}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" /> Delete User
+                            </DropdownMenuItem>
+                          </>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     ))}
                   </TableBody>
                 </Table>
@@ -399,6 +414,5 @@ export default function RolesPage() {
           )}
         </AlertDialog>
       </div>
-    </TooltipProvider>
   );
 }
