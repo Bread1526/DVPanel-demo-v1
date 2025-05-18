@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useEffect, useState, useTransition } from 'react';
+import React, { useEffect, useState, useTransition, useCallback } from 'react';
 import { useActionState } from 'react';
 import { motion } from "framer-motion";
 import { login } from './actions';
@@ -15,6 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { cn } from '@/lib/utils';
 
 const initialLoginState: LoginState = { message: "", status: "idle", errors: {} };
 
@@ -27,20 +28,38 @@ export default function LoginPage() {
   const [reasonMessage, setReasonMessage] = useState<string | null>(null);
   const [isTransitionPending, startTransition] = useTransition();
 
+  const [clickCount, setClickCount] = useState(0);
+  const [easterEggActive, setEasterEggActive] = useState(false);
+
+  const handleBannerClick = () => {
+    const newClickCount = clickCount + 1;
+    setClickCount(newClickCount);
+    if (newClickCount === 3) {
+      setEasterEggActive(true);
+      setTimeout(() => {
+        setEasterEggActive(false);
+        setClickCount(0); // Reset click count after easter egg
+      }, 1000); // Flash duration
+    }
+  };
+
+
   useEffect(() => {
     const reason = searchParams.get('reason');
     if (reason) {
+      let message = "Please log in to continue.";
       if (reason === 'inactive') {
-        setReasonMessage("You have been logged out due to inactivity.");
+        message = "You have been logged out due to inactivity.";
       } else if (reason === 'unauthorized') {
-        setReasonMessage("You need to log in to access this page.");
+        message = "You need to log in to access this page.";
       } else if (reason === 'settings_changed') {
-        setReasonMessage("Settings updated. Please log in again.");
+        message = "Settings updated. Please log in again.";
       } else if (reason === 'session_error_api' || reason === 'session_error_catch' || reason === 'unauthorized_no_user_data') {
-        setReasonMessage("Your session has expired or is invalid. Please log in again.");
+        message = "Your session has expired or is invalid. Please log in again.";
       } else if (reason === 'account_inactive') {
-        setReasonMessage("Your account is inactive. Please contact an administrator.");
+        message = "Your account is inactive. Please contact an administrator.";
       }
+      setReasonMessage(message);
       
       const current = new URL(window.location.href);
       current.searchParams.delete('reason');
@@ -51,10 +70,14 @@ export default function LoginPage() {
   useEffect(() => {
     // Client-side console log for debugging formState changes
     if (process.env.NODE_ENV === 'development') {
-      console.log('Login formState changed:', formState);
+     // console.log('Login formState changed:', formState);
     }
 
-    if (formState.status === "error" || formState.status === "validation_failed") {
+    if (formState.status === "success" && formState.message.startsWith("Login successful!")) {
+        // Redirect is handled by the server action itself. No client-side redirect needed here.
+        // Toast might be redundant if redirect happens quickly.
+        // toast({ title: "Login Success", description: formState.message });
+    } else if (formState.status === "error" || formState.status === "validation_failed") {
       let mainErrorMessage = formState.message;
       let hasFieldErrors = false;
 
@@ -66,55 +89,76 @@ export default function LoginPage() {
         }
       }
       
-      if (!hasFieldErrors && mainErrorMessage) {
+      // Only show generic toast if there are no specific field errors displayed OR if it's a form-level error
+      if ((!hasFieldErrors && mainErrorMessage) || (formState.errors?._form && formState.errors._form.length > 0)) {
         toast({
           title: "Login Failed",
-          description: mainErrorMessage,
+          description: mainErrorMessage || "Please check your credentials.",
           variant: "destructive",
         });
       }
     }
   }, [formState, toast]);
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+    // Get form values directly for clarity if not using FormData for all fields
+    const username = String(formData.get("username") ?? "");
+    const password = String(formData.get("password") ?? "");
+    const keepLoggedIn = formData.get("keepLoggedIn") === "on";
+    const redirect = searchParams.get('redirect') || "/"; // Get redirectUrl from searchParams
+
+    const dataToSubmit = new FormData();
+    dataToSubmit.append("username", username);
+    dataToSubmit.append("password", password);
+    if (keepLoggedIn) {
+        dataToSubmit.append("keepLoggedIn", "on");
+    }
+    dataToSubmit.append("redirectUrl", redirect);
+
+
     startTransition(() => {
-      formAction(formData);
+      formAction(dataToSubmit);
     });
-  };
+  }, [formAction, startTransition, searchParams]);
 
   const isFormProcessing = isActionPending || isTransitionPending;
 
   return (
-    <Card className="w-full max-w-md shadow-2xl rounded-xl">
+    <Card className="w-full max-w-md shadow-2xl rounded-xl bg-card/80 backdrop-blur-sm border-border/30">
       <CardHeader className="space-y-2 text-center pt-6 pb-4">
-        <div className="flex justify-center mb-3">
-          <motion.div
-            className="w-full max-w-[350px] h-[80px] rounded-lg bg-gradient-to-br from-slate-700 via-slate-800 to-slate-900 p-4 shadow-lg flex items-center justify-center cursor-default group opacity-95"
-            whileHover={{
-              scale: 1.02,
-              boxShadow: "0px 8px 20px -3px rgba(0,0,0,0.35)",
-            }}
-            transition={{ duration: 0.2, ease: "circOut" }}
-            initial={{ boxShadow: "0px 5px 15px -3px rgba(0,0,0,0.3)" }}
+        <motion.div
+          className="w-full max-w-[350px] h-[80px] rounded-lg bg-gradient-to-br from-slate-800 via-slate-900 to-background p-4 shadow-lg flex flex-col items-center justify-center cursor-pointer group opacity-90"
+          whileHover={{
+            scale: 1.02,
+            boxShadow: "0px 10px 25px -5px rgba(0,0,0,0.4)",
+          }}
+          transition={{ duration: 0.2, ease: "circOut" }}
+          initial={{ boxShadow: "0px 5px 15px -3px rgba(0,0,0,0.3)" }}
+          onClick={handleBannerClick}
+        >
+          <h2 className="text-sm font-medium text-slate-400 group-hover:text-slate-300 transition-colors duration-200">
+            Welcome to
+          </h2>
+          <h1 
+            className={cn(
+              "text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary via-sky-400 to-cyan-300 tracking-tight select-none text-center transition-all duration-150 ease-out group-hover:scale-110 group-hover:tracking-normal group-hover:drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]",
+              easterEggActive && "animate-pulse !bg-gradient-to-r !from-purple-500 !via-pink-500 !to-accent"
+            )}
           >
-            <h1 
-              className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary via-sky-400 to-cyan-300 tracking-tight select-none text-center transition-all duration-200 ease-out group-hover:tracking-normal group-hover:drop-shadow-[0_0_6px_rgba(59,130,246,0.4)]"
-            >
-              Welcome to DVPanel
-            </h1>
-          </motion.div>
-        </div>
-        <CardDescription>Enter your credentials to access your dashboard.</CardDescription>
+            DVPanel
+          </h1>
+        </motion.div>
+        <CardDescription className="pt-2">Enter your credentials to access your dashboard.</CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="space-y-6">
           {reasonMessage && (
-            <Alert variant="default" className="bg-primary/10 border-primary/30">
+            <Alert variant="default" className="bg-primary/10 border-primary/30 text-primary-foreground">
               <AlertCircle className="h-4 w-4 text-primary" />
-              <AlertTitle>Information</AlertTitle>
-              <AlertDescription>{reasonMessage}</AlertDescription>
+              <AlertTitle className="text-primary">Information</AlertTitle>
+              <AlertDescription className="text-primary/90">{reasonMessage}</AlertDescription>
             </Alert>
           )}
           {formState.status !== "idle" && formState.errors?._form && formState.errors._form.length > 0 && (
@@ -132,7 +176,7 @@ export default function LoginPage() {
               type="text"
               placeholder="Enter your username"
               required
-              className="text-base md:text-sm"
+              className="text-base md:text-sm bg-background/70 border-border/50 placeholder:text-muted-foreground/80"
               aria-describedby={formState.errors?.username ? "username-error" : undefined}
               aria-invalid={!!formState.errors?.username}
             />
@@ -146,7 +190,7 @@ export default function LoginPage() {
               type="password"
               placeholder="Enter your password"
               required
-              className="text-base md:text-sm"
+              className="text-base md:text-sm bg-background/70 border-border/50 placeholder:text-muted-foreground/80"
               aria-describedby={formState.errors?.password ? "password-error" : undefined}
               aria-invalid={!!formState.errors?.password}
             />
@@ -161,9 +205,8 @@ export default function LoginPage() {
               Keep me logged in
             </Label>
           </div>
-          {searchParams.get('redirect') && <input type="hidden" name="redirectUrl" value={searchParams.get('redirect')!} />}
         </CardContent>
-        <CardFooter className="flex flex-col">
+        <CardFooter className="flex flex-col pb-6">
           <Button type="submit" className="w-full text-lg py-6 shadow-md hover:scale-105 transform transition-transform duration-150" disabled={isFormProcessing}>
             {isFormProcessing ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : "Log In"}
           </Button>
@@ -172,3 +215,4 @@ export default function LoginPage() {
     </Card>
   );
 }
+
