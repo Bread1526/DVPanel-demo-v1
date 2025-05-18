@@ -1,9 +1,8 @@
+
 "use client"
 
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
-// import type { VariantProps } from "class-variance-authority" // No longer needed here
-// import { cva } from "class-variance-authority" // Moved to AppShell
 import { PanelLeft } from "lucide-react"
 
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -517,16 +516,21 @@ const SidebarMenuItem = React.forwardRef<
 ))
 SidebarMenuItem.displayName = "SidebarMenuItem"
 
+// Props for the new SidebarMenuItemLayout component
+interface SidebarMenuItemLayoutProps
+  extends React.ComponentPropsWithoutRef<"a"> { // Changed to extend <a> props
+  icon?: React.ElementType
+  label?: string
+  badgeContent?: React.ReactNode
+  showText?: boolean
+  isActive?: boolean // To control active styling
+  // asChild prop is explicitly destructured and ignored
+  asChild?: never; 
+}
+
 export const SidebarMenuItemLayout = React.forwardRef<
-  HTMLDivElement,
-  {
-    icon?: React.ElementType;
-    label?: string;
-    badgeContent?: React.ReactNode;
-    showText?: boolean;
-    size?: "default" | "sm" | "lg";
-    className?: string;
-  }
+  HTMLAnchorElement, // Ref is for an anchor element
+  SidebarMenuItemLayoutProps
 >(
   (
     {
@@ -534,30 +538,40 @@ export const SidebarMenuItemLayout = React.forwardRef<
       label,
       badgeContent,
       showText,
-      size = "default", // Default size, can be adjusted
+      isActive,
       className,
+      children, // Children from Link asChild will be the content
+      asChild: _asChild, // Destructure and ignore asChild
+      ...props // Spread remaining props (like href, onClick from Link) onto the <a>
     },
     ref
   ) => {
+    // Renders an <a> tag, designed to work with Link asChild
     return (
-      <div
+      <a 
         ref={ref}
-        className={cn(
-          "flex w-full items-center gap-2 overflow-hidden",
-          // Padding is now controlled by the parent Link/<a>
-          className
-        )}
-        data-sidebar="menu-item-layout"
+        data-sidebar="menu-button" // Keep for potential styling hooks
+        data-active={isActive ? 'true' : undefined}
+        className={className} // className will be applied by AppShell's cva
+        {...props} // Spread href, onClick, etc. from Link
       >
-        {Icon && <Icon className={cn("shrink-0", size === "lg" ? "size-5" : "size-4")} />}
-        {showText && label && <span className="truncate">{label}</span>}
-        {showText && badgeContent }
-      </div>
+        {/* Inner layout for icon, label, badge */}
+        <div
+          className={cn(
+            "flex w-full items-center gap-2 overflow-hidden",
+          )}
+          data-sidebar="menu-item-inner-layout" 
+        >
+          {Icon && <Icon className={cn("shrink-0 size-4")} />}
+          {showText && label && <span className="truncate">{label}</span>}
+          {showText && badgeContent}
+        </div>
+        {children} {/* This allows Link to correctly inject its functionality */}
+      </a>
     );
   }
 );
 SidebarMenuItemLayout.displayName = "SidebarMenuItemLayout";
-
 
 const SidebarMenuAction = React.forwardRef<
   HTMLButtonElement,
@@ -713,7 +727,6 @@ export {
   SidebarMenu,
   SidebarMenuAction,
   SidebarMenuBadge,
-  SidebarMenuItemLayout,
   SidebarMenuItem,
   SidebarMenuSkeleton,
   SidebarMenuSub,
