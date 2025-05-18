@@ -3,14 +3,14 @@
 
 import React, { useEffect, useState, useTransition } from 'react';
 import { useActionState } from 'react';
-// Removed: import Image from 'next/image'; 
+import { motion } from "framer-motion"; // Import motion
 import { login } from './actions';
 import type { LoginState } from './types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from "@/components/ui/checkbox";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader } from '@/components/ui/card'; // Removed CardTitle import
 import { useToast } from '@/hooks/use-toast';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -42,20 +42,18 @@ export default function LoginPage() {
             setReasonMessage("Your account is inactive. Please contact an administrator.");
         }
         
-        const newUrl = new URL(window.location.href);
-        newUrl.searchParams.delete('reason');
-        router.replace(newUrl.toString(), { scroll: false });
+        // Clear the reason from URL
+        const current = new URL(window.location.href);
+        current.searchParams.delete('reason');
+        router.replace(current.pathname + current.search, {scroll: false});
     }
   }, [searchParams, router]);
-
 
   useEffect(() => {
     // Client-side console log for debugging formState changes
     // console.log('Login formState changed:', formState);
 
-    if (formState.status === "success") {
-      // Successful login is now handled by server-side redirect in the action
-    } else if (formState.status === "error" || formState.status === "validation_failed") {
+    if (formState.status === "error" || formState.status === "validation_failed") {
       const hasFieldErrors = (formState.errors?.username && formState.errors.username.length > 0) ||
                              (formState.errors?.password && formState.errors.password.length > 0);
 
@@ -72,27 +70,13 @@ export default function LoginPage() {
         });
       }
     }
-  }, [formState, toast, router]);
+  }, [formState, toast]);
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    
-    const username = String(formData.get("username") ?? "");
-    const password = String(formData.get("password") ?? "");
-    const keepLoggedIn = formData.get("keepLoggedIn") === "on";
-    const redirectUrlParam = searchParams.get('redirect');
-
-    // Construct the object to pass to the server action
-    const submissionData = {
-        username,
-        password,
-        redirectUrl: redirectUrlParam || '/', // Default redirect to dashboard
-        keepLoggedIn,
-    };
-    
     startTransition(() => {
-      formAction(submissionData);
+      formAction(formData);
     });
   };
 
@@ -100,17 +84,22 @@ export default function LoginPage() {
 
   return (
     <Card className="w-full max-w-md shadow-2xl rounded-xl">
-      {/* Custom Banner Start */}
-      <div className="pt-6 pb-2 flex justify-center">
-        <div className="w-full max-w-[300px] h-[75px] rounded-lg bg-gradient-to-br from-slate-700 via-slate-800 to-slate-900 p-4 shadow-lg flex items-center justify-center border border-slate-600">
-          <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-primary via-sky-400 to-cyan-300 tracking-tighter">
-            DVPanel
-          </h1>
+      <CardHeader className="space-y-2 text-center pt-6 pb-4"> {/* Adjusted padding */}
+        <div className="flex justify-center"> {/* Wrapper for centering the banner */}
+          <motion.div
+            className="w-full max-w-[300px] h-[75px] rounded-lg bg-gradient-to-br from-slate-700 via-slate-800 to-slate-900 p-4 shadow-lg flex items-center justify-center cursor-default"
+            whileHover={{
+              scale: 1.03,
+              boxShadow: "0px 10px 25px -5px rgba(0,0,0,0.4)",
+              transition: { duration: 0.2, ease: "circOut" },
+            }}
+            initial={{ boxShadow: "0px 5px 15px -3px rgba(0,0,0,0.3)" }}
+          >
+            <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-primary via-sky-400 to-cyan-300 tracking-tighter select-none">
+              DVPanel
+            </h1>
+          </motion.div>
         </div>
-      </div>
-      {/* Custom Banner End */}
-      <CardHeader className="space-y-1 text-center pt-4">
-        <CardTitle className="text-3xl font-bold">Welcome to DVPanel</CardTitle>
         <CardDescription>Enter your credentials to access your dashboard.</CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>
