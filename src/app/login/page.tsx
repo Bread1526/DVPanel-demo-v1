@@ -3,14 +3,14 @@
 
 import React, { useEffect, useState, useTransition } from 'react';
 import { useActionState } from 'react';
-import { motion } from "framer-motion"; // Import motion
+import { motion } from "framer-motion";
 import { login } from './actions';
 import type { LoginState } from './types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from "@/components/ui/checkbox";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader } from '@/components/ui/card'; // Removed CardTitle import
+import { Card, CardContent, CardDescription, CardFooter, CardHeader } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -30,38 +30,42 @@ export default function LoginPage() {
   useEffect(() => {
     const reason = searchParams.get('reason');
     if (reason) {
-        if (reason === 'inactive') {
-            setReasonMessage("You have been logged out due to inactivity.");
-        } else if (reason === 'unauthorized') {
-            setReasonMessage("You need to log in to access this page.");
-        } else if (reason === 'settings_changed') {
-            setReasonMessage("Settings updated. Please log in again.");
-        } else if (reason === 'session_error_api' || reason === 'session_error_catch' || reason === 'unauthorized_no_user_data') {
-            setReasonMessage("Your session has expired or is invalid. Please log in again.");
-        } else if (reason === 'account_inactive') {
-            setReasonMessage("Your account is inactive. Please contact an administrator.");
-        }
-        
-        // Clear the reason from URL
-        const current = new URL(window.location.href);
-        current.searchParams.delete('reason');
-        router.replace(current.pathname + current.search, {scroll: false});
+      if (reason === 'inactive') {
+        setReasonMessage("You have been logged out due to inactivity.");
+      } else if (reason === 'unauthorized') {
+        setReasonMessage("You need to log in to access this page.");
+      } else if (reason === 'settings_changed') {
+        setReasonMessage("Settings updated. Please log in again.");
+      } else if (reason === 'session_error_api' || reason === 'session_error_catch' || reason === 'unauthorized_no_user_data') {
+        setReasonMessage("Your session has expired or is invalid. Please log in again.");
+      } else if (reason === 'account_inactive') {
+        setReasonMessage("Your account is inactive. Please contact an administrator.");
+      }
+      
+      const current = new URL(window.location.href);
+      current.searchParams.delete('reason');
+      router.replace(current.pathname + current.search, {scroll: false});
     }
   }, [searchParams, router]);
 
   useEffect(() => {
     // Client-side console log for debugging formState changes
-    // console.log('Login formState changed:', formState);
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Login formState changed:', formState);
+    }
 
     if (formState.status === "error" || formState.status === "validation_failed") {
-      const hasFieldErrors = (formState.errors?.username && formState.errors.username.length > 0) ||
-                             (formState.errors?.password && formState.errors.password.length > 0);
-
       let mainErrorMessage = formState.message;
-      if (formState.errors?._form && formState.errors._form.length > 0) {
-        mainErrorMessage = formState.errors._form.join('; ');
-      }
+      let hasFieldErrors = false;
 
+      if (formState.errors) {
+        if (formState.errors.username && formState.errors.username.length > 0) hasFieldErrors = true;
+        if (formState.errors.password && formState.errors.password.length > 0) hasFieldErrors = true;
+        if (formState.errors._form && formState.errors._form.length > 0) {
+          mainErrorMessage = formState.errors._form.join('; ');
+        }
+      }
+      
       if (!hasFieldErrors && mainErrorMessage) {
         toast({
           title: "Login Failed",
@@ -84,19 +88,21 @@ export default function LoginPage() {
 
   return (
     <Card className="w-full max-w-md shadow-2xl rounded-xl">
-      <CardHeader className="space-y-2 text-center pt-6 pb-4"> {/* Adjusted padding */}
-        <div className="flex justify-center"> {/* Wrapper for centering the banner */}
+      <CardHeader className="space-y-2 text-center pt-6 pb-4">
+        <div className="flex justify-center mb-3">
           <motion.div
-            className="w-full max-w-[300px] h-[75px] rounded-lg bg-gradient-to-br from-slate-700 via-slate-800 to-slate-900 p-4 shadow-lg flex items-center justify-center cursor-default"
+            className="w-full max-w-[350px] h-[80px] rounded-lg bg-gradient-to-br from-slate-700 via-slate-800 to-slate-900 p-4 shadow-lg flex items-center justify-center cursor-default group opacity-95"
             whileHover={{
-              scale: 1.03,
-              boxShadow: "0px 10px 25px -5px rgba(0,0,0,0.4)",
-              transition: { duration: 0.2, ease: "circOut" },
+              scale: 1.02,
+              boxShadow: "0px 8px 20px -3px rgba(0,0,0,0.35)",
             }}
+            transition={{ duration: 0.2, ease: "circOut" }}
             initial={{ boxShadow: "0px 5px 15px -3px rgba(0,0,0,0.3)" }}
           >
-            <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-primary via-sky-400 to-cyan-300 tracking-tighter select-none">
-              DVPanel
+            <h1 
+              className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary via-sky-400 to-cyan-300 tracking-tight select-none text-center transition-all duration-200 ease-out group-hover:tracking-normal group-hover:drop-shadow-[0_0_6px_rgba(59,130,246,0.4)]"
+            >
+              Welcome to DVPanel
             </h1>
           </motion.div>
         </div>
