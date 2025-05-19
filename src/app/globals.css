@@ -60,7 +60,7 @@ body {
     --primary-foreground: 210 40% 98%; /* Light text on primary */
     --secondary: 222 30% 20%; /* Darker, less saturated secondary */
     --secondary-foreground: 220 10% 70%;
-    --muted: 222 30% 18%;
+    --muted: 222 30% 18%; /* Muted background for line numbers, slightly different from card */
     --muted-foreground: 220 10% 55%; /* Muted text for dark */
     --accent: 262 83% 58%; /* #7c3aed violet */
     --accent-foreground: 260 80% 95%; /* Light text on accent */
@@ -107,6 +107,15 @@ body {
   .destructive .toast-timer-bar {
      @apply bg-destructive-foreground; /* Or another contrasting color for destructive toasts */
   }
+
+  /* Custom scrollbar utilities */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
 }
 
 @keyframes shrink-width {
@@ -117,3 +126,5 @@ body {
     width: 0%;
   }
 }
+
+    

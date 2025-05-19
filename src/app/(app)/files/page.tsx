@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
+import CodeEditor from '@/components/ui/code-editor'; // Import the new CodeEditor
 import { useToast } from "@/hooks/use-toast";
 import path from 'path-browserify';
 import { format } from 'date-fns';
@@ -25,7 +25,7 @@ interface FileItem {
   type: 'folder' | 'file' | 'unknown';
   size?: number | null;
   modified?: string | null; // ISO string
-  permissions?: string | null; // "rwxrwxrwx" format
+  permissions?: string | null; // "rwxrwxrwx" format - kept for display if needed
   octalPermissions?: string | null; // "0755" format
 }
 
@@ -68,6 +68,22 @@ function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactN
   }
 }
 
+function getLanguageFromFilename(filename: string): string {
+  const extension = filename.split('.').pop()?.toLowerCase() || '';
+  switch (extension) {
+    case 'js': case 'jsx': return 'javascript';
+    case 'ts': case 'tsx': return 'typescript';
+    case 'html': case 'htm': return 'html';
+    case 'css': case 'scss': return 'css';
+    case 'json': return 'json';
+    case 'yaml': case 'yml': return 'yaml';
+    case 'md': return 'markdown';
+    case 'sh': case 'bash': return 'shell';
+    default: return 'plaintext';
+  }
+}
+
+
 export default function FilesPage() {
   const [currentPath, setCurrentPath] = useState<string>('/');
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -79,6 +95,7 @@ export default function FilesPage() {
   const [editingFile, setEditingFile] = useState<FileItem | null>(null);
   const [editingFilePath, setEditingFilePath] = useState<string | null>(null);
   const [editingFileContent, setEditingFileContent] = useState<string>("");
+  const [editingFileLanguage, setEditingFileLanguage] = useState<string>('plaintext');
   const [isEditorLoading, setIsEditorLoading] = useState(false);
   const [isEditorSaving, setIsEditorSaving] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
@@ -100,7 +117,7 @@ export default function FilesPage() {
           const errData = await response.json();
           errorMsg = errData.error || errData.details || errorMsg;
         } catch (parseError) {
-          errorMsg = await response.text().catch(() => errorMsg);
+           errorMsg = await response.text().catch(() => errorMsg);
         }
         throw new Error(errorMsg);
       }
@@ -111,8 +128,8 @@ export default function FilesPage() {
           type: f.type,
           size: f.size,
           modified: f.modified,
-          permissions: f.permissions,
-          octalPermissions: f.octalPermissions,
+          permissions: f.permissions, // rwx string
+          octalPermissions: f.octalPermissions, // e.g., "0755"
         })));
         setCurrentPath(data.path || pathToFetch);
       } else {
@@ -172,6 +189,7 @@ export default function FilesPage() {
     const fullPath = path.join(currentPath, file.name).replace(/\\/g, '/');
     setEditingFilePath(fullPath);
     setEditingFile(file);
+    setEditingFileLanguage(getLanguageFromFilename(file.name));
     setIsEditorLoading(true);
     setEditorError(null);
     setEditingFileContent("");
@@ -193,7 +211,7 @@ export default function FilesPage() {
   };
 
   const handleSaveFileContent = async () => {
-    if (!editingFilePath || editingFileContent === null) return;
+    if (!editingFilePath) return;
     setIsEditorSaving(true);
     setEditorError(null);
     try {
@@ -220,6 +238,7 @@ export default function FilesPage() {
     setEditingFilePath(null);
     setEditingFile(null);
     setEditingFileContent("");
+    setEditingFileLanguage('plaintext');
     setEditorError(null);
   };
 
@@ -392,44 +411,42 @@ export default function FilesPage() {
         </CardContent>
       </Card>
 
+      {/* Editor Dialog */}
       {editingFile && editingFilePath && (
         <Dialog open={!!editingFilePath} onOpenChange={(isOpen) => { if (!isOpen) closeEditorDialog(); }}>
           <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-7xl h-[90vh] p-0 flex flex-col rounded-2xl backdrop-blur-sm">
-            <DialogHeader className="p-4 pb-3 border-b">
+            <DialogHeader className="p-4 pb-3 border-b shrink-0">
               <DialogTitle>Editing: {editingFile.name}</DialogTitle>
               <DialogDescription>
-                Path: <span className="font-mono text-xs">{editingFilePath}</span>
+                Path: <span className="font-mono text-xs">{editingFilePath}</span> | Language: {editingFileLanguage}
               </DialogDescription>
             </DialogHeader>
-            <div className="flex-grow overflow-hidden flex flex-row">
-              <div className="w-12 bg-muted/50 border-r border-border py-2 px-1 text-right text-muted-foreground text-xs select-none overflow-y-hidden shrink-0">
-                {/* Placeholder for line numbers */}
-              </div>
-              <div className="flex-grow flex flex-col">
-                {isEditorLoading ? (
-                  <div className="flex justify-center items-center h-full">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                    <p className="ml-2">Loading content...</p>
-                  </div>
-                ) : editorError ? (
-                  <div className="flex flex-col justify-center items-center h-full text-destructive p-4">
-                    <AlertTriangle className="h-8 w-8 mb-2" />
-                    <p className="font-semibold">Error Loading File</p>
-                    <p className="text-sm text-center">{editorError}</p>
-                  </div>
-                ) : (
-                  <Textarea
+            
+            <div className="flex-grow overflow-hidden p-1"> {/* Added p-1 for slight inset for the editor box */}
+              {isEditorLoading ? (
+                <div className="flex justify-center items-center h-full">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  <p className="ml-2">Loading content...</p>
+                </div>
+              ) : editorError ? (
+                <div className="flex flex-col justify-center items-center h-full text-destructive p-4">
+                  <AlertTriangle className="h-8 w-8 mb-2" />
+                  <p className="font-semibold">Error Loading File</p>
+                  <p className="text-sm text-center">{editorError}</p>
+                </div>
+              ) : (
+                 <CodeEditor
                     value={editingFileContent}
-                    onChange={(e) => setEditingFileContent(e.target.value)}
-                    className="flex-grow h-full w-full resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-4 font-mono text-sm leading-relaxed tracking-wide bg-background"
-                    placeholder="File content will appear here..."
-                  />
-                )}
-              </div>
+                    onChange={setEditingFileContent}
+                    language={editingFileLanguage}
+                    className="h-full w-full" // CodeEditor will fill this padded div
+                 />
+              )}
             </div>
-            <DialogFooter className="p-3 border-t flex justify-between items-center">
+
+            <DialogFooter className="p-3 border-t flex justify-between items-center shrink-0">
               <div className="text-xs text-muted-foreground">
-                Chars: {editingFileContent.length}
+                Chars: {editingFileContent.length} Lines: {editingFileContent.split('\\n').length}
               </div>
               <div className="flex gap-2">
                 <Button type="button" variant="outline" onClick={closeEditorDialog} disabled={isEditorSaving}>
@@ -459,3 +476,4 @@ export default function FilesPage() {
   );
 }
 
+    
