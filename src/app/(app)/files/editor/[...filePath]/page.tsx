@@ -5,7 +5,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import { CodeEditor } from '@/components/ui/code-editor';
+import CodeEditor from '@/components/ui/code-editor'; // Corrected to default import
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Save, ArrowLeft, Camera, Search as SearchIcon } from "lucide-react";
 import path from 'path-browserify';
