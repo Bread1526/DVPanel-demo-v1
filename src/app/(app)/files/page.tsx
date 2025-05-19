@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,16 +9,25 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import {
-  MoreHorizontal, Folder, File as FileIcon, Upload, Download, Edit3, Trash2, KeyRound, Search, ArrowLeft, Loader2, AlertTriangle,
-  FileCode2, FileJson, FileText, ImageIcon, Archive, Shell, FileTerminal, AudioWaveform, VideoIcon, Database, List, Shield, Github, Settings2, ServerCog
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogClose,
+} from '@/components/ui/dialog';
+import {
+  MoreHorizontal, Folder, File as FileIconDefault, Upload, Download, Edit3, Trash2, KeyRound, Search, ArrowLeft, Loader2, AlertTriangle,
+  FileCode2, FileJson, FileText, ImageIcon, Archive, Shell, FileTerminal, AudioWaveform, VideoIcon, Database, List, Shield, Github, Settings2, ServerCog, Save, X
 } from "lucide-react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { useToast } from "@/hooks/use-toast";
 import path from 'path-browserify';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import PermissionsDialog from './components/permissions-dialog';
 import { cn } from '@/lib/utils';
-import { useRouter } from 'next/navigation'; // Import useRouter
+import CodeEditor from '@/components/ui/code-editor';
 
 interface FileItem {
   name: string;
@@ -32,7 +41,7 @@ interface FileItem {
 const DAEMON_API_BASE_PATH = '/api/panel-daemon';
 
 function formatBytes(bytes?: number | null, decimals = 2) {
-  if (bytes === null || bytes === undefined || !+bytes) return '0 Bytes';
+  if (bytes === null || bytes === undefined || !+bytes || bytes === 0) return '0 Bytes';
   const k = 1024;
   const dm = decimals < 0 ? 0 : decimals;
   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
@@ -42,7 +51,7 @@ function formatBytes(bytes?: number | null, decimals = 2) {
 
 function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactNode {
   if (fileType === 'folder') return <Folder className="h-5 w-5 text-primary" />;
-  if (fileType === 'unknown') return <FileIcon className="h-5 w-5 text-muted-foreground" />;
+  if (fileType === 'unknown') return <FileIconDefault className="h-5 w-5 text-muted-foreground" />;
 
   const extension = filename.split('.').pop()?.toLowerCase() || '';
   switch (extension) {
@@ -52,7 +61,8 @@ function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactN
     case 'ts': case 'tsx': return <FileCode2 className="h-5 w-5 text-sky-500" />;
     case 'json': return <FileJson className="h-5 w-5 text-yellow-600" />;
     case 'yaml': case 'yml': return <ServerCog className="h-5 w-5 text-indigo-400" />;
-    case 'txt': case 'md': case 'log': return <FileText className="h-5 w-5 text-gray-500" />;
+    case 'txt': case 'log': return <FileText className="h-5 w-5 text-gray-500" />;
+    case 'md': return <FileCode2 className="h-5 w-5 text-gray-400" />; // Specific for Markdown
     case 'png': case 'jpg': case 'jpeg': case 'gif': case 'svg': case 'webp': case 'ico': return <ImageIcon className="h-5 w-5 text-purple-500" />;
     case 'zip': case 'tar': case 'gz': case 'rar': case '7z': return <Archive className="h-5 w-5 text-amber-700" />;
     case 'sh': case 'bash': return <Shell className="h-5 w-5 text-green-600" />;
@@ -64,97 +74,163 @@ function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactN
     case 'exe': case 'dmg': case 'app': return <Settings2 className="h-5 w-5 text-gray-800" />;
     case 'pem': case 'crt': case 'key': return <Shield className="h-5 w-5 text-teal-500" />;
     case 'gitignore': case 'gitattributes': case 'gitmodules': return <Github className="h-5 w-5 text-neutral-700" />;
-    default: return <FileIcon className="h-5 w-5 text-muted-foreground" />;
+    default: return <FileIconDefault className="h-5 w-5 text-muted-foreground" />;
   }
 }
 
+function getLanguageFromFilename(filename: string): string {
+  const extension = filename.split('.').pop()?.toLowerCase() || '';
+  switch (extension) {
+    case 'js': case 'jsx': return 'javascript';
+    case 'ts': case 'tsx': return 'typescript';
+    case 'html': case 'htm': return 'html';
+    case 'css': case 'scss': return 'css';
+    case 'json': return 'json';
+    case 'yaml': case 'yml': return 'yaml';
+    case 'md': return 'markdown';
+    case 'sh': case 'bash': return 'shell';
+    case 'py': return 'python';
+    default: return 'plaintext';
+  }
+}
 
 export default function FilesPage() {
-  console.log("[FilesPage] Component RENDER start");
   const [currentPath, setCurrentPath] = useState<string>('/');
   const [files, setFiles] = useState<FileItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const { toast } = useToast();
-  const router = useRouter(); // Initialize useRouter
 
   const [isPermissionsDialogOpen, setIsPermissionsDialogOpen] = useState(false);
   const [permissionDialogTargetPath, setPermissionDialogTargetPath] = useState<string>("");
   const [permissionDialogCurrentRwxPerms, setPermissionDialogCurrentRwxPerms] = useState<string>("");
   const [permissionDialogCurrentOctalPerms, setPermissionDialogCurrentOctalPerms] = useState<string>("");
 
+  // Editor State
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [editingFilePath, setEditingFilePath] = useState<string | null>(null);
+  const [editingFileContent, setEditingFileContent] = useState<string>("");
+  const [editingOriginalFileContent, setEditingOriginalFileContent] = useState<string>("");
+  const [editingFileLanguage, setEditingFileLanguage] = useState<string>("plaintext");
+  const [isEditorLoading, setIsEditorLoading] = useState<boolean>(false);
+  const [isEditorSaving, setIsEditorSaving] = useState<boolean>(false);
+  const [editorError, setEditorError] = useState<string | null>(null);
+
+  const hasUnsavedChanges = useMemo(() => editingFileContent !== editingOriginalFileContent, [editingFileContent, editingOriginalFileContent]);
 
   const fetchFiles = useCallback(async (pathToFetch: string) => {
-    console.log("[FilesPage] fetchFiles CALLED for path:", pathToFetch);
     setIsLoading(true);
     setError(null);
     try {
       const response = await fetch(`${DAEMON_API_BASE_PATH}/files?path=${encodeURIComponent(pathToFetch)}`);
       if (!response.ok) {
         let errorMsg = `HTTP error! status: ${response.status}`;
-        try {
-          const errData = await response.json();
-          errorMsg = errData.error || errData.details || errorMsg;
-        } catch (parseError) {
-           errorMsg = await response.text().catch(() => errorMsg);
-        }
+        try { const errData = await response.json(); errorMsg = errData.error || errData.details || errorMsg; }
+        catch (parseError) { errorMsg = await response.text().catch(() => errorMsg); }
         throw new Error(errorMsg);
       }
       const data = await response.json();
-      console.log("[FilesPage] fetchFiles RESPONSE for path:", pathToFetch, "DATA:", data);
       if (data && Array.isArray(data.files)) {
-        setFiles(data.files.map((f: any) => ({
-          name: f.name,
-          type: f.type,
-          size: f.size,
-          modified: f.modified,
-          permissions: f.permissions,
-          octalPermissions: f.octalPermissions,
-        })));
+        setFiles(data.files.map((f: any) => ({ ...f }))); // Simplified mapping
         setCurrentPath(data.path || pathToFetch);
       } else {
         setFiles([]);
         setCurrentPath(data.path || pathToFetch);
-        if (!Array.isArray(data.files)) console.warn("API did not return a 'files' array. Response:", data);
       }
     } catch (e: any) {
-      console.error("Error fetching files:", e);
       const errorMessage = e.message || "An unknown error occurred while fetching files.";
       setError(errorMessage);
       setFiles([]);
       toast({ title: "File Manager Error", description: `Could not fetch files: ${errorMessage}.`, variant: "destructive" });
     } finally {
       setIsLoading(false);
-      console.log("[FilesPage] fetchFiles FINISHED for path:", pathToFetch);
     }
   }, [toast]);
 
   useEffect(() => {
-    console.log("[FilesPage] useEffect for currentPath, calling fetchFiles with currentPath:", currentPath);
     fetchFiles(currentPath);
   }, [currentPath, fetchFiles]);
 
-  const handleFileOrFolderClick = useCallback((item: FileItem) => {
-    const fullPath = path.join(currentPath, item.name).replace(/\\/g, '/');
-    if (item.type === 'folder') {
-      console.log("[FilesPage] handleFileOrFolderClick: FOLDER CLICKED", item.name, "New path will be:", fullPath);
-      setCurrentPath(fullPath);
-    } else if (item.type === 'file') {
-      console.log("[FilesPage] handleFileOrFolderClick: FILE CLICKED for editing", item.name, "Navigating to editor for:", fullPath);
-      // Encode the full path to handle special characters in filenames/paths
-      router.push(`/files/editor/${encodeURIComponent(fullPath)}`);
+  const handleOpenEditor = useCallback(async (fileItem: FileItem) => {
+    if (fileItem.type !== 'file') return;
+    const fullPath = path.join(currentPath, fileItem.name).replace(/\\/g, '/');
+    setEditingFilePath(fullPath);
+    setEditingFileLanguage(getLanguageFromFilename(fileItem.name));
+    setIsEditorOpen(true);
+    setIsEditorLoading(true);
+    setEditorError(null);
+    setEditingFileContent(""); // Clear previous content
+    setEditingOriginalFileContent("");
+
+    try {
+      const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(fullPath)}&view=true`);
+      if (!response.ok) {
+        let errorMsg = `Error fetching file: ${response.status}`;
+        try { const errData = await response.json(); errorMsg = errData.error || errData.details || errorMsg; }
+        catch (parseError) { errorMsg = await response.text().catch(() => errorMsg); }
+        throw new Error(errorMsg);
+      }
+      const textContent = await response.text();
+      setEditingFileContent(textContent);
+      setEditingOriginalFileContent(textContent);
+    } catch (e: any) {
+      setEditorError(e.message || "Failed to load file content.");
+      toast({ title: "Error Loading File", description: e.message, variant: "destructive" });
+    } finally {
+      setIsEditorLoading(false);
     }
-  }, [currentPath, router]);
+  }, [currentPath, toast]);
+
+  const handleSaveFile = useCallback(async () => {
+    if (!editingFilePath) {
+      toast({ title: "Error", description: "No file path specified.", variant: "destructive" });
+      return;
+    }
+    setIsEditorSaving(true);
+    setEditorError(null);
+    try {
+      const response = await fetch(`${DAEMON_API_BASE_PATH}/file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: editingFilePath, content: editingFileContent }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || result.details || 'Failed to save file.');
+      }
+      toast({ title: 'Success', description: result.message || `File ${path.basename(editingFilePath)} saved.` });
+      setEditingOriginalFileContent(editingFileContent); // Update original content on save
+    } catch (e: any) {
+      setEditorError(e.message || "An unexpected error occurred while saving.");
+      toast({ title: "Error Saving File", description: e.message, variant: "destructive" });
+    } finally {
+      setIsEditorSaving(false);
+    }
+  }, [editingFilePath, editingFileContent, toast]);
+
+  const handleEditorContentChange = useCallback((newContent: string) => {
+    setEditingFileContent(newContent);
+  }, []);
+  
+  const handleCloseEditor = useCallback(() => {
+    if (hasUnsavedChanges) {
+      if (!window.confirm("You have unsaved changes. Are you sure you want to close?")) {
+        return;
+      }
+    }
+    setIsEditorOpen(false);
+    setEditingFilePath(null);
+    setEditingFileContent("");
+    setEditingOriginalFileContent("");
+    setEditorError(null);
+  }, [hasUnsavedChanges]);
 
 
   const handleBreadcrumbClick = useCallback((index: number) => {
     const segments = currentPath.split('/').filter(Boolean);
     let newPath = '/';
-    if (index >= 0) {
-      newPath += segments.slice(0, index + 1).join('/');
-    }
-    console.log("[FilesPage] handleBreadcrumbClick: index", index, "New path:", newPath.replace(/\\/g, '/'));
+    if (index >= 0) { newPath += segments.slice(0, index + 1).join('/'); }
     setCurrentPath(newPath.replace(/\\/g, '/'));
   }, [currentPath]);
 
@@ -171,20 +247,18 @@ export default function FilesPage() {
     const fullPath = path.join(currentPath, file.name).replace(/\\/g, '/');
     setPermissionDialogTargetPath(fullPath);
     setPermissionDialogCurrentRwxPerms(file.permissions || "---------");
-    setPermissionDialogCurrentOctalPerms(file.octalPermissions || "000");
+    setPermissionDialogCurrentOctalPerms(file.octalPermissions || "0000");
     setIsPermissionsDialogOpen(true);
   };
 
   const handlePermissionsUpdate = () => {
     setIsPermissionsDialogOpen(false);
-    fetchFiles(currentPath); // Refresh file list after permissions update
+    fetchFiles(currentPath);
   };
 
   const filteredFiles = useMemo(() => files.filter(file =>
     file.name.toLowerCase().includes(searchTerm.toLowerCase())
   ), [files, searchTerm]);
-
-  console.log("[FilesPage] RENDER CYCLE - currentPath:", currentPath);
 
   return (
     <div className="flex flex-col h-full">
@@ -230,10 +304,7 @@ export default function FilesPage() {
                     ) : (
                       <BreadcrumbLink
                         href="#"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          handleBreadcrumbClick(segment.path === '/' ? -1 : index -1 );
-                        }}
+                        onClick={(e) => { e.preventDefault(); handleBreadcrumbClick(segment.path === '/' ? -1 : index -1 ); }}
                       >
                         {segment.name}
                       </BreadcrumbLink>
@@ -288,21 +359,20 @@ export default function FilesPage() {
                     <TableRow
                       key={file.name}
                       onDoubleClick={() => {
-                        console.log("[FilesPage] TableRow onDoubleClick FIRED for:", file.name, "Type:", file.type);
-                        handleFileOrFolderClick(file);
+                        if (file.type === 'folder') {
+                           setCurrentPath(fullPathToItem);
+                        } else if (file.type === 'file') {
+                           handleOpenEditor(file);
+                        }
                       }}
                       className='cursor-pointer hover:bg-muted/50'
                     >
-                      <TableCell>
-                        {getFileIcon(file.name, file.type)}
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {file.name}
-                      </TableCell>
+                      <TableCell>{getFileIcon(file.name, file.type)}</TableCell>
+                      <TableCell className="font-medium">{file.name}</TableCell>
                       <TableCell className="text-muted-foreground capitalize">{file.type}</TableCell>
                       <TableCell className="text-muted-foreground">{formatBytes(file.size)}</TableCell>
                       <TableCell className="text-muted-foreground">
-                        {file.modified ? format(new Date(file.modified), 'PPpp') : 'N/A'}
+                        {file.modified ? formatDistanceToNow(new Date(file.modified), { addSuffix: true }) : 'N/A'}
                       </TableCell>
                       <TableCell className="text-muted-foreground font-mono text-xs">{file.octalPermissions || 'N/A'}</TableCell>
                       <TableCell className="text-right">
@@ -320,7 +390,10 @@ export default function FilesPage() {
                                 <Download className="mr-2 h-4 w-4" /> Download
                               </DropdownMenuItem>
                             )}
-                             <DropdownMenuItem onSelect={() => handleFileOrFolderClick(file)}>
+                             <DropdownMenuItem onSelect={() => {
+                                if (file.type === 'folder') { setCurrentPath(fullPathToItem); }
+                                else if (file.type === 'file') { handleOpenEditor(file); }
+                             }}>
                                 <Edit3 className="mr-2 h-4 w-4" /> {file.type === 'file' ? 'View/Edit' : 'Open'}
                             </DropdownMenuItem>
                             <DropdownMenuItem onSelect={() => handlePermissionsClick(file)}>
@@ -341,6 +414,63 @@ export default function FilesPage() {
         </CardContent>
       </Card>
 
+      {isEditorOpen && editingFilePath && (
+        <Dialog open={isEditorOpen} onOpenChange={(open) => { if (!open) handleCloseEditor(); else setIsEditorOpen(true); }}>
+          <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl w-[90vw] h-[85vh] flex flex-col p-0 rounded-2xl backdrop-blur-sm">
+            <DialogHeader className="p-4 border-b flex-shrink-0">
+              <DialogTitle>Edit File: {path.basename(editingFilePath)}</DialogTitle>
+              <DialogDescription>{editingFilePath}</DialogDescription>
+            </DialogHeader>
+            
+            <div className="flex-grow overflow-hidden p-1">
+              {isEditorLoading ? (
+                <div className="flex h-full justify-center items-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  <p className="ml-2 text-muted-foreground">Loading content...</p>
+                </div>
+              ) : editorError ? (
+                 <div className="flex h-full flex-col justify-center items-center text-destructive p-4 bg-destructive/10">
+                    <AlertTriangle className="h-10 w-10 mb-2" />
+                    <p className="font-semibold">Error Loading File</p>
+                    <p className="text-sm text-center mb-3">{editorError}</p>
+                    <Button onClick={() => handleOpenEditor({name: path.basename(editingFilePath!), type: 'file'})} variant="outline" size="sm">Retry</Button>
+                 </div>
+              ) : (
+                <CodeEditor
+                  value={editingFileContent}
+                  onChange={handleEditorContentChange}
+                  language={editingFileLanguage}
+                  readOnly={isEditorSaving}
+                  className="h-full w-full border-0 rounded-none"
+                />
+              )}
+            </div>
+            
+            <DialogFooter className="p-3 border-t flex-shrink-0 flex justify-between items-center">
+              <div className="text-xs text-muted-foreground">
+                <span>Lang: {editingFileLanguage}</span>
+                <span className="mx-2">|</span>
+                <span>Chars: {editingFileContent.length}</span>
+                <span className="mx-2">|</span>
+                <span>Lines: {editingFileContent.split('\n').length}</span>
+                {hasUnsavedChanges && <span className="ml-2 font-semibold text-amber-500">* Unsaved</span>}
+              </div>
+              <div className="flex gap-2">
+                <DialogClose asChild>
+                   <Button type="button" variant="outline" onClick={handleCloseEditor} disabled={isEditorSaving}>
+                     <X className="mr-2 h-4 w-4" /> Close
+                   </Button>
+                </DialogClose>
+                <Button type="button" onClick={handleSaveFile} disabled={isEditorSaving || !hasUnsavedChanges} className="shadow-md hover:scale-105">
+                  {isEditorSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Save Changes
+                </Button>
+              </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
       {isPermissionsDialogOpen && permissionDialogTargetPath && (
         <PermissionsDialog
           isOpen={isPermissionsDialogOpen}
@@ -354,3 +484,4 @@ export default function FilesPage() {
     </div>
   );
 }
+
