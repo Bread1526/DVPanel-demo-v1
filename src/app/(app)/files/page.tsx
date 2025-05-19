@@ -10,32 +10,29 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { MoreHorizontal, Folder, File as FileIcon, Upload, Download, Edit3, Trash2, KeyRound, Search, ArrowLeft, Loader2, AlertTriangle } from "lucide-react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
-// Removed: import { loadPanelSettings, type PanelSettingsData } from '@/app/(app)/settings/actions';
 import { useToast } from "@/hooks/use-toast";
 import path from 'path-browserify'; // Using path-browserify for client-side path manipulation
 
 interface FileItem {
-  id: string; // Can be derived from name if names are unique in a dir
+  id: string;
   name: string;
   type: 'folder' | 'file';
-  size: string; // Placeholder
-  modified: string; // Placeholder
-  permissions: string; // Placeholder
+  size: string;
+  modified: string;
+  permissions: string;
 }
 
 const DAEMON_API_VERSION = 'v1';
-const DEFAULT_DAEMON_URL = `http://localhost:3005/api/${DAEMON_API_VERSION}`;
+const DEFAULT_DAEMON_URL_BASE = `http://localhost:3005/api/${DAEMON_API_VERSION}`;
 
 export default function FilesPage() {
-  const [daemonUrl, setDaemonUrl] = useState<string>(DEFAULT_DAEMON_URL); // Default to localhost:3005
-  const [currentPath, setCurrentPath] = useState<string>('/'); // Start at root
+  const [daemonUrl, setDaemonUrl] = useState<string>(DEFAULT_DAEMON_URL_BASE);
+  const [currentPath, setCurrentPath] = useState<string>('/');
   const [files, setFiles] = useState<FileItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const { toast } = useToast();
-
-  // Removed useEffect for fetching panel settings. Daemon URL is now defaulted.
 
   const fetchFiles = useCallback(async (pathToFetch: string) => {
     setIsLoading(true);
@@ -43,53 +40,58 @@ export default function FilesPage() {
     try {
       const response = await fetch(`${daemonUrl}/files?path=${encodeURIComponent(pathToFetch)}`);
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({ error: 'Failed to fetch files from daemon. Ensure it is running and accessible.' }));
-        throw new Error(errData.error || `HTTP error! status: ${response.status}`);
+        let errorMsg = `HTTP error! status: ${response.status}`;
+        try {
+          const errData = await response.json();
+          errorMsg = errData.error || errData.message || errorMsg;
+        } catch (parseError) {
+          // If parsing fails, use the original HTTP error message
+          console.error("Failed to parse error response from daemon:", parseError);
+        }
+        throw new Error(errorMsg);
       }
       const data = await response.json();
       if (data && data.files) {
         setFiles(data.files.map((f: any, index: number) => ({
-          id: `${pathToFetch}-${f.name}-${index}`, // Simple unique ID
+          id: `${pathToFetch}-${f.name}-${index}`,
           name: f.name,
           type: f.type,
           size: 'N/A',
           modified: 'N/A',
           permissions: 'N/A',
         })));
-        setCurrentPath(data.path || pathToFetch); // Trust daemon's reported path
+        setCurrentPath(data.path || pathToFetch);
       } else {
         setFiles([]);
       }
     } catch (e: any) {
       console.error("Error fetching files:", e);
-      setError(e.message || "An unknown error occurred while fetching files.");
-      setFiles([]); // Clear files on error
+      const errorMessage = e.message || "An unknown error occurred while fetching files.";
+      setError(errorMessage);
+      setFiles([]);
       toast({
         title: "File Manager Error",
-        description: e.message || "Could not connect to the daemon or fetch files. Please ensure it's running correctly.",
+        description: `Could not connect to the daemon or fetch files: ${errorMessage}. Please ensure it's running correctly and the path is accessible on the daemon.`,
         variant: "destructive",
       });
     } finally {
       setIsLoading(false);
     }
-  }, [daemonUrl, toast]); // Removed dependency on panelSettings, kept toast
+  }, [daemonUrl, toast]);
 
   useEffect(() => {
-    // Fetch files on initial mount with the default daemon URL and currentPath
     fetchFiles(currentPath);
-  }, [fetchFiles, currentPath]); // fetchFiles is stable, currentPath triggers refetch
+  }, [fetchFiles, currentPath]);
 
   const handleFolderClick = (folderName: string) => {
     const newPath = path.join(currentPath, folderName);
     setCurrentPath(newPath);
-    // fetchFiles will be triggered by useEffect watching currentPath
   };
 
   const handleBreadcrumbClick = (index: number) => {
     const segments = currentPath.split('/').filter(Boolean);
     const newPath = '/' + segments.slice(0, index + 1).join('/');
     setCurrentPath(newPath === '/' && segments.length > 0 && index === -1 ? '/' : newPath);
-     // Special case for root when clicking first breadcrumb link
   };
 
   const getBreadcrumbSegments = () => {
@@ -109,7 +111,7 @@ export default function FilesPage() {
     <div>
       <PageHeader 
         title="Root File Manager" 
-        description={`Manage files via daemon. Defaulting to ${DEFAULT_DAEMON_URL}.`}
+        description={`Manage files via daemon. Defaulting to ${DEFAULT_DAEMON_URL_BASE}.`}
         actions={
           <div className="flex gap-2">
             <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
