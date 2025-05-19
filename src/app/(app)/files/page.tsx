@@ -86,7 +86,7 @@ export default function FilesPage() {
 
   const [isPermissionsDialogOpen, setIsPermissionsDialogOpen] = useState(false);
   const [permissionDialogTargetPath, setPermissionDialogTargetPath] = useState<string>("");
-  const [permissionDialogCurrentPerms, setPermissionDialogCurrentPerms] = useState<string>("");
+  const [permissionDialogCurrentRwxPerms, setPermissionDialogCurrentRwxPerms] = useState<string>("");
   const [permissionDialogCurrentOctalPerms, setPermissionDialogCurrentOctalPerms] = useState<string>("");
 
 
@@ -112,8 +112,8 @@ export default function FilesPage() {
           type: f.type,
           size: f.size,
           modified: f.modified,
-          permissions: f.permissions,
-          octalPermissions: f.octalPermissions,
+          permissions: f.permissions, // rwxrwxrwx string from API
+          octalPermissions: f.octalPermissions, // "0755" string from API
         })));
         setCurrentPath(data.path || pathToFetch);
       } else {
@@ -209,8 +209,7 @@ export default function FilesPage() {
       }
       toast({ title: 'Success', description: result.message || `File ${editingFile?.name} saved.` });
       closeEditorDialog();
-      // Optionally, re-fetch files if save might change metadata like size/modified, though less critical for content save.
-      // fetchFiles(currentPath); 
+      fetchFiles(currentPath); 
     } catch (e: any) {
       setEditorError(e.message || "An unexpected error occurred while saving.");
       toast({ title: "Error Saving File", description: e.message, variant: "destructive" });
@@ -229,8 +228,8 @@ export default function FilesPage() {
   const handlePermissionsClick = (file: FileItem) => {
     const fullPath = path.join(currentPath, file.name).replace(/\\/g, '/');
     setPermissionDialogTargetPath(fullPath);
-    setPermissionDialogCurrentPerms(file.permissions || "---------"); // rwx string
-    setPermissionDialogCurrentOctalPerms(file.octalPermissions || "000"); // octal string
+    setPermissionDialogCurrentRwxPerms(file.permissions || "---------");
+    setPermissionDialogCurrentOctalPerms(file.octalPermissions || "000");
     setIsPermissionsDialogOpen(true);
   };
 
@@ -404,13 +403,12 @@ export default function FilesPage() {
                 Path: <span className="font-mono text-xs">{editingFilePath}</span>
               </DialogDescription>
             </DialogHeader>
-            <div className="flex-grow overflow-hidden flex"> {/* Added flex here */}
+            <div className="flex-grow overflow-hidden flex flex-row"> {/* Main content area: flex row */}
               {/* Visual Line Number Gutter Placeholder */}
-              <div className="w-12 bg-muted/50 border-r border-border py-2 px-1 text-right text-muted-foreground text-xs select-none overflow-y-hidden">
+              <div className="w-12 bg-muted/50 border-r border-border py-2 px-1 text-right text-muted-foreground text-xs select-none overflow-y-hidden shrink-0">
                 {/* This is a placeholder. Real line numbers require JS sync with textarea scroll/content. */}
-                {/* For now, it's just a visual gutter. */}
               </div>
-              <div className="flex-grow overflow-hidden"> {/* This div will contain the ScrollArea */}
+              <div className="flex-grow overflow-hidden flex flex-col"> {/* Editor area: flex column to allow ScrollArea to grow */}
                 {isEditorLoading ? (
                   <div className="flex justify-center items-center h-full">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -423,11 +421,11 @@ export default function FilesPage() {
                     <p className="text-sm text-center">{editorError}</p>
                   </div>
                 ) : (
-                  <ScrollArea className="h-full w-full bg-muted/30"> {/* Distinct background for editor area */}
+                  <ScrollArea className="flex-grow w-full bg-background"> {/* ScrollArea takes available space */}
                     <Textarea
                       value={editingFileContent}
                       onChange={(e) => setEditingFileContent(e.target.value)}
-                      className="h-full w-full resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-2 font-mono text-sm leading-relaxed tracking-wide"
+                      className="h-full w-full resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-4 font-mono text-sm leading-relaxed tracking-wide bg-transparent"
                       placeholder="File content will appear here..."
                     />
                   </ScrollArea>
@@ -457,7 +455,7 @@ export default function FilesPage() {
           isOpen={isPermissionsDialogOpen}
           onOpenChange={setIsPermissionsDialogOpen}
           targetPath={permissionDialogTargetPath}
-          currentRwxPermissions={permissionDialogCurrentPerms}
+          currentRwxPermissions={permissionDialogCurrentRwxPerms}
           currentOctalPermissions={permissionDialogCurrentOctalPerms}
           onPermissionsUpdate={handlePermissionsUpdate}
         />
