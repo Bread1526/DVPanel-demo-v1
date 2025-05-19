@@ -8,12 +8,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label"; // Added import for Label
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   MoreHorizontal, Folder, File as FileIconDefault, Upload, Download, Edit3, Trash2, KeyRound, Search, ArrowLeft, Loader2, AlertTriangle,
   FileCode2, FileJson, FileText, ImageIcon, Archive, Shell, FileTerminal, AudioWaveform, VideoIcon, Database, List, Shield, Github, Settings2, ServerCog,
-  Camera, Search as SearchIcon, ShieldAlert, FolderPlus, FilePlus, X
+  FolderPlus, FilePlus, X
 } from "lucide-react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { useToast } from "@/hooks/use-toast";
@@ -43,9 +44,25 @@ function formatBytes(bytes?: number | null, decimals = 2) {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 }
 
+function getLanguageFromFilename(filename: string): string {
+  if (!filename) return 'plaintext';
+  const extension = filename.split('.').pop()?.toLowerCase() || '';
+  switch (extension) {
+    case 'js': case 'jsx': return 'javascript';
+    case 'ts': case 'tsx': return 'typescript';
+    case 'html': case 'htm': return 'html';
+    case 'css': case 'scss': return 'css';
+    case 'json': return 'json';
+    case 'yaml': case 'yml': return 'yaml';
+    case 'py': return 'python';
+    case 'sh': case 'bash': return 'shell';
+    default: return 'plaintext';
+  }
+}
+
 function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactNode {
   if (fileType === 'folder') return <Folder className="h-5 w-5 text-primary" />;
-  if (fileType === 'link') return <FileIconDefault className="h-5 w-5 text-purple-400" />; // Or a dedicated link icon
+  if (fileType === 'link') return <FileIconDefault className="h-5 w-5 text-purple-400" />; 
   if (fileType === 'unknown') return <FileIconDefault className="h-5 w-5 text-muted-foreground" />;
 
   const extension = filename.split('.').pop()?.toLowerCase() || '';
@@ -92,7 +109,6 @@ export default function FilesPage() {
   const [newItemName, setNewItemName] = useState('');
   const [isCreatingItem, setIsCreatingItem] = useState(false);
 
-
   const fetchFiles = useCallback(async (pathToFetch: string) => {
     setIsLoading(true);
     setError(null);
@@ -126,14 +142,14 @@ export default function FilesPage() {
     fetchFiles(currentPath);
   }, [currentPath, fetchFiles]);
 
-  const handleItemAction = (fileItem: FileItem) => {
+  const handleFileDoubleClick = useCallback((fileItem: FileItem) => {
     const fullPath = path.join(currentPath, fileItem.name).replace(/\\/g, '/');
     if (fileItem.type === 'folder') {
       setCurrentPath(fullPath);
     } else if (fileItem.type === 'file') {
       router.push(`/files/editor/${encodeURIComponent(fullPath)}`);
     }
-  };
+  }, [currentPath, router]);
 
   const handleBreadcrumbClick = useCallback((index: number) => {
     const segments = currentPath.split('/').filter(Boolean);
@@ -188,18 +204,16 @@ export default function FilesPage() {
       });
       const result = await response.json();
       if (!response.ok) {
-        throw new Error(result.error || `Failed to create ${createItemType}.`);
+        throw new Error(result.error || result.details || `Failed to create ${createItemType}.`);
       }
       toast({ title: "Success", description: result.message || `${createItemType} "${newItemName}" created.` });
       setIsCreateItemDialogOpen(false);
       fetchFiles(currentPath); // Refresh file list
-    } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } catch (e: any)      toast({ title: "Error", description: e.message, variant: "destructive" });
     } finally {
       setIsCreatingItem(false);
     }
   };
-
 
   return (
     <div className="flex flex-col h-full">
@@ -303,7 +317,7 @@ export default function FilesPage() {
                   return (
                     <TableRow
                       key={file.name}
-                      onDoubleClick={() => handleItemAction(file)}
+                      onDoubleClick={() => handleFileDoubleClick(file)}
                       className='cursor-pointer hover:bg-muted/50'
                     >
                       <TableCell>{getFileIcon(file.name, file.type)}</TableCell>
@@ -322,7 +336,7 @@ export default function FilesPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                             <DropdownMenuItem onSelect={() => handleItemAction(file)}>
+                             <DropdownMenuItem onSelect={() => handleFileDoubleClick(file)}>
                                 <Edit3 className="mr-2 h-4 w-4" /> {file.type === 'file' ? 'View/Edit' : 'Open Folder'}
                             </DropdownMenuItem>
                             {file.type === 'file' && (
@@ -397,3 +411,5 @@ export default function FilesPage() {
     </div>
   );
 }
+
+  
