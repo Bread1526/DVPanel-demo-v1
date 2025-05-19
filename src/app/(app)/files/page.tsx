@@ -1,31 +1,35 @@
 
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { MoreHorizontal, Folder, File as FileIcon, Upload, Download, Edit3, Trash2, KeyRound, Search, ArrowLeft, Loader2, AlertTriangle, Save, X } from "lucide-react";
+import {
+  MoreHorizontal, Folder, File as FileIcon, Upload, Download, Edit3, Trash2, KeyRound, Search, ArrowLeft, Loader2, AlertTriangle, Save, X,
+  FileCode2, FileJson, FileText, ImageIcon, Archive, Shell, FileTerminal, AudioWaveform, VideoIcon, Database, List, Shield, Github, Settings2
+} from "lucide-react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import path from 'path-browserify'; // Using path-browserify for client-side path manipulation
+import path from 'path-browserify';
 import { format } from 'date-fns';
+import PermissionsDialog from './components/permissions-dialog'; // Import the new dialog
 
 interface FileItem {
   name: string;
   type: 'folder' | 'file' | 'unknown';
   size?: number | null;
-  modified?: string | null; // ISO string from API
+  modified?: string | null;
   permissions?: string | null;
 }
 
-const DAEMON_API_BASE_PATH = '/api/panel-daemon'; // Internal API path
+const DAEMON_API_BASE_PATH = '/api/panel-daemon';
 
 function formatBytes(bytes?: number | null, decimals = 2) {
     if (bytes === null || bytes === undefined || !+bytes) return '0 Bytes';
@@ -36,6 +40,33 @@ function formatBytes(bytes?: number | null, decimals = 2) {
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 }
 
+function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactNode {
+  if (fileType === 'folder') return <Folder className="h-5 w-5 text-primary" />;
+  if (fileType === 'unknown') return <FileIcon className="h-5 w-5 text-muted-foreground" />;
+
+  const extension = filename.split('.').pop()?.toLowerCase() || '';
+  switch (extension) {
+    case 'html': case 'htm': return <FileCode2 className="h-5 w-5 text-orange-500" />;
+    case 'css': case 'scss': case 'sass': return <FileCode2 className="h-5 w-5 text-blue-500" />;
+    case 'js': case 'jsx': return <FileCode2 className="h-5 w-5 text-yellow-500" />;
+    case 'ts': case 'tsx': return <FileCode2 className="h-5 w-5 text-sky-500" />;
+    case 'json': return <FileJson className="h-5 w-5 text-yellow-600" />;
+    case 'txt': case 'md': case 'log': return <FileText className="h-5 w-5 text-gray-500" />;
+    case 'png': case 'jpg': case 'jpeg': case 'gif': case 'svg': case 'webp': case 'ico': return <ImageIcon className="h-5 w-5 text-purple-500" />;
+    case 'zip': case 'tar': case 'gz': case 'rar': case '7z': return <Archive className="h-5 w-5 text-amber-700" />;
+    case 'sh': case 'bash': return <Shell className="h-5 w-5 text-green-600" />;
+    case 'bat': case 'cmd': return <FileTerminal className="h-5 w-5 text-gray-700" />;
+    case 'mp3': case 'wav': case 'ogg': return <AudioWaveform className="h-5 w-5 text-pink-500" />;
+    case 'mp4': case 'mov': case 'avi': case 'mkv': return <VideoIcon className="h-5 w-5 text-red-500" />;
+    case 'db': case 'sqlite': case 'sql': return <Database className="h-5 w-5 text-indigo-500" />;
+    case 'csv': case 'xls': case 'xlsx': return <List className="h-5 w-5 text-green-700" />;
+    case 'exe': case 'dmg': case 'app': return <Settings2 className="h-5 w-5 text-gray-800" />;
+    case 'pem': case 'crt': case 'key': return <Shield className="h-5 w-5 text-teal-500" />;
+    case 'gitignore': case 'gitattributes': case 'gitmodules': return <Github className="h-5 w-5 text-neutral-700" />;
+    default: return <FileIcon className="h-5 w-5 text-muted-foreground" />;
+  }
+}
+
 export default function FilesPage() {
   const [currentPath, setCurrentPath] = useState<string>('/');
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -44,12 +75,15 @@ export default function FilesPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const { toast } = useToast();
 
-  // State for the file editor dialog
   const [editingFile, setEditingFile] = useState<FileItem | null>(null);
   const [editingFilePath, setEditingFilePath] = useState<string | null>(null);
   const [editingFileContent, setEditingFileContent] = useState<string>("");
   const [isEditorLoading, setIsEditorLoading] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
+
+  const [isPermissionsDialogOpen, setIsPermissionsDialogOpen] = useState(false);
+  const [permissionDialogTargetPath, setPermissionDialogTargetPath] = useState<string>("");
+  const [permissionDialogCurrentPerms, setPermissionDialogCurrentPerms] = useState<string>("");
 
 
   const fetchFiles = useCallback(async (pathToFetch: string) => {
@@ -63,7 +97,6 @@ export default function FilesPage() {
           const errData = await response.json();
           errorMsg = errData.error || errData.details || errorMsg;
         } catch (parseError) {
-          // console.error("Failed to parse error response from daemon API:", parseError);
           errorMsg = await response.text().catch(() => errorMsg);
         }
         throw new Error(errorMsg);
@@ -92,7 +125,7 @@ export default function FilesPage() {
       setFiles([]);
       toast({
         title: "File Manager Error",
-        description: `Could not fetch files: ${errorMessage}. Please ensure the backend is configured correctly and the path is accessible.`,
+        description: `Could not fetch files: ${errorMessage}. Please ensure the API is responding correctly and the path is accessible.`,
         variant: "destructive",
       });
     } finally {
@@ -118,14 +151,14 @@ export default function FilesPage() {
     setCurrentPath(newPath.replace(/\\/g, '/'));
   };
 
-  const getBreadcrumbSegments = () => {
+  const getBreadcrumbSegments = useMemo(() => {
     if (currentPath === '/') return [{ name: 'Root', path: '/' }];
     const segments = currentPath.split('/').filter(Boolean);
     return [{ name: 'Root', path: '/' }, ...segments.map((segment, index) => ({
       name: segment,
       path: '/' + segments.slice(0, index + 1).join('/'),
     }))];
-  };
+  }, [currentPath]);
 
   const handleFileDoubleClick = async (file: FileItem) => {
     if (file.type === 'folder') {
@@ -160,6 +193,18 @@ export default function FilesPage() {
     setEditingFile(null);
     setEditingFileContent("");
     setEditorError(null);
+  };
+
+  const handlePermissionsClick = (file: FileItem) => {
+    const fullPath = path.join(currentPath, file.name).replace(/\\/g, '/');
+    setPermissionDialogTargetPath(fullPath);
+    setPermissionDialogCurrentPerms(file.permissions || "---------");
+    setIsPermissionsDialogOpen(true);
+  };
+
+  const handlePermissionsUpdate = () => {
+    setIsPermissionsDialogOpen(false);
+    fetchFiles(currentPath); // Refresh file list
   };
 
   const filteredFiles = files.filter(file =>
@@ -202,7 +247,7 @@ export default function FilesPage() {
           </div>
           <Breadcrumb className="mt-4">
             <BreadcrumbList>
-              {getBreadcrumbSegments().map((segment, index, arr) => (
+              {getBreadcrumbSegments.map((segment, index, arr) => (
                 <React.Fragment key={segment.path + '-' + index}>
                   <BreadcrumbItem>
                     {index === arr.length - 1 ? (
@@ -271,7 +316,7 @@ export default function FilesPage() {
                       className={file.type === 'folder' ? 'cursor-pointer hover:bg-muted/50' : 'cursor-pointer hover:bg-muted/50'}
                     >
                       <TableCell>
-                        {file.type === 'folder' ? <Folder className="h-5 w-5 text-primary" /> : <FileIcon className="h-5 w-5 text-muted-foreground" />}
+                        {getFileIcon(file.name, file.type)}
                       </TableCell>
                       <TableCell
                         className="font-medium"
@@ -300,7 +345,9 @@ export default function FilesPage() {
                              <DropdownMenuItem onSelect={() => handleFileDoubleClick(file)}>
                                 <Edit3 className="mr-2 h-4 w-4" /> {file.type === 'file' ? 'View/Edit' : 'Open'}
                             </DropdownMenuItem>
-                            <DropdownMenuItem><KeyRound className="mr-2 h-4 w-4" /> Permissions</DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => handlePermissionsClick(file)}>
+                                <KeyRound className="mr-2 h-4 w-4" /> Permissions
+                            </DropdownMenuItem>
                             <DropdownMenuItem className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground">
                               <Trash2 className="mr-2 h-4 w-4" /> Delete
                             </DropdownMenuItem>
@@ -318,14 +365,14 @@ export default function FilesPage() {
 
       {editingFile && editingFilePath && (
         <Dialog open={!!editingFilePath} onOpenChange={(isOpen) => { if (!isOpen) closeEditorDialog(); }}>
-          <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-5xl h-[80vh] flex flex-col rounded-2xl backdrop-blur-sm">
-            <DialogHeader>
+          <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-5xl h-[80vh] p-0 flex flex-col rounded-2xl backdrop-blur-sm">
+            <DialogHeader className="p-6 pb-4 border-b">
               <DialogTitle>Viewing: {editingFile.name}</DialogTitle>
               <DialogDescription>
                 Path: {editingFilePath}
               </DialogDescription>
             </DialogHeader>
-            <div className="flex-grow overflow-hidden py-4">
+            <div className="flex-grow overflow-hidden">
               {isEditorLoading ? (
                 <div className="flex justify-center items-center h-full">
                   <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -337,28 +384,37 @@ export default function FilesPage() {
                   <p>Error loading file: {editorError}</p>
                 </div>
               ) : (
-                <ScrollArea className="h-full border rounded-md bg-background">
+                <ScrollArea className="h-full bg-background">
                   <Textarea
                     value={editingFileContent}
-                    readOnly // For now, make it read-only. Editing requires a save mechanism.
-                    className="h-full w-full resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-2 font-mono text-sm"
+                    readOnly
+                    className="h-full w-full resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-4 font-mono text-sm"
                     placeholder="File content will appear here..."
                   />
                 </ScrollArea>
               )}
             </div>
-            <DialogFooter className="border-t pt-4">
+            <DialogFooter className="p-6 pt-4 border-t">
               <Button type="button" variant="outline" onClick={closeEditorDialog}>
                 <X className="mr-2 h-4 w-4" /> Close
               </Button>
-              <Button type="button" disabled /* Save functionality not implemented */ className="shadow-md hover:scale-105 transform transition-transform duration-150">
+              <Button type="button" disabled className="shadow-md hover:scale-105 transform transition-transform duration-150">
                 <Save className="mr-2 h-4 w-4" /> Save Changes
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
+
+      {isPermissionsDialogOpen && permissionDialogTargetPath && (
+        <PermissionsDialog
+          isOpen={isPermissionsDialogOpen}
+          onOpenChange={setIsPermissionsDialogOpen}
+          targetPath={permissionDialogTargetPath}
+          currentPermissions={permissionDialogCurrentPerms}
+          onPermissionsUpdate={handlePermissionsUpdate}
+        />
+      )}
     </div>
   );
 }
-
