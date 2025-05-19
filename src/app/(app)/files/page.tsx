@@ -1,29 +1,138 @@
+
+"use client";
+
+import React, { useState, useEffect, useCallback } from 'react';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { MoreHorizontal, Folder, File, Upload, Download, Edit3, Trash2, KeyRound, Search } from "lucide-react";
+import { MoreHorizontal, Folder, File as FileIcon, Upload, Download, Edit3, Trash2, KeyRound, Search, ArrowLeft, Loader2, AlertTriangle } from "lucide-react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
+import { loadPanelSettings, type PanelSettingsData } from '@/app/(app)/settings/actions';
+import { useToast } from "@/hooks/use-toast";
+import path from 'path-browserify'; // Using path-browserify for client-side path manipulation
 
-const files = [
-  { id: '1', name: 'app', type: 'folder', size: '4.2MB', modified: '2023-10-26', permissions: 'drwxr-xr-x' },
-  { id: '2', name: 'public', type: 'folder', size: '1.5MB', modified: '2023-10-25', permissions: 'drwxr-xr-x' },
-  { id: '3', name: 'package.json', type: 'file', size: '1.2KB', modified: '2023-10-26', permissions: '-rw-r--r--' },
-  { id: '4', name: 'next.config.js', type: 'file', size: '0.8KB', modified: '2023-10-24', permissions: '-rw-r--r--' },
-  { id: '5', name: '.env.example', type: 'file', size: '0.2KB', modified: '2023-10-20', permissions: '-rw-r--r--' },
-];
+interface FileItem {
+  id: string; // Can be derived from name if names are unique in a dir
+  name: string;
+  type: 'folder' | 'file';
+  size: string; // Placeholder
+  modified: string; // Placeholder
+  permissions: string; // Placeholder
+}
+
+const DAEMON_API_VERSION = 'v1';
 
 export default function FilesPage() {
+  const [daemonSettings, setDaemonSettings] = useState<PanelSettingsData | null>(null);
+  const [daemonUrl, setDaemonUrl] = useState<string | null>(null);
+  const [currentPath, setCurrentPath] = useState<string>('/'); // Start at root
+  const [files, setFiles] = useState<FileItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const { toast } = useToast();
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const result = await loadPanelSettings();
+        if (result.data) {
+          setDaemonSettings(result.data);
+          const url = `http://${result.data.daemonIp || 'localhost'}:${result.data.daemonPort || '3005'}/api/${DAEMON_API_VERSION}`;
+          setDaemonUrl(url);
+        } else {
+          setError("Failed to load daemon settings. Please configure them in Panel Settings.");
+          setIsLoading(false);
+        }
+      } catch (e) {
+        console.error("Error loading panel settings for File Manager:", e);
+        setError("Error loading panel settings. Check console.");
+        setIsLoading(false);
+      }
+    };
+    fetchSettings();
+  }, []);
+
+  const fetchFiles = useCallback(async (pathToFetch: string) => {
+    if (!daemonUrl) {
+      //setError("Daemon URL not configured. Cannot fetch files.");
+      // setIsLoading(false); // Moved loading state management
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${daemonUrl}/files?path=${encodeURIComponent(pathToFetch)}`);
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({ error: 'Failed to fetch files from daemon.' }));
+        throw new Error(errData.error || `HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      if (data && data.files) {
+        setFiles(data.files.map((f: any, index: number) => ({
+          id: `${pathToFetch}-${f.name}-${index}`, // Simple unique ID
+          name: f.name,
+          type: f.type,
+          size: 'N/A',
+          modified: 'N/A',
+          permissions: 'N/A',
+        })));
+        setCurrentPath(data.path || pathToFetch); // Trust daemon's reported path
+      } else {
+        setFiles([]);
+      }
+    } catch (e: any) {
+      console.error("Error fetching files:", e);
+      setError(e.message || "An unknown error occurred while fetching files.");
+      setFiles([]); // Clear files on error
+    } finally {
+      setIsLoading(false);
+    }
+  }, [daemonUrl]);
+
+  useEffect(() => {
+    if (daemonUrl) {
+      fetchFiles(currentPath);
+    }
+  }, [daemonUrl, fetchFiles, currentPath]); // fetchFiles is stable, currentPath triggers refetch
+
+  const handleFolderClick = (folderName: string) => {
+    const newPath = path.join(currentPath, folderName);
+    setCurrentPath(newPath);
+    // fetchFiles will be triggered by useEffect watching currentPath
+  };
+
+  const handleBreadcrumbClick = (index: number) => {
+    const segments = currentPath.split('/').filter(Boolean);
+    const newPath = '/' + segments.slice(0, index + 1).join('/');
+    setCurrentPath(newPath === '/' && segments.length > 0 && index === -1 ? '/' : newPath);
+     // Special case for root when clicking first breadcrumb link
+  };
+
+  const getBreadcrumbSegments = () => {
+    if (currentPath === '/') return [{ name: '/', path: '/' }];
+    const segments = currentPath.split('/').filter(Boolean);
+    return [{ name: 'Root /', path: '/' }, ...segments.map((segment, index) => ({
+      name: segment,
+      path: '/' + segments.slice(0, index + 1).join('/'),
+    }))];
+  };
+
+  const filteredFiles = files.filter(file => 
+    file.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div>
       <PageHeader 
         title="Root File Manager" 
-        description="Manage all files and folders on your server. (Owner access only)"
+        description={daemonUrl ? `Manage files via daemon at ${daemonUrl}` : "Configure daemon settings to enable file management."}
         actions={
           <div className="flex gap-2">
-            <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
+            <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={!daemonUrl}>
               <Upload className="mr-2 h-4 w-4" /> Upload
             </Button>
           </div>
@@ -35,72 +144,119 @@ export default function FilesPage() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <CardTitle>File Explorer</CardTitle>
-              <CardDescription className="mt-1">Current path: /srv/www/</CardDescription>
+              <CardDescription className="mt-1">
+                Current path: {currentPath}
+              </CardDescription>
             </div>
             <div className="relative w-full sm:w-auto">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input type="search" placeholder="Search files..." className="pl-8 w-full sm:w-[250px]" />
+              <Input 
+                type="search" 
+                placeholder="Search files..." 
+                className="pl-8 w-full sm:w-[250px]" 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                disabled={!daemonUrl}
+              />
             </div>
           </div>
           <Breadcrumb className="mt-4">
             <BreadcrumbList>
-              <BreadcrumbItem>
-                <BreadcrumbLink href="#">/</BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbLink href="#">srv</BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbPage>www</BreadcrumbPage>
-              </BreadcrumbItem>
+              {getBreadcrumbSegments().map((segment, index, arr) => (
+                <React.Fragment key={segment.path}>
+                  <BreadcrumbItem>
+                    {index === arr.length - 1 ? (
+                      <BreadcrumbPage>{segment.name === '/' ? 'Root /' : segment.name}</BreadcrumbPage>
+                    ) : (
+                      <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); handleBreadcrumbClick(segment.path === '/' ? -1 : index); }}>
+                        {segment.name === '/' ? 'Root /' : segment.name}
+                      </BreadcrumbLink>
+                    )}
+                  </BreadcrumbItem>
+                  {index < arr.length - 1 && <BreadcrumbSeparator />}
+                </React.Fragment>
+              ))}
             </BreadcrumbList>
           </Breadcrumb>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[50px]"></TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Size</TableHead>
-                <TableHead>Modified</TableHead>
-                <TableHead>Permissions</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {files.map((file) => (
-                <TableRow key={file.id}>
-                  <TableCell>
-                    {file.type === 'folder' ? <Folder className="h-5 w-5 text-primary" /> : <File className="h-5 w-5 text-muted-foreground" />}
-                  </TableCell>
-                  <TableCell className="font-medium">{file.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{file.size}</TableCell>
-                  <TableCell className="text-muted-foreground">{file.modified}</TableCell>
-                  <TableCell className="text-muted-foreground font-mono text-xs">{file.permissions}</TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {file.type === 'file' && <DropdownMenuItem><Download className="mr-2 h-4 w-4" /> Download</DropdownMenuItem>}
-                        <DropdownMenuItem><Edit3 className="mr-2 h-4 w-4" /> Edit / Rename</DropdownMenuItem>
-                        <DropdownMenuItem><KeyRound className="mr-2 h-4 w-4" /> Permissions</DropdownMenuItem>
-                        <DropdownMenuItem className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground">
-                          <Trash2 className="mr-2 h-4 w-4" /> Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
+          {isLoading && (
+            <div className="flex justify-center items-center py-10">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="ml-2 text-muted-foreground">Loading files...</p>
+            </div>
+          )}
+          {error && !isLoading && (
+            <div className="flex flex-col items-center justify-center py-10 text-destructive bg-destructive/10 p-4 rounded-md">
+              <AlertTriangle className="h-8 w-8 mb-2" />
+              <p className="font-semibold">Error Loading Files</p>
+              <p className="text-sm text-center">{error}</p>
+              <Button variant="outline" onClick={() => fetchFiles(currentPath)} className="mt-4">
+                Retry
+              </Button>
+            </div>
+          )}
+          {!isLoading && !error && filteredFiles.length === 0 && (
+            <div className="text-center py-10 text-muted-foreground">
+              <Folder className="mx-auto h-12 w-12 mb-2" />
+              <p>This folder is empty or no files match your search.</p>
+            </div>
+          )}
+          {!isLoading && !error && filteredFiles.length > 0 && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[50px]"></TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Size</TableHead>
+                  <TableHead>Modified</TableHead>
+                  <TableHead>Permissions</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filteredFiles.map((file) => (
+                  <TableRow 
+                    key={file.id} 
+                    onDoubleClick={file.type === 'folder' ? () => handleFolderClick(file.name) : undefined}
+                    className={file.type === 'folder' ? 'cursor-pointer hover:bg-muted/50' : ''}
+                  >
+                    <TableCell>
+                      {file.type === 'folder' ? <Folder className="h-5 w-5 text-primary" /> : <FileIcon className="h-5 w-5 text-muted-foreground" />}
+                    </TableCell>
+                    <TableCell 
+                      className="font-medium"
+                      onClick={file.type === 'folder' ? () => handleFolderClick(file.name) : undefined}
+                    >
+                      {file.name}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground capitalize">{file.type}</TableCell>
+                    <TableCell className="text-muted-foreground">{file.size}</TableCell>
+                    <TableCell className="text-muted-foreground">{file.modified}</TableCell>
+                    <TableCell className="text-muted-foreground font-mono text-xs">{file.permissions}</TableCell>
+                    <TableCell className="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {file.type === 'file' && <DropdownMenuItem><Download className="mr-2 h-4 w-4" /> Download</DropdownMenuItem>}
+                          <DropdownMenuItem><Edit3 className="mr-2 h-4 w-4" /> Edit / Rename</DropdownMenuItem>
+                          <DropdownMenuItem><KeyRound className="mr-2 h-4 w-4" /> Permissions</DropdownMenuItem>
+                          <DropdownMenuItem className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground">
+                            <Trash2 className="mr-2 h-4 w-4" /> Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>
