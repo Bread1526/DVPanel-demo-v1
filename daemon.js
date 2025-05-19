@@ -1,66 +1,33 @@
+
 // daemon.js
-const express = require('express');
+// This file's functionality has been integrated into Next.js API routes
+// specifically for the File Manager feature.
+// See: src/app/api/panel-daemon/files/route.ts and src/app/api/panel-daemon/file/route.ts
+// You can delete this file if it's no longer used for other purposes.
+
 const fs = require('fs');
 const path = require('path');
-const cors = require('cors');
 
-const app = express();
-const PORT = process.env.DAEMON_PORT || 3005;
+const logFile = path.resolve(__dirname, 'daemon.log');
 
-app.use(cors());
-app.use(express.json());
+function log(message) {
+  const timestamp = new Date().toISOString();
+  const logMsg = `[${timestamp}] ${message}\n`;
+  // fs.appendFileSync(logFile, logMsg); // Commented out to prevent errors if this script is run accidentally
+  console.log(logMsg.trim());
+}
 
-// Sanitize and resolve file paths within a root directory
-const BASE_DIR = '/srv/www';
-const resolveSafePath = (userPath) => {
-  const safePath = path.resolve(BASE_DIR, userPath || '');
-  if (!safePath.startsWith(BASE_DIR)) throw new Error('Access denied');
-  return safePath;
-};
+log('Legacy daemon.js script started (functionality moved to Next.js API routes).');
 
-// List files in a directory
-app.get('/api/v1/files', (req, res) => {
-  try {
-    const userPath = req.query.path || '/';
-    const dirPath = resolveSafePath(userPath);
+// setInterval(() => {
+//   log('Legacy daemon.js is running...');
+// }, 10000);
 
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    const result = entries.map(entry => ({
-      name: entry.name,
-      type: entry.isDirectory() ? 'folder' : 'file',
-    }));
-
-    res.json({ path: userPath, files: result });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to list files.' });
-  }
-});
-
-// Read a file
-app.get('/api/v1/file', (req, res) => {
-  try {
-    const userPath = req.query.path;
-    if (!userPath) {
-      return res.status(400).json({ error: 'File path is required.' });
-    }
-    const filePath = resolveSafePath(userPath);
-
-    const content = fs.readFileSync(filePath, 'utf-8');
-    res.send(content);
-  } catch (err) {
-    console.error(err);
-    if (err.message === 'Access denied') {
-      return res.status(403).json({ error: 'Access denied.' });
-    }
-    if (err.code === 'ENOENT') {
-      return res.status(404).json({ error: 'File not found.' });
-    }
-    res.status(500).json({ error: 'Failed to read file.' });
-  }
-});
-
-// Start the daemon
-app.listen(PORT, () => {
-  console.log(`🔧 DVPanel Daemon running at http://localhost:${PORT}`);
-});
+// process.on('SIGINT', () => {
+//   log('Legacy daemon.js stopped (SIGINT).');
+//   process.exit(0);
+// });
+// process.on('SIGTERM', () => {
+//   log('Legacy daemon.js stopped (SIGTERM).');
+//   process.exit(0);
+// });

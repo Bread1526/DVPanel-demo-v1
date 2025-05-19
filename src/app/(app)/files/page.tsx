@@ -14,19 +14,18 @@ import { useToast } from "@/hooks/use-toast";
 import path from 'path-browserify'; // Using path-browserify for client-side path manipulation
 
 interface FileItem {
-  id: string;
   name: string;
   type: 'folder' | 'file';
-  size: string;
-  modified: string;
-  permissions: string;
+  // Other properties like size, modified, permissions can be added if daemon provides them
+  size?: string;
+  modified?: string;
+  permissions?: string;
 }
 
-const DAEMON_API_VERSION = 'v1';
-const DEFAULT_DAEMON_URL_BASE = `http://localhost:3005/api/${DAEMON_API_VERSION}`;
+// The daemon functionality is now part of the Next.js app via API routes
+const DAEMON_API_BASE_PATH = '/api/panel-daemon';
 
 export default function FilesPage() {
-  const [daemonUrl, setDaemonUrl] = useState<string>(DEFAULT_DAEMON_URL_BASE);
   const [currentPath, setCurrentPath] = useState<string>('/');
   const [files, setFiles] = useState<FileItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -38,31 +37,35 @@ export default function FilesPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${daemonUrl}/files?path=${encodeURIComponent(pathToFetch)}`);
+      const response = await fetch(`${DAEMON_API_BASE_PATH}/files?path=${encodeURIComponent(pathToFetch)}`);
       if (!response.ok) {
         let errorMsg = `HTTP error! status: ${response.status}`;
         try {
           const errData = await response.json();
-          errorMsg = errData.error || errData.message || errorMsg;
+          errorMsg = errData.error || errData.details || errorMsg;
         } catch (parseError) {
-          // If parsing fails, use the original HTTP error message
-          console.error("Failed to parse error response from daemon:", parseError);
+          console.error("Failed to parse error response from daemon API:", parseError);
+          errorMsg = await response.text().catch(() => errorMsg);
         }
         throw new Error(errorMsg);
       }
       const data = await response.json();
-      if (data && data.files) {
-        setFiles(data.files.map((f: any, index: number) => ({
-          id: `${pathToFetch}-${f.name}-${index}`,
+      if (data && Array.isArray(data.files)) {
+        setFiles(data.files.map((f: any) => ({
           name: f.name,
           type: f.type,
-          size: 'N/A',
-          modified: 'N/A',
-          permissions: 'N/A',
+          size: 'N/A', // Placeholder
+          modified: 'N/A', // Placeholder
+          permissions: 'N/A', // Placeholder
         })));
-        setCurrentPath(data.path || pathToFetch);
+        setCurrentPath(data.path || pathToFetch); // Trust the path returned by API
       } else {
         setFiles([]);
+        setCurrentPath(data.path || pathToFetch);
+        if (!Array.isArray(data.files)) {
+          console.warn("Daemon API did not return a 'files' array. Response:", data);
+          // Potentially setError("Received malformed data from server.")
+        }
       }
     } catch (e: any) {
       console.error("Error fetching files:", e);
@@ -71,33 +74,41 @@ export default function FilesPage() {
       setFiles([]);
       toast({
         title: "File Manager Error",
-        description: `Could not connect to the daemon or fetch files: ${errorMessage}. Please ensure it's running correctly and the path is accessible on the daemon.`,
+        description: `Could not fetch files: ${errorMessage}. Please ensure the backend is configured correctly and the path is accessible.`,
         variant: "destructive",
       });
     } finally {
       setIsLoading(false);
     }
-  }, [daemonUrl, toast]);
+  }, [toast]);
 
   useEffect(() => {
     fetchFiles(currentPath);
-  }, [fetchFiles, currentPath]);
+  }, [currentPath, fetchFiles]);
 
   const handleFolderClick = (folderName: string) => {
     const newPath = path.join(currentPath, folderName);
-    setCurrentPath(newPath);
+    setCurrentPath(newPath.replace(/\\/g, '/'));
   };
 
   const handleBreadcrumbClick = (index: number) => {
     const segments = currentPath.split('/').filter(Boolean);
-    const newPath = '/' + segments.slice(0, index + 1).join('/');
-    setCurrentPath(newPath === '/' && segments.length > 0 && index === -1 ? '/' : newPath);
+    const newPath = '/' + segments.slice(0, index +1).join('/');
+    // Adjust for root click
+    if (index === -1 && segments.length > 0) {
+         setCurrentPath('/');
+    } else if (index === -1 && segments.length === 0) {
+        setCurrentPath('/');
+    }
+    else {
+        setCurrentPath(newPath.replace(/\\/g, '/'));
+    }
   };
 
   const getBreadcrumbSegments = () => {
-    if (currentPath === '/') return [{ name: 'Root /', path: '/' }];
+    if (currentPath === '/') return [{ name: 'Root', path: '/' }];
     const segments = currentPath.split('/').filter(Boolean);
-    return [{ name: 'Root /', path: '/' }, ...segments.map((segment, index) => ({
+    return [{ name: 'Root', path: '/' }, ...segments.map((segment, index) => ({
       name: segment,
       path: '/' + segments.slice(0, index + 1).join('/'),
     }))];
@@ -111,7 +122,7 @@ export default function FilesPage() {
     <div>
       <PageHeader 
         title="Root File Manager" 
-        description={`Manage files via daemon. Defaulting to ${DEFAULT_DAEMON_URL_BASE}.`}
+        description="Manage files directly on the server via internal API."
         actions={
           <div className="flex gap-2">
             <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
@@ -144,13 +155,19 @@ export default function FilesPage() {
           <Breadcrumb className="mt-4">
             <BreadcrumbList>
               {getBreadcrumbSegments().map((segment, index, arr) => (
-                <React.Fragment key={segment.path}>
+                <React.Fragment key={segment.path + '-' + index}>
                   <BreadcrumbItem>
                     {index === arr.length - 1 ? (
-                      <BreadcrumbPage>{segment.name === '/' ? 'Root /' : segment.name}</BreadcrumbPage>
+                      <BreadcrumbPage>{segment.name}</BreadcrumbPage>
                     ) : (
-                      <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); handleBreadcrumbClick(segment.path === '/' ? -1 : index); }}>
-                        {segment.name === '/' ? 'Root /' : segment.name}
+                      <BreadcrumbLink 
+                        href="#" 
+                        onClick={(e) => { 
+                          e.preventDefault(); 
+                          handleBreadcrumbClick(segment.path === '/' ? -1 : index -1 ); 
+                        }}
+                      >
+                        {segment.name}
                       </BreadcrumbLink>
                     )}
                   </BreadcrumbItem>
@@ -199,7 +216,7 @@ export default function FilesPage() {
               <TableBody>
                 {filteredFiles.map((file) => (
                   <TableRow 
-                    key={file.id} 
+                    key={file.name} // Assuming names are unique within a directory for key
                     onDoubleClick={file.type === 'folder' ? () => handleFolderClick(file.name) : undefined}
                     className={file.type === 'folder' ? 'cursor-pointer hover:bg-muted/50' : ''}
                   >
@@ -213,9 +230,9 @@ export default function FilesPage() {
                       {file.name}
                     </TableCell>
                     <TableCell className="text-muted-foreground capitalize">{file.type}</TableCell>
-                    <TableCell className="text-muted-foreground">{file.size}</TableCell>
-                    <TableCell className="text-muted-foreground">{file.modified}</TableCell>
-                    <TableCell className="text-muted-foreground font-mono text-xs">{file.permissions}</TableCell>
+                    <TableCell className="text-muted-foreground">{file.size || 'N/A'}</TableCell>
+                    <TableCell className="text-muted-foreground">{file.modified || 'N/A'}</TableCell>
+                    <TableCell className="text-muted-foreground font-mono text-xs">{file.permissions || 'N/A'}</TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
