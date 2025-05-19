@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label"; // Added import for Label
+import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -62,7 +62,7 @@ function getLanguageFromFilename(filename: string): string {
 
 function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactNode {
   if (fileType === 'folder') return <Folder className="h-5 w-5 text-primary" />;
-  if (fileType === 'link') return <FileIconDefault className="h-5 w-5 text-purple-400" />; 
+  if (fileType === 'link') return <FileIconDefault className="h-5 w-5 text-purple-400" />;
   if (fileType === 'unknown') return <FileIconDefault className="h-5 w-5 text-muted-foreground" />;
 
   const extension = filename.split('.').pop()?.toLowerCase() || '';
@@ -209,7 +209,8 @@ export default function FilesPage() {
       toast({ title: "Success", description: result.message || `${createItemType} "${newItemName}" created.` });
       setIsCreateItemDialogOpen(false);
       fetchFiles(currentPath); // Refresh file list
-    } catch (e: any)      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
     } finally {
       setIsCreatingItem(false);
     }
@@ -411,5 +412,3 @@ export default function FilesPage() {
     </div>
   );
 }
-
-  
