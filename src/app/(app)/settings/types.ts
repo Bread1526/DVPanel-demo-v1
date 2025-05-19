@@ -49,6 +49,27 @@ export const panelSettingsSchema = z.object({
     .default(false)
     .describe('Disable automatic logout due to inactivity.'),
   debugMode: z.boolean().default(false).describe('Global debug mode for the panel.'),
+  daemonPort: z
+    .string()
+    .min(1, "Daemon Port is required.")
+    .regex(/^\d+$/, "Daemon Port must be a number.")
+    .refine((val) => {
+      const portNum = parseInt(val, 10);
+      return portNum >= 1 && portNum <= 65535;
+    }, "Daemon Port must be between 1 and 65535.")
+    .default("8443"),
+  daemonIp: z
+    .string()
+    .refine(
+      (val) =>
+        val === "" ||
+        /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(val) || // IPv4
+        /^[a-zA-Z0-9.-]+$/.test(val), // Domain name
+      {
+        message: "Must be a valid IPv4 address, domain name, or empty (interpreted as 127.0.0.1).",
+      }
+    )
+    .default("127.0.0.1"),
 });
 
 export type PanelSettingsData = z.infer<typeof panelSettingsSchema>;
