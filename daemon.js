@@ -41,11 +41,21 @@ app.get('/api/v1/files', (req, res) => {
 app.get('/api/v1/file', (req, res) => {
   try {
     const userPath = req.query.path;
+    if (!userPath) {
+      return res.status(400).json({ error: 'File path is required.' });
+    }
     const filePath = resolveSafePath(userPath);
 
     const content = fs.readFileSync(filePath, 'utf-8');
     res.send(content);
   } catch (err) {
+    console.error(err);
+    if (err.message === 'Access denied') {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+    if (err.code === 'ENOENT') {
+      return res.status(404).json({ error: 'File not found.' });
+    }
     res.status(500).json({ error: 'Failed to read file.' });
   }
 });
