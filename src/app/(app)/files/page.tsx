@@ -1,10 +1,10 @@
 
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
@@ -13,31 +13,41 @@ import {
   FileCode2, FileJson, FileText, ImageIcon, Archive, Shell, FileTerminal, AudioWaveform, VideoIcon, Database, List, Shield, Github, Settings2, ServerCog
 } from "lucide-react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
-import CodeEditor from '@/components/ui/code-editor'; // Import the new CodeEditor
+import CodeEditor from '@/components/ui/code-editor';
 import { useToast } from "@/hooks/use-toast";
 import path from 'path-browserify';
 import { format } from 'date-fns';
 import PermissionsDialog from './components/permissions-dialog';
+import { cn } from '@/lib/utils';
+import { buttonVariants } from '@/components/ui/button';
 
 interface FileItem {
   name: string;
   type: 'folder' | 'file' | 'unknown';
   size?: number | null;
-  modified?: string | null; // ISO string
-  permissions?: string | null; // "rwxrwxrwx" format
-  octalPermissions?: string | null; // "0755" format
+  modified?: string | null;
+  permissions?: string | null;
+  octalPermissions?: string | null;
+}
+
+interface OpenedFile {
+  path: string; // Full path
+  name: string;
+  content: string; // Current content in editor
+  originalContent: string; // Content as loaded from server or last save
+  language: string;
+  unsavedChanges: boolean;
 }
 
 const DAEMON_API_BASE_PATH = '/api/panel-daemon';
 
 function formatBytes(bytes?: number | null, decimals = 2) {
-    if (bytes === null || bytes === undefined || !+bytes) return '0 Bytes';
-    const k = 1024;
-    const dm = decimals < 0 ? 0 : decimals;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+  if (bytes === null || bytes === undefined || !+bytes) return '0 Bytes';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 }
 
 function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactNode {
@@ -53,7 +63,7 @@ function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactN
     case 'json': return <FileJson className="h-5 w-5 text-yellow-600" />;
     case 'yaml': case 'yml': return <ServerCog className="h-5 w-5 text-indigo-400" />;
     case 'txt': case 'md': case 'log': return <FileText className="h-5 w-5 text-gray-500" />;
-    case 'png': case 'jpg': case 'jpeg': case 'gif': case 'svg': case 'webp': case 'ico': return <ImageIcon className="h-5 w-5 text-purple-500" />;
+    case 'png': case 'jpg': case 'jpeg': case 'gif': case 'svg': case 'webp': 'ico': return <ImageIcon className="h-5 w-5 text-purple-500" />;
     case 'zip': case 'tar': case 'gz': case 'rar': case '7z': return <Archive className="h-5 w-5 text-amber-700" />;
     case 'sh': case 'bash': return <Shell className="h-5 w-5 text-green-600" />;
     case 'bat': case 'cmd': return <FileTerminal className="h-5 w-5 text-gray-700" />;
@@ -72,18 +82,17 @@ function getLanguageFromFilename(filename: string): string {
   const extension = filename.split('.').pop()?.toLowerCase() || '';
   switch (extension) {
     case 'js': case 'jsx': return 'javascript';
-    case 'ts': case 'tsx': return 'typescript'; // CodeMirror javascript lang supports typescript
+    case 'ts': case 'tsx': return 'typescript';
     case 'html': case 'htm': return 'html';
     case 'css': case 'scss': return 'css';
     case 'json': return 'json';
-    case 'yaml': case 'yml': return 'yaml'; // May need a specific CM lang for YAML or use plaintext
-    case 'md': return 'markdown'; // May need a specific CM lang for Markdown or use plaintext
+    case 'yaml': case 'yml': return 'yaml';
+    case 'md': return 'markdown';
     case 'sh': case 'bash': return 'shell';
     case 'py': return 'python';
-    default: return 'plaintext'; // Fallback for CodeMirror
+    default: return 'plaintext';
   }
 }
-
 
 export default function FilesPage() {
   const [currentPath, setCurrentPath] = useState<string>('/');
@@ -93,21 +102,29 @@ export default function FilesPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const { toast } = useToast();
 
-  const [editingFile, setEditingFile] = useState<FileItem | null>(null);
-  const [editingFilePath, setEditingFilePath] = useState<string | null>(null);
-  const [editingFileContent, setEditingFileContent] = useState<string>("");
-  const [editingFileLanguage, setEditingFileLanguage] = useState<string>('plaintext');
+  // Tabbed editor state
+  const [openedFiles, setOpenedFiles] = useState<OpenedFile[]>([]);
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  const activeFilePathRef = useRef<string | null>(null); // To handle async updates correctly
+
+  // Editor specific state (driven by activeFilePath and openedFiles)
   const [isEditorLoading, setIsEditorLoading] = useState(false);
   const [isEditorSaving, setIsEditorSaving] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
+  // editorContent and editorLanguage are now derived or set by useEffect based on activeFilePath
 
   const [isPermissionsDialogOpen, setIsPermissionsDialogOpen] = useState(false);
   const [permissionDialogTargetPath, setPermissionDialogTargetPath] = useState<string>("");
   const [permissionDialogCurrentRwxPerms, setPermissionDialogCurrentRwxPerms] = useState<string>("");
   const [permissionDialogCurrentOctalPerms, setPermissionDialogCurrentOctalPerms] = useState<string>("");
 
+  // Update ref whenever activeFilePath changes
+  useEffect(() => {
+    activeFilePathRef.current = activeFilePath;
+  }, [activeFilePath]);
 
   const fetchFiles = useCallback(async (pathToFetch: string) => {
+    console.log("[FilesPage] fetchFiles CALLED for path:", pathToFetch);
     setIsLoading(true);
     setError(null);
     try {
@@ -123,55 +140,54 @@ export default function FilesPage() {
         throw new Error(errorMsg);
       }
       const data = await response.json();
+      console.log("[FilesPage] fetchFiles RESPONSE for path:", pathToFetch, "DATA:", data);
       if (data && Array.isArray(data.files)) {
         setFiles(data.files.map((f: any) => ({
           name: f.name,
           type: f.type,
           size: f.size,
           modified: f.modified,
-          permissions: f.permissions, 
+          permissions: f.permissions,
           octalPermissions: f.octalPermissions,
         })));
         setCurrentPath(data.path || pathToFetch);
       } else {
         setFiles([]);
         setCurrentPath(data.path || pathToFetch);
-        if (!Array.isArray(data.files)) {
-          console.warn("API did not return a 'files' array. Response:", data);
-        }
+        if (!Array.isArray(data.files)) console.warn("API did not return a 'files' array. Response:", data);
       }
     } catch (e: any) {
       console.error("Error fetching files:", e);
       const errorMessage = e.message || "An unknown error occurred while fetching files.";
       setError(errorMessage);
       setFiles([]);
-      toast({
-        title: "File Manager Error",
-        description: `Could not fetch files: ${errorMessage}. Please ensure the API is responding correctly and the path is accessible.`,
-        variant: "destructive",
-      });
+      toast({ title: "File Manager Error", description: `Could not fetch files: ${errorMessage}.`, variant: "destructive" });
     } finally {
       setIsLoading(false);
+      console.log("[FilesPage] fetchFiles FINISHED for path:", pathToFetch);
     }
   }, [toast]);
 
   useEffect(() => {
+    console.log("[FilesPage] useEffect for currentPath, calling fetchFiles with currentPath:", currentPath);
     fetchFiles(currentPath);
   }, [currentPath, fetchFiles]);
 
-  const handleFolderClick = (folderName: string) => {
+  const handleFolderClick = useCallback((folderName: string) => {
     const newPath = path.join(currentPath, folderName);
+    console.log("[FilesPage] handleFolderClick:", folderName, "New path will be:", newPath.replace(/\\/g, '/'));
     setCurrentPath(newPath.replace(/\\/g, '/'));
-  };
+  }, [currentPath]);
 
-  const handleBreadcrumbClick = (index: number) => {
+  const handleBreadcrumbClick = useCallback((index: number) => {
     const segments = currentPath.split('/').filter(Boolean);
     let newPath = '/';
     if (index >= 0) {
       newPath += segments.slice(0, index + 1).join('/');
     }
+    console.log("[FilesPage] handleBreadcrumbClick: index", index, "New path:", newPath.replace(/\\/g, '/'));
     setCurrentPath(newPath.replace(/\\/g, '/'));
-  };
+  }, [currentPath]);
 
   const getBreadcrumbSegments = useMemo(() => {
     if (currentPath === '/') return [{ name: 'Root', path: '/' }];
@@ -182,66 +198,222 @@ export default function FilesPage() {
     }))];
   }, [currentPath]);
 
-  const handleFileDoubleClick = async (file: FileItem) => {
-    if (file.type === 'folder') {
-      handleFolderClick(file.name);
+  // Derived editor content based on active file
+  const derivedEditorContent = useMemo(() => {
+    if (!activeFilePath) return "";
+    const activeFile = openedFiles.find(f => f.path === activeFilePath);
+    const content = activeFile ? activeFile.content : "";
+    console.log("[FilesPage] useMemo editorContent: activeFilePath='", activeFilePath, "', found content length=", content.length);
+    return content;
+  }, [activeFilePath, openedFiles]);
+
+  const derivedEditorLanguage = useMemo(() => {
+    if (!activeFilePath) return "plaintext";
+    const activeFile = openedFiles.find(f => f.path === activeFilePath);
+    return activeFile ? activeFile.language : "plaintext";
+  }, [activeFilePath, openedFiles]);
+
+
+  // Effect to fetch content when activeFilePath changes and content is not loaded
+  useEffect(() => {
+    console.log("[FilesPage] useEffect[activeFilePath, openedFiles] START. Active path:", activeFilePath);
+    if (!activeFilePath) {
+      setEditorError(null);
+      setIsEditorLoading(false);
+      console.log("[FilesPage] useEffect[activeFilePath]: No active file, clearing editor states.");
       return;
     }
-    const fullPath = path.join(currentPath, file.name).replace(/\\/g, '/');
-    setEditingFilePath(fullPath);
-    setEditingFile(file);
-    setEditingFileLanguage(getLanguageFromFilename(file.name));
-    setIsEditorLoading(true);
-    setEditorError(null);
-    setEditingFileContent("");
 
-    try {
-      const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(fullPath)}&view=true`);
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({ error: `Failed to load file content. Status: ${response.status}` }));
-        throw new Error(errData.error || `HTTP error ${response.status}`);
-      }
-      const content = await response.text();
-      setEditingFileContent(content);
-    } catch (e: any) {
-      setEditorError(e.message || "Failed to load file content.");
-      toast({ title: "Error", description: `Could not load file: ${e.message}`, variant: "destructive" });
-    } finally {
+    const activeFileIndex = openedFiles.findIndex(f => f.path === activeFilePath);
+    if (activeFileIndex === -1) {
+      console.error("[FilesPage] useEffect[activeFilePath]: Active file path not found in openedFiles. This shouldn't happen.", activeFilePath);
+      setEditorError("Error: Active file data not found.");
       setIsEditorLoading(false);
+      return;
     }
-  };
+    
+    const activeFile = openedFiles[activeFileIndex];
 
-  const handleSaveFileContent = async () => {
-    if (!editingFilePath) return;
+    // Only fetch if content is an empty string AND it's not marked as unsaved changes (meaning it was truly never loaded or empty by design)
+    // And also consider an initial loading marker if we add one.
+    // For simplicity, if content is empty string and originalContent is also empty string (after first open), we assume it's loaded.
+    // We'll fetch if originalContent is empty string (signifying it was added but not fetched).
+    if (activeFile.originalContent === "" && activeFile.content === "") {
+      console.log("[FilesPage] useEffect[activeFilePath]: Fetching content for", activeFilePath);
+      setIsEditorLoading(true);
+      setEditorError(null);
+
+      fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(activeFilePath)}&view=true`)
+        .then(response => {
+          if (!response.ok) {
+            return response.json().then(errData => { throw new Error(errData.error || `HTTP error ${response.status}`); });
+          }
+          return response.text();
+        })
+        .then(textContent => {
+          if (activeFilePathRef.current === activeFilePath) { // Check if tab is still active
+            setOpenedFiles(prev => prev.map(f =>
+              f.path === activeFilePath ? { ...f, content: textContent, originalContent: textContent, unsavedChanges: false } : f
+            ));
+            console.log("[FilesPage] useEffect[activeFilePath]: Content fetched successfully for", activeFilePath);
+          } else {
+            console.log("[FilesPage] useEffect[activeFilePath]: Content fetched for", activeFilePath, "but tab is no longer active.");
+          }
+        })
+        .catch((e: any) => {
+          if (activeFilePathRef.current === activeFilePath) {
+            const message = e.message || "Failed to load file content.";
+            console.error("[FilesPage] useEffect[activeFilePath]: Error loading file content for", activeFilePath, message);
+            setEditorError(message);
+            toast({ title: "Error Loading File", description: message, variant: "destructive" });
+          }
+        })
+        .finally(() => {
+          if (activeFilePathRef.current === activeFilePath) {
+            setIsEditorLoading(false);
+          }
+        });
+    } else {
+      console.log("[FilesPage] useEffect[activeFilePath]: Content for", activeFilePath, "already exists or is being edited. No fetch. Unsaved:", activeFile.unsavedChanges);
+      setIsEditorLoading(false); // Content is already there or being managed
+      setEditorError(null);
+    }
+  }, [activeFilePath, openedFiles, toast]); // `openedFiles` is needed to react to its content changes
+
+  const handleOpenAndActivateFile = useCallback((fileItem: FileItem) => {
+    console.log("[FilesPage] handleOpenAndActivateFile CALLED for fileItem:", fileItem.name, "Type:", fileItem.type);
+    if (fileItem.type === 'folder') {
+      handleFolderClick(fileItem.name);
+      return;
+    }
+
+    const fullPath = path.join(currentPath, fileItem.name).replace(/\\/g, '/');
+    console.log("[FilesPage] handleOpenAndActivateFile: Full path to open:", fullPath);
+
+    setOpenedFiles(prev => {
+      const existingFileIndex = prev.findIndex(f => f.path === fullPath);
+      let newOpenedFiles = [...prev];
+
+      if (existingFileIndex !== -1) {
+        console.log("[FilesPage] handleOpenAndActivateFile: File already in openedFiles. Moving to end:", fullPath);
+        const existingFile = newOpenedFiles.splice(existingFileIndex, 1)[0];
+        newOpenedFiles.push(existingFile);
+      } else {
+        console.log("[FilesPage] handleOpenAndActivateFile: File not in openedFiles. Adding:", fullPath);
+        newOpenedFiles.push({
+          path: fullPath,
+          name: fileItem.name,
+          content: "", // Initially empty, will be fetched by useEffect
+          originalContent: "", // Mark as needing fetch
+          language: getLanguageFromFilename(fileItem.name),
+          unsavedChanges: false,
+        });
+      }
+      return newOpenedFiles;
+    });
+    setActiveFilePath(fullPath); // This will trigger the useEffect to load content
+    console.log("[FilesPage] handleOpenAndActivateFile: Set activeFilePath to:", fullPath);
+
+  }, [currentPath, handleFolderClick]);
+  
+  const handleTabActivation = useCallback((filePath: string) => {
+    console.log("[FilesPage] handleTabActivation CALLED for filePath:", filePath);
+    setActiveFilePath(filePath);
+    setOpenedFiles(prev => {
+        const fileIndex = prev.findIndex(f => f.path === filePath);
+        if (fileIndex === -1) return prev; // Should not happen
+        const fileToActivate = prev[fileIndex];
+        const restOfFiles = prev.filter(f => f.path !== filePath);
+        return [...restOfFiles, fileToActivate]; // Move to end (most recently used)
+    });
+  }, []);
+
+  const handleCloseTab = useCallback((filePathToClose: string, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent tab activation when clicking close
+    console.log("[FilesPage] handleCloseTab CALLED for filePathToClose:", filePathToClose);
+
+    const fileToClose = openedFiles.find(f => f.path === filePathToClose);
+    if (fileToClose?.unsavedChanges) {
+      if (!window.confirm(`File "${fileToClose.name}" has unsaved changes. Are you sure you want to close it?`)) {
+        console.log("[FilesPage] handleCloseTab: Close cancelled due to unsaved changes for", filePathToClose);
+        return;
+      }
+    }
+
+    setOpenedFiles(prev => {
+      const remainingFiles = prev.filter(f => f.path !== filePathToClose);
+      if (activeFilePath === filePathToClose) {
+        if (remainingFiles.length > 0) {
+          // Activate the new last tab (previously second to last)
+          const newActivePath = remainingFiles[remainingFiles.length - 1].path;
+          console.log("[FilesPage] handleCloseTab: Closed active tab. New active tab will be:", newActivePath);
+          setActiveFilePath(newActivePath);
+        } else {
+          console.log("[FilesPage] handleCloseTab: Closed last tab. Clearing active file.");
+          setActiveFilePath(null);
+        }
+      }
+      return remainingFiles;
+    });
+  }, [openedFiles, activeFilePath]);
+
+  const handleEditorContentChange = useCallback((newContent: string) => {
+    if (!activeFilePath) return;
+    console.log("[FilesPage] handleEditorContentChange: activeFilePath:", activeFilePath, "New content length:", newContent.length);
+    setOpenedFiles(prev =>
+      prev.map(f => {
+        if (f.path === activeFilePath) {
+          const hasChanged = newContent !== f.originalContent;
+          console.log("[FilesPage] handleEditorContentChange: File", f.name, "original length:", f.originalContent.length, "new length:", newContent.length, "hasChanged:", hasChanged);
+          return { ...f, content: newContent, unsavedChanges: hasChanged };
+        }
+        return f;
+      })
+    );
+  }, [activeFilePath]);
+
+  const handleSaveFileContent = useCallback(async () => {
+    if (!activeFilePath) {
+      console.warn("[FilesPage] handleSaveFileContent: No active file to save.");
+      return;
+    }
+    const activeFile = openedFiles.find(f => f.path === activeFilePath);
+    if (!activeFile) {
+      console.error("[FilesPage] handleSaveFileContent: Active file not found in openedFiles state.");
+      return;
+    }
+
+    console.log("[FilesPage] handleSaveFileContent: Saving file", activeFilePath);
     setIsEditorSaving(true);
     setEditorError(null);
+
     try {
       const response = await fetch(`${DAEMON_API_BASE_PATH}/file`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: editingFilePath, content: editingFileContent }),
+        body: JSON.stringify({ path: activeFilePath, content: activeFile.content }),
       });
       const result = await response.json();
       if (!response.ok) {
         throw new Error(result.error || result.details || 'Failed to save file.');
       }
-      toast({ title: 'Success', description: result.message || `File ${editingFile?.name} saved.` });
-      closeEditorDialog();
+      toast({ title: 'Success', description: result.message || `File ${activeFile.name} saved.` });
+      setOpenedFiles(prev =>
+        prev.map(f =>
+          f.path === activeFilePath ? { ...f, unsavedChanges: false, originalContent: activeFile.content } : f
+        )
+      );
+      console.log("[FilesPage] handleSaveFileContent: File saved successfully", activeFilePath);
     } catch (e: any) {
-      setEditorError(e.message || "An unexpected error occurred while saving.");
-      toast({ title: "Error Saving File", description: e.message, variant: "destructive" });
+      const message = e.message || "An unexpected error occurred while saving.";
+      console.error("[FilesPage] handleSaveFileContent: Error saving file", activeFilePath, message);
+      setEditorError(message);
+      toast({ title: "Error Saving File", description: message, variant: "destructive" });
     } finally {
       setIsEditorSaving(false);
     }
-  };
+  }, [activeFilePath, openedFiles, toast]);
 
-  const closeEditorDialog = () => {
-    setEditingFilePath(null);
-    setEditingFile(null);
-    setEditingFileContent("");
-    setEditingFileLanguage('plaintext');
-    setEditorError(null);
-  };
 
   const handlePermissionsClick = (file: FileItem) => {
     const fullPath = path.join(currentPath, file.name).replace(/\\/g, '/');
@@ -253,18 +425,25 @@ export default function FilesPage() {
 
   const handlePermissionsUpdate = () => {
     setIsPermissionsDialogOpen(false);
-    fetchFiles(currentPath);
+    fetchFiles(currentPath); // Refresh file list to show updated permissions
   };
 
-  const filteredFiles = files.filter(file =>
+  const filteredFiles = useMemo(() => files.filter(file =>
     file.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  ), [files, searchTerm]);
+
+  const activeFileForEditor = useMemo(() => {
+    if (!activeFilePath) return null;
+    return openedFiles.find(f => f.path === activeFilePath) || null;
+  }, [activeFilePath, openedFiles]);
+
+  console.log("[FilesPage] RENDER CYCLE - currentPath:", currentPath, "activeFilePath:", activeFilePath, "openedFiles count:", openedFiles.length, "isEditorLoading:", isEditorLoading, "editorContent length (derived):", derivedEditorContent.length);
 
   return (
-    <div>
+    <div className="flex flex-col h-full">
       <PageHeader
         title="File Manager"
-        description="Manage files directly on the server via internal API."
+        description="Browse and manage files on the server."
         actions={
           <div className="flex gap-2">
             <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
@@ -274,13 +453,103 @@ export default function FilesPage() {
         }
       />
 
-      <Card>
+      {/* Debug Info Paragraph - REMOVE FOR PRODUCTION */}
+      {/* <div className="p-2 mb-2 text-xs bg-yellow-100 border border-yellow-300 rounded text-yellow-700">
+        DEBUG: Active: {activeFilePath || "None"} | Editor Loading: {isEditorLoading.toString()} | Error: {editorError || "None"} | Content Length: {derivedEditorContent.length}
+      </div> */}
+      
+      {/* Tab Bar and Editor Area */}
+      {openedFiles.length > 0 && (
+        <Card className="mb-6 flex-shrink-0">
+          <CardHeader className="p-0 border-b">
+            <div className="flex items-center px-1 pt-1 overflow-x-auto no-scrollbar">
+              {openedFiles.map(file => (
+                <div
+                  key={file.path}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleTabActivation(file.path)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleTabActivation(file.path)}
+                  className={cn(
+                    buttonVariants({ variant: 'ghost', size: 'sm' }),
+                    "h-8 px-3 rounded-b-none border-b-2 flex items-center gap-2",
+                    activeFilePath === file.path
+                      ? "border-primary text-primary bg-muted"
+                      : "border-transparent text-muted-foreground hover:bg-muted/50"
+                  )}
+                >
+                  {getFileIcon(file.name, 'file')}
+                  <span className="truncate max-w-[150px] text-xs">{file.name}{file.unsavedChanges ? "*" : ""}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 ml-1 p-0"
+                    onClick={(e) => handleCloseTab(file.path, e)}
+                    aria-label={`Close ${file.name}`}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {activeFilePath && (
+                <div className="flex flex-col" style={{ height: 'calc(100vh - 450px)', minHeight: '300px' }}> {/* Adjust height as needed */}
+                 <div className="flex items-center p-2 border-b">
+                    <Button onClick={handleSaveFileContent} disabled={isEditorSaving || !activeFileForEditor?.unsavedChanges} size="sm" className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                      {isEditorSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                      Save Changes
+                    </Button>
+                    {activeFileForEditor?.unsavedChanges && <span className="ml-2 text-xs text-amber-600 italic">* Unsaved changes</span>}
+                    <span className="ml-auto text-xs text-muted-foreground truncate max-w-xs" title={activeFilePath}>
+                      {activeFilePath.split('/').pop()} ({derivedEditorLanguage})
+                    </span>
+                  </div>
+                  <div className="flex-grow overflow-hidden p-1 bg-muted/30">
+                    {isEditorLoading ? (
+                      <div className="flex justify-center items-center h-full">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        <p className="ml-2">Loading content...</p>
+                      </div>
+                    ) : editorError ? (
+                      <div className="flex flex-col justify-center items-center h-full text-destructive p-4">
+                        <AlertTriangle className="h-8 w-8 mb-2" />
+                        <p className="font-semibold">Error Loading File</p>
+                        <p className="text-sm text-center">{editorError}</p>
+                      </div>
+                    ) : (
+                      <CodeEditor
+                        key={activeFilePath} // Force re-mount on file change
+                        value={derivedEditorContent}
+                        onChange={handleEditorContentChange}
+                        language={derivedEditorLanguage}
+                        className="h-full w-full"
+                        readOnly={false}
+                      />
+                    )}
+                  </div>
+              </div>
+            )}
+          </CardContent>
+          {activeFilePath && (
+            <CardFooter className="p-2 border-t text-xs text-muted-foreground justify-between">
+              <div>Path: <span className="font-mono">{activeFilePath}</span></div>
+              <div>Chars: {derivedEditorContent.length} Lines: {derivedEditorContent.split('\n').length}</div>
+            </CardFooter>
+          )}
+        </Card>
+      )}
+
+
+      {/* File Table Area */}
+      <Card className="flex-grow flex flex-col overflow-hidden">
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <CardTitle>File Explorer</CardTitle>
               <CardDescription className="mt-1">
-                Current path: {currentPath}
+                Current path: <span className="font-mono">{currentPath}</span>
               </CardDescription>
             </div>
             <div className="relative w-full sm:w-auto">
@@ -319,7 +588,7 @@ export default function FilesPage() {
             </BreadcrumbList>
           </Breadcrumb>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex-grow overflow-y-auto">
           {isLoading && (
             <div className="flex justify-center items-center py-10">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -361,7 +630,10 @@ export default function FilesPage() {
                   return (
                     <TableRow
                       key={file.name}
-                      onDoubleClick={() => handleFileDoubleClick(file)}
+                      onDoubleClick={() => {
+                        console.log("[FilesPage] TableRow onDoubleClick FIRED for:", file.name, "Type:", file.type);
+                        handleOpenAndActivateFile(file);
+                      }}
                       className={file.type === 'folder' ? 'cursor-pointer hover:bg-muted/50' : 'cursor-pointer hover:bg-muted/50'}
                     >
                       <TableCell>
@@ -391,7 +663,7 @@ export default function FilesPage() {
                                 <Download className="mr-2 h-4 w-4" /> Download
                               </DropdownMenuItem>
                             )}
-                             <DropdownMenuItem onSelect={() => handleFileDoubleClick(file)}>
+                             <DropdownMenuItem onSelect={() => handleOpenAndActivateFile(file)}>
                                 <Edit3 className="mr-2 h-4 w-4" /> {file.type === 'file' ? 'View/Edit' : 'Open'}
                             </DropdownMenuItem>
                             <DropdownMenuItem onSelect={() => handlePermissionsClick(file)}>
@@ -412,58 +684,6 @@ export default function FilesPage() {
         </CardContent>
       </Card>
 
-      {/* Editor Dialog */}
-      {editingFile && editingFilePath && (
-        <Dialog open={!!editingFilePath} onOpenChange={(isOpen) => { if (!isOpen) closeEditorDialog(); }}>
-          <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-7xl h-[90vh] p-0 flex flex-col rounded-2xl backdrop-blur-sm">
-            <DialogHeader className="p-4 pb-3 border-b shrink-0">
-              <DialogTitle>Editing: {editingFile.name}</DialogTitle>
-              <DialogDescription>
-                Path: <span className="font-mono text-xs">{editingFilePath}</span> | Language: {editingFileLanguage}
-              </DialogDescription>
-            </DialogHeader>
-            
-            <div className="flex-grow overflow-hidden p-1">
-              {isEditorLoading ? (
-                <div className="flex justify-center items-center h-full">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                  <p className="ml-2">Loading content...</p>
-                </div>
-              ) : editorError ? (
-                <div className="flex flex-col justify-center items-center h-full text-destructive p-4">
-                  <AlertTriangle className="h-8 w-8 mb-2" />
-                  <p className="font-semibold">Error Loading File</p>
-                  <p className="text-sm text-center">{editorError}</p>
-                </div>
-              ) : (
-                 <CodeEditor
-                    value={editingFileContent}
-                    onChange={setEditingFileContent}
-                    language={editingFileLanguage}
-                    className="h-full w-full"
-                    readOnly={false} // Or dynamically set if some files should be read-only
-                 />
-              )}
-            </div>
-
-            <DialogFooter className="p-3 border-t flex justify-between items-center shrink-0">
-              <div className="text-xs text-muted-foreground">
-                Chars: {editingFileContent.length} Lines: {editingFileContent.split('\\n').length}
-              </div>
-              <div className="flex gap-2">
-                <Button type="button" variant="outline" onClick={closeEditorDialog} disabled={isEditorSaving}>
-                  <X className="mr-2 h-4 w-4" /> Close
-                </Button>
-                <Button type="button" onClick={handleSaveFileContent} disabled={isEditorLoading || isEditorSaving} className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                  {isEditorSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                  Save Changes
-                </Button>
-              </div>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
-
       {isPermissionsDialogOpen && permissionDialogTargetPath && (
         <PermissionsDialog
           isOpen={isPermissionsDialogOpen}
@@ -477,3 +697,4 @@ export default function FilesPage() {
     </div>
   );
 }
+
