@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import path from 'path-browserify';
@@ -101,7 +100,6 @@ export default function FilesPage() {
           const errData = await response.json();
           errorMsg = errData.error || errData.details || errorMsg;
         } catch (parseError) {
-          // If parsing JSON fails, try to get text, otherwise stick with original errorMsg
           errorMsg = await response.text().catch(() => errorMsg);
         }
         throw new Error(errorMsg);
@@ -113,8 +111,8 @@ export default function FilesPage() {
           type: f.type,
           size: f.size,
           modified: f.modified,
-          permissions: f.permissions, // rwxrwxrwx string from API
-          octalPermissions: f.octalPermissions, // "0755" string from API
+          permissions: f.permissions,
+          octalPermissions: f.octalPermissions,
         })));
         setCurrentPath(data.path || pathToFetch);
       } else {
@@ -179,7 +177,6 @@ export default function FilesPage() {
     setEditingFileContent("");
 
     try {
-      // Pass ?view=true to suggest to the API we want plain text if possible
       const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(fullPath)}&view=true`);
       if (!response.ok) {
         const errData = await response.json().catch(() => ({ error: `Failed to load file content. Status: ${response.status}` }));
@@ -211,8 +208,6 @@ export default function FilesPage() {
       }
       toast({ title: 'Success', description: result.message || `File ${editingFile?.name} saved.` });
       closeEditorDialog();
-      // Optionally, re-fetch files if needed, though usually not for content save unless metadata changes
-      // fetchFiles(currentPath); 
     } catch (e: any) {
       setEditorError(e.message || "An unexpected error occurred while saving.");
       toast({ title: "Error Saving File", description: e.message, variant: "destructive" });
@@ -238,7 +233,7 @@ export default function FilesPage() {
 
   const handlePermissionsUpdate = () => {
     setIsPermissionsDialogOpen(false);
-    fetchFiles(currentPath); // Refresh file list
+    fetchFiles(currentPath);
   };
 
   const filteredFiles = files.filter(file =>
@@ -406,12 +401,11 @@ export default function FilesPage() {
                 Path: <span className="font-mono text-xs">{editingFilePath}</span>
               </DialogDescription>
             </DialogHeader>
-            <div className="flex-grow overflow-hidden flex flex-row"> {/* Main content area: flex row */}
-              {/* Visual Line Number Gutter Placeholder */}
+            <div className="flex-grow overflow-hidden flex flex-row">
               <div className="w-12 bg-muted/50 border-r border-border py-2 px-1 text-right text-muted-foreground text-xs select-none overflow-y-hidden shrink-0">
-                {/* This is a placeholder. Real line numbers require JS sync with textarea scroll/content. */}
+                {/* Placeholder for line numbers */}
               </div>
-              <div className="flex-grow flex flex-col"> {/* Editor area: flex column to allow ScrollArea to grow */}
+              <div className="flex-grow flex flex-col">
                 {isEditorLoading ? (
                   <div className="flex justify-center items-center h-full">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -424,14 +418,12 @@ export default function FilesPage() {
                     <p className="text-sm text-center">{editorError}</p>
                   </div>
                 ) : (
-                  <ScrollArea className="flex-grow h-full w-full bg-background"> {/* ScrollArea takes available space, added h-full */}
-                    <Textarea
-                      value={editingFileContent}
-                      onChange={(e) => setEditingFileContent(e.target.value)}
-                      className="h-full w-full resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-4 font-mono text-sm leading-relaxed tracking-wide bg-transparent"
-                      placeholder="File content will appear here..."
-                    />
-                  </ScrollArea>
+                  <Textarea
+                    value={editingFileContent}
+                    onChange={(e) => setEditingFileContent(e.target.value)}
+                    className="flex-grow h-full w-full resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-4 font-mono text-sm leading-relaxed tracking-wide bg-background"
+                    placeholder="File content will appear here..."
+                  />
                 )}
               </div>
             </div>
