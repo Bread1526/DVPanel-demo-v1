@@ -8,22 +8,23 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { MoreHorizontal, Folder, File as FileIcon, Upload, Download, Edit3, Trash2, KeyRound, Search, ArrowLeft, Loader2, AlertTriangle } from "lucide-react";
+import { MoreHorizontal, Folder, File as FileIcon, Upload, Download, Edit3, Trash2, KeyRound, Search, ArrowLeft, Loader2, AlertTriangle, Save, X } from "lucide-react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import path from 'path-browserify'; // Using path-browserify for client-side path manipulation
 
 interface FileItem {
   name: string;
   type: 'folder' | 'file';
-  // Other properties like size, modified, permissions can be added if daemon provides them
   size?: string;
   modified?: string;
   permissions?: string;
 }
 
-// The daemon functionality is now part of the Next.js app via API routes
-const DAEMON_API_BASE_PATH = '/api/panel-daemon';
+const DAEMON_API_BASE_PATH = '/api/panel-daemon'; // Internal API path
 
 export default function FilesPage() {
   const [currentPath, setCurrentPath] = useState<string>('/');
@@ -32,6 +33,14 @@ export default function FilesPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const { toast } = useToast();
+
+  // State for the file editor dialog
+  const [editingFile, setEditingFile] = useState<FileItem | null>(null);
+  const [editingFilePath, setEditingFilePath] = useState<string | null>(null);
+  const [editingFileContent, setEditingFileContent] = useState<string>("");
+  const [isEditorLoading, setIsEditorLoading] = useState(false);
+  const [editorError, setEditorError] = useState<string | null>(null);
+
 
   const fetchFiles = useCallback(async (pathToFetch: string) => {
     setIsLoading(true);
@@ -44,7 +53,7 @@ export default function FilesPage() {
           const errData = await response.json();
           errorMsg = errData.error || errData.details || errorMsg;
         } catch (parseError) {
-          console.error("Failed to parse error response from daemon API:", parseError);
+          // console.error("Failed to parse error response from daemon API:", parseError);
           errorMsg = await response.text().catch(() => errorMsg);
         }
         throw new Error(errorMsg);
@@ -54,17 +63,16 @@ export default function FilesPage() {
         setFiles(data.files.map((f: any) => ({
           name: f.name,
           type: f.type,
-          size: 'N/A', // Placeholder
-          modified: 'N/A', // Placeholder
-          permissions: 'N/A', // Placeholder
+          size: f.size || 'N/A',
+          modified: f.modified || 'N/A',
+          permissions: f.permissions || 'N/A',
         })));
-        setCurrentPath(data.path || pathToFetch); // Trust the path returned by API
+        setCurrentPath(data.path || pathToFetch);
       } else {
         setFiles([]);
         setCurrentPath(data.path || pathToFetch);
         if (!Array.isArray(data.files)) {
-          console.warn("Daemon API did not return a 'files' array. Response:", data);
-          // Potentially setError("Received malformed data from server.")
+          console.warn("API did not return a 'files' array. Response:", data);
         }
       }
     } catch (e: any) {
@@ -93,16 +101,11 @@ export default function FilesPage() {
 
   const handleBreadcrumbClick = (index: number) => {
     const segments = currentPath.split('/').filter(Boolean);
-    const newPath = '/' + segments.slice(0, index +1).join('/');
-    // Adjust for root click
-    if (index === -1 && segments.length > 0) {
-         setCurrentPath('/');
-    } else if (index === -1 && segments.length === 0) {
-        setCurrentPath('/');
+    let newPath = '/';
+    if (index >= 0) {
+      newPath += segments.slice(0, index + 1).join('/');
     }
-    else {
-        setCurrentPath(newPath.replace(/\\/g, '/'));
-    }
+    setCurrentPath(newPath.replace(/\\/g, '/'));
   };
 
   const getBreadcrumbSegments = () => {
@@ -114,14 +117,49 @@ export default function FilesPage() {
     }))];
   };
 
-  const filteredFiles = files.filter(file => 
+  const handleFileDoubleClick = async (file: FileItem) => {
+    if (file.type === 'folder') {
+      handleFolderClick(file.name);
+      return;
+    }
+    const fullPath = path.join(currentPath, file.name).replace(/\\/g, '/');
+    setEditingFilePath(fullPath);
+    setEditingFile(file);
+    setIsEditorLoading(true);
+    setEditorError(null);
+    setEditingFileContent("");
+
+    try {
+      const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(fullPath)}&view=true`);
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({ error: `Failed to load file content. Status: ${response.status}` }));
+        throw new Error(errData.error || `HTTP error ${response.status}`);
+      }
+      const content = await response.text();
+      setEditingFileContent(content);
+    } catch (e: any) {
+      setEditorError(e.message || "Failed to load file content.");
+      toast({ title: "Error", description: `Could not load file: ${e.message}`, variant: "destructive" });
+    } finally {
+      setIsEditorLoading(false);
+    }
+  };
+
+  const closeEditorDialog = () => {
+    setEditingFilePath(null);
+    setEditingFile(null);
+    setEditingFileContent("");
+    setEditorError(null);
+  };
+
+  const filteredFiles = files.filter(file =>
     file.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
     <div>
-      <PageHeader 
-        title="Root File Manager" 
+      <PageHeader
+        title="File Manager"
         description="Manage files directly on the server via internal API."
         actions={
           <div className="flex gap-2">
@@ -143,10 +181,10 @@ export default function FilesPage() {
             </div>
             <div className="relative w-full sm:w-auto">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input 
-                type="search" 
-                placeholder="Search files..." 
-                className="pl-8 w-full sm:w-[250px]" 
+              <Input
+                type="search"
+                placeholder="Search files..."
+                className="pl-8 w-full sm:w-[250px]"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -160,11 +198,11 @@ export default function FilesPage() {
                     {index === arr.length - 1 ? (
                       <BreadcrumbPage>{segment.name}</BreadcrumbPage>
                     ) : (
-                      <BreadcrumbLink 
-                        href="#" 
-                        onClick={(e) => { 
-                          e.preventDefault(); 
-                          handleBreadcrumbClick(segment.path === '/' ? -1 : index -1 ); 
+                      <BreadcrumbLink
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          handleBreadcrumbClick(segment.path === '/' ? -1 : index -1 );
                         }}
                       >
                         {segment.name}
@@ -214,49 +252,102 @@ export default function FilesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredFiles.map((file) => (
-                  <TableRow 
-                    key={file.name} // Assuming names are unique within a directory for key
-                    onDoubleClick={file.type === 'folder' ? () => handleFolderClick(file.name) : undefined}
-                    className={file.type === 'folder' ? 'cursor-pointer hover:bg-muted/50' : ''}
-                  >
-                    <TableCell>
-                      {file.type === 'folder' ? <Folder className="h-5 w-5 text-primary" /> : <FileIcon className="h-5 w-5 text-muted-foreground" />}
-                    </TableCell>
-                    <TableCell 
-                      className="font-medium"
-                      onClick={file.type === 'folder' ? () => handleFolderClick(file.name) : undefined}
+                {filteredFiles.map((file) => {
+                  const fullPathToItem = path.join(currentPath, file.name).replace(/\\/g, '/');
+                  return (
+                    <TableRow
+                      key={file.name}
+                      onDoubleClick={() => handleFileDoubleClick(file)}
+                      className={file.type === 'folder' ? 'cursor-pointer hover:bg-muted/50' : 'cursor-pointer hover:bg-muted/50'}
                     >
-                      {file.name}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground capitalize">{file.type}</TableCell>
-                    <TableCell className="text-muted-foreground">{file.size || 'N/A'}</TableCell>
-                    <TableCell className="text-muted-foreground">{file.modified || 'N/A'}</TableCell>
-                    <TableCell className="text-muted-foreground font-mono text-xs">{file.permissions || 'N/A'}</TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {file.type === 'file' && <DropdownMenuItem><Download className="mr-2 h-4 w-4" /> Download</DropdownMenuItem>}
-                          <DropdownMenuItem><Edit3 className="mr-2 h-4 w-4" /> Edit / Rename</DropdownMenuItem>
-                          <DropdownMenuItem><KeyRound className="mr-2 h-4 w-4" /> Permissions</DropdownMenuItem>
-                          <DropdownMenuItem className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground">
-                            <Trash2 className="mr-2 h-4 w-4" /> Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      <TableCell>
+                        {file.type === 'folder' ? <Folder className="h-5 w-5 text-primary" /> : <FileIcon className="h-5 w-5 text-muted-foreground" />}
+                      </TableCell>
+                      <TableCell
+                        className="font-medium"
+                      >
+                        {file.name}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground capitalize">{file.type}</TableCell>
+                      <TableCell className="text-muted-foreground">{file.size || 'N/A'}</TableCell>
+                      <TableCell className="text-muted-foreground">{file.modified || 'N/A'}</TableCell>
+                      <TableCell className="text-muted-foreground font-mono text-xs">{file.permissions || 'N/A'}</TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            {file.type === 'file' && (
+                              <DropdownMenuItem
+                                onSelect={(e) => { e.preventDefault(); window.location.href = `${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(fullPathToItem)}`; }}
+                              >
+                                <Download className="mr-2 h-4 w-4" /> Download
+                              </DropdownMenuItem>
+                            )}
+                             <DropdownMenuItem onSelect={() => handleFileDoubleClick(file)}>
+                                <Edit3 className="mr-2 h-4 w-4" /> {file.type === 'file' ? 'View/Edit' : 'Open'}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem><KeyRound className="mr-2 h-4 w-4" /> Permissions</DropdownMenuItem>
+                            <DropdownMenuItem className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground">
+                              <Trash2 className="mr-2 h-4 w-4" /> Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
         </CardContent>
       </Card>
+
+      {editingFile && editingFilePath && (
+        <Dialog open={!!editingFilePath} onOpenChange={(isOpen) => { if (!isOpen) closeEditorDialog(); }}>
+          <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-5xl h-[80vh] flex flex-col rounded-2xl backdrop-blur-sm">
+            <DialogHeader>
+              <DialogTitle>Viewing: {editingFile.name}</DialogTitle>
+              <DialogDescription>
+                Path: {editingFilePath}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex-grow overflow-hidden py-4">
+              {isEditorLoading ? (
+                <div className="flex justify-center items-center h-full">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  <p className="ml-2">Loading content...</p>
+                </div>
+              ) : editorError ? (
+                <div className="flex flex-col justify-center items-center h-full text-destructive">
+                  <AlertTriangle className="h-8 w-8 mb-2" />
+                  <p>Error loading file: {editorError}</p>
+                </div>
+              ) : (
+                <ScrollArea className="h-full border rounded-md">
+                  <Textarea
+                    value={editingFileContent}
+                    readOnly // For now, make it read-only. Editing requires a save mechanism.
+                    className="h-full w-full resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-4 font-mono text-sm"
+                    placeholder="File content will appear here..."
+                  />
+                </ScrollArea>
+              )}
+            </div>
+            <DialogFooter className="border-t pt-4">
+              <Button type="button" variant="outline" onClick={closeEditorDialog}>
+                <X className="mr-2 h-4 w-4" /> Close
+              </Button>
+              <Button type="button" disabled /* Save functionality not implemented */ className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                <Save className="mr-2 h-4 w-4" /> Save Changes
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
