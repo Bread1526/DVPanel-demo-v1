@@ -15,16 +15,26 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import path from 'path-browserify'; // Using path-browserify for client-side path manipulation
+import { format } from 'date-fns';
 
 interface FileItem {
   name: string;
-  type: 'folder' | 'file';
-  size?: string;
-  modified?: string;
-  permissions?: string;
+  type: 'folder' | 'file' | 'unknown';
+  size?: number | null;
+  modified?: string | null; // ISO string from API
+  permissions?: string | null;
 }
 
 const DAEMON_API_BASE_PATH = '/api/panel-daemon'; // Internal API path
+
+function formatBytes(bytes?: number | null, decimals = 2) {
+    if (bytes === null || bytes === undefined || !+bytes) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+}
 
 export default function FilesPage() {
   const [currentPath, setCurrentPath] = useState<string>('/');
@@ -63,9 +73,9 @@ export default function FilesPage() {
         setFiles(data.files.map((f: any) => ({
           name: f.name,
           type: f.type,
-          size: f.size || 'N/A',
-          modified: f.modified || 'N/A',
-          permissions: f.permissions || 'N/A',
+          size: f.size,
+          modified: f.modified,
+          permissions: f.permissions,
         })));
         setCurrentPath(data.path || pathToFetch);
       } else {
@@ -269,8 +279,8 @@ export default function FilesPage() {
                         {file.name}
                       </TableCell>
                       <TableCell className="text-muted-foreground capitalize">{file.type}</TableCell>
-                      <TableCell className="text-muted-foreground">{file.size || 'N/A'}</TableCell>
-                      <TableCell className="text-muted-foreground">{file.modified || 'N/A'}</TableCell>
+                      <TableCell className="text-muted-foreground">{formatBytes(file.size)}</TableCell>
+                      <TableCell className="text-muted-foreground">{file.modified ? format(new Date(file.modified), 'PPpp') : 'N/A'}</TableCell>
                       <TableCell className="text-muted-foreground font-mono text-xs">{file.permissions || 'N/A'}</TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>

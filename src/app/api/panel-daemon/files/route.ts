@@ -5,46 +5,47 @@ import path from 'path';
 
 // Define the base directory for file operations.
 // Reads from environment variable FILE_MANAGER_BASE_DIR, defaults to '/'
-// WARNING: Defaulting to '/' can be a security risk. Ensure the Next.js server process
-// has appropriately restricted permissions or set FILE_MANAGER_BASE_DIR in .env.local
-// to a specific, safer directory (e.g., /srv/www).
 const BASE_DIR = process.env.FILE_MANAGER_BASE_DIR || '/';
 
 console.log(`[API /panel-daemon/files] Using BASE_DIR: ${BASE_DIR}`);
 
+function modeToString(mode: number, isDirectory: boolean): string {
+    let str = isDirectory ? 'd' : '-';
+    str += (mode & fs.constants.S_IRUSR) ? 'r' : '-';
+    str += (mode & fs.constants.S_IWUSR) ? 'w' : '-';
+    str += (mode & fs.constants.S_IXUSR) ? 'x' : '-';
+    str += (mode & fs.constants.S_IRGRP) ? 'r' : '-';
+    str += (mode & fs.constants.S_IWGRP) ? 'w' : '-';
+    str += (mode & fs.constants.S_IXGRP) ? 'x' : '-';
+    str += (mode & fs.constants.S_IROTH) ? 'r' : '-';
+    str += (mode & fs.constants.S_IWOTH) ? 'w' : '-';
+    str += (mode & fs.constants.S_IXOTH) ? 'x' : '-';
+    return str;
+}
 
 function resolveSafePath(relativePath: string): string {
-  // Normalize the relative path to resolve ".." and "." segments.
-  const normalizedRelativePath = path.normalize(relativePath);
-
-  // Prevent paths that try to go above the root of the relative path structure
-  // (e.g., if relativePath itself starts with '../' after normalization).
-  if (normalizedRelativePath.startsWith('..') || normalizedRelativePath.includes(path.sep + '..')) {
-    console.error(
-      `[API Security] Access Denied (Invalid Path Structure): relativePath='${relativePath}', normalizedRelativePath='${normalizedRelativePath}'`
-    );
-    throw new Error('Access denied: Invalid path structure.');
-  }
+  // Normalize the user-provided path first to handle things like '.' or '..', empty strings etc.
+  // An empty or '.' path should refer to the BASE_DIR itself.
+  const normalizedUserPath = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '');
 
   // Join with BASE_DIR and normalize again for the final absolute path
-  const absolutePath = path.normalize(path.join(BASE_DIR, normalizedRelativePath));
+  const absolutePath = path.normalize(path.join(BASE_DIR, normalizedUserPath));
 
   // Final security check: ensure the resolved path is still within or at BASE_DIR
-  // Account for BASE_DIR being '/' itself.
   if (BASE_DIR === '/') {
-    if (!path.isAbsolute(absolutePath)) { // Should always be absolute after path.join with absolute BASE_DIR
-         console.error(
-            `[API Security] Access Denied (Path not absolute - Files): relativePath='${relativePath}', absolutePath='${absolutePath}', BASE_DIR='${BASE_DIR}'`
-         );
-        throw new Error('Access denied: Resolved path is not absolute.');
+    if (!path.isAbsolute(absolutePath)) {
+      console.error(
+        `[API Security] Access Denied (Path not absolute - Files): relativePath='${relativePath}', absolutePath='${absolutePath}', BASE_DIR='${BASE_DIR}'`
+      );
+      throw new Error('Access denied: Resolved path is not absolute.');
     }
-    // If BASE_DIR is root, any absolute path is "within" it. Further OS-level permissions will apply.
   } else if (!absolutePath.startsWith(BASE_DIR + path.sep) && absolutePath !== BASE_DIR) {
-     console.error(
-      `[API Security] Access Denied (Outside Base Directory - Files): relativePath='${relativePath}', normalizedRelativePath='${normalizedRelativePath}', absolutePath='${absolutePath}', BASE_DIR='${BASE_DIR}'`
+    console.error(
+      `[API Security] Access Denied (Outside Base Directory - Files): relativePath='${relativePath}', normalizedUserPath='${normalizedUserPath}', absolutePath='${absolutePath}', BASE_DIR='${BASE_DIR}'`
     );
     throw new Error('Access denied: Path is outside the allowed directory.');
   }
+  console.log(`[API /panel-daemon/files - resolveSafePath] Resolved: '${absolutePath}' from relative: '${relativePath}' (normalizedUserPath: '${normalizedUserPath}')`);
   return absolutePath;
 }
 
@@ -66,13 +67,33 @@ export async function GET(request: NextRequest) {
     }
 
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    const result = entries.map(entry => ({
-      name: entry.name,
-      type: entry.isDirectory() ? 'folder' : 'file',
-    }));
+    const result = entries.map(entry => {
+      const entryPath = path.join(dirPath, entry.name);
+      let stats;
+      try {
+        stats = fs.statSync(entryPath);
+      } catch (e: any) {
+        console.warn(`[API /panel-daemon/files] Failed to stat ${entryPath}: ${e.message}`);
+        // Determine type from dirent if possible, otherwise fallback
+        const typeFromDirent = entry.isDirectory() ? 'folder' : (entry.isFile() ? 'file' : 'unknown');
+        return {
+          name: entry.name,
+          type: typeFromDirent,
+          size: null,
+          modified: null,
+          permissions: '---------',
+        };
+      }
 
-    // Return the logical path the client requested for consistency
-    // Ensure it's a clean, forward-slash path starting with /
+      return {
+        name: entry.name,
+        type: stats.isDirectory() ? 'folder' : (stats.isFile() ? 'file' : 'unknown'),
+        size: stats.size,
+        modified: stats.mtime.toISOString(),
+        permissions: modeToString(stats.mode, stats.isDirectory()),
+      };
+    });
+
     const clientPath = ('/' + requestedPath).replace(/\/+/g, '/');
     
     console.log(`[API /panel-daemon/files] Successfully listed ${result.length} entries for clientPath: ${clientPath}`);
