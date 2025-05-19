@@ -1,15 +1,14 @@
+
 // src/app/api/panel-daemon/files/route.ts
 import { NextResponse, type NextRequest } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
-// Define the base directory for file operations.
-// Reads from environment variable FILE_MANAGER_BASE_DIR, defaults to '/'
 const BASE_DIR = process.env.FILE_MANAGER_BASE_DIR || '/';
 
 console.log(`[API /panel-daemon/files] Using BASE_DIR: ${BASE_DIR}`);
 
-function modeToString(mode: number, isDirectory: boolean): string {
+function modeToRwxString(mode: number, isDirectory: boolean): string {
     let str = isDirectory ? 'd' : '-';
     str += (mode & fs.constants.S_IRUSR) ? 'r' : '-';
     str += (mode & fs.constants.S_IWUSR) ? 'w' : '-';
@@ -23,15 +22,16 @@ function modeToString(mode: number, isDirectory: boolean): string {
     return str;
 }
 
-function resolveSafePath(relativePath: string): string {
-  // Normalize the user-provided path first to handle things like '.' or '..', empty strings etc.
-  // An empty or '.' path should refer to the BASE_DIR itself.
-  const normalizedUserPath = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '');
+function modeToOctalString(mode: number): string {
+  // Extract only the permission bits (last 3 octal digits)
+  return (mode & 0o777).toString(8).padStart(3, '0');
+}
 
-  // Join with BASE_DIR and normalize again for the final absolute path
+
+function resolveSafePath(relativePath: string): string {
+  const normalizedUserPath = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '');
   const absolutePath = path.normalize(path.join(BASE_DIR, normalizedUserPath));
 
-  // Final security check: ensure the resolved path is still within or at BASE_DIR
   if (BASE_DIR === '/') {
     if (!path.isAbsolute(absolutePath)) {
       console.error(
@@ -51,7 +51,7 @@ function resolveSafePath(relativePath: string): string {
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
-  const requestedPath = searchParams.get('path') || '/'; // Default to logical root relative to BASE_DIR
+  const requestedPath = searchParams.get('path') || '/'; 
 
   try {
     const dirPath = resolveSafePath(requestedPath);
@@ -74,7 +74,6 @@ export async function GET(request: NextRequest) {
         stats = fs.statSync(entryPath);
       } catch (e: any) {
         console.warn(`[API /panel-daemon/files] Failed to stat ${entryPath}: ${e.message}`);
-        // Determine type from dirent if possible, otherwise fallback
         const typeFromDirent = entry.isDirectory() ? 'folder' : (entry.isFile() ? 'file' : 'unknown');
         return {
           name: entry.name,
@@ -82,6 +81,7 @@ export async function GET(request: NextRequest) {
           size: null,
           modified: null,
           permissions: '---------',
+          octalPermissions: '000',
         };
       }
 
@@ -90,7 +90,8 @@ export async function GET(request: NextRequest) {
         type: stats.isDirectory() ? 'folder' : (stats.isFile() ? 'file' : 'unknown'),
         size: stats.size,
         modified: stats.mtime.toISOString(),
-        permissions: modeToString(stats.mode, stats.isDirectory()),
+        permissions: modeToRwxString(stats.mode, stats.isDirectory()),
+        octalPermissions: modeToOctalString(stats.mode),
       };
     });
 

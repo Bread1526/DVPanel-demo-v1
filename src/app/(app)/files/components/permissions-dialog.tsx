@@ -17,13 +17,14 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Save, X } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Alert, AlertDescription } from '@/components/ui/alert'; // Removed AlertTitle
 
 interface PermissionsDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   targetPath: string;
-  currentPermissions: string; // e.g., "rwxr-xr-x" or "drwxr-xr-x"
+  currentRwxPermissions: string; // e.g., "rwxr-xr-x" or "drwxr-xr-x"
+  currentOctalPermissions: string; // e.g., "0755" or "755"
   onPermissionsUpdate: () => void;
 }
 
@@ -37,45 +38,8 @@ interface PermissionsState {
   owner: PermissionSet;
   group: PermissionSet;
   others: PermissionSet;
-  octal: string; // e.g., "755"
+  octal: string; // e.g., "755" or "0755"
 }
-
-// Helper to convert rwx string to PermissionSet
-const rwxToPermissionSet = (rwx: string): PermissionSet => ({
-  read: rwx[0] === 'r',
-  write: rwx[1] === 'w',
-  execute: rwx[2] === 'x',
-});
-
-// Helper to convert full permission string to PermissionsState (ignoring directory 'd' bit)
-const stringToPermissionsState = (permString: string): Partial<PermissionsState> => {
-  const relevantPerms = permString.length === 10 ? permString.substring(1) : permString; // Strip 'd' if present
-  if (relevantPerms.length !== 9) {
-    console.error("Invalid permission string length:", permString);
-    return { octal: "000" }; // Default to a safe, restrictive value
-  }
-  const owner = rwxToPermissionSet(relevantPerms.substring(0, 3));
-  const group = rwxToPermissionSet(relevantPerms.substring(3, 6));
-  const others = rwxToPermissionSet(relevantPerms.substring(6, 9));
-  return { owner, group, others };
-};
-
-// Helper to convert PermissionSet to octal digit
-const permissionSetToOctalDigit = (permSet: PermissionSet): number => {
-  let digit = 0;
-  if (permSet.read) digit += 4;
-  if (permSet.write) digit += 2;
-  if (permSet.execute) digit += 1;
-  return digit;
-};
-
-// Helper to convert PermissionsState (checkboxes) to octal string
-const permissionsStateToOctal = (state: Pick<PermissionsState, 'owner' | 'group' | 'others'>): string => {
-  const ownerDigit = permissionSetToOctalDigit(state.owner);
-  const groupDigit = permissionSetToOctalDigit(state.group);
-  const othersDigit = permissionSetToOctalDigit(state.others);
-  return `${ownerDigit}${groupDigit}${othersDigit}`;
-};
 
 // Helper to convert octal digit to PermissionSet
 const octalDigitToPermissionSet = (digit: number): PermissionSet => ({
@@ -84,14 +48,13 @@ const octalDigitToPermissionSet = (digit: number): PermissionSet => ({
   execute: (digit & 1) === 1,
 });
 
-// Helper to convert octal string to full PermissionsState (for checkboxes)
-const octalToPermissionsState = (octal: string): Pick<PermissionsState, 'owner' | 'group' | 'others'> | null => {
-  if (!/^[0-7]{3}$/.test(octal) && !/^[0-7]{4}$/.test(octal)) {
-    console.warn("Invalid octal string for conversion:", octal);
-    return null; // Or throw an error
+// Helper to convert 3-digit or 4-digit octal string to checkbox states
+const octalToPermissionsStateCheckboxes = (octal: string): Pick<PermissionsState, 'owner' | 'group' | 'others'> | null => {
+  const relevantOctal = octal.length === 4 ? octal.substring(1) : octal;
+  if (!/^[0-7]{3}$/.test(relevantOctal)) {
+    // console.warn("Invalid octal string for checkbox conversion:", octal);
+    return null;
   }
-  const relevantOctal = octal.length === 4 ? octal.substring(1) : octal; // Ignore SUID/SGID/Sticky for checkboxes
-
   const ownerDigit = parseInt(relevantOctal[0], 10);
   const groupDigit = parseInt(relevantOctal[1], 10);
   const othersDigit = parseInt(relevantOctal[2], 10);
@@ -103,12 +66,30 @@ const octalToPermissionsState = (octal: string): Pick<PermissionsState, 'owner' 
   };
 };
 
+// Helper to convert PermissionSet to octal digit
+const permissionSetToOctalDigit = (permSet: PermissionSet): number => {
+  let digit = 0;
+  if (permSet.read) digit += 4;
+  if (permSet.write) digit += 2;
+  if (permSet.execute) digit += 1;
+  return digit;
+};
+
+// Helper to convert checkbox states to 3-digit octal string
+const permissionsStateCheckboxesToOctal3 = (state: Pick<PermissionsState, 'owner' | 'group' | 'others'>): string => {
+  const ownerDigit = permissionSetToOctalDigit(state.owner);
+  const groupDigit = permissionSetToOctalDigit(state.group);
+  const othersDigit = permissionSetToOctalDigit(state.others);
+  return `${ownerDigit}${groupDigit}${othersDigit}`;
+};
+
 
 export default function PermissionsDialog({
   isOpen,
   onOpenChange,
   targetPath,
-  currentPermissions,
+  currentRwxPermissions,
+  currentOctalPermissions,
   onPermissionsUpdate,
 }: PermissionsDialogProps) {
   const [permissions, setPermissions] = useState<PermissionsState>({
@@ -121,56 +102,65 @@ export default function PermissionsDialog({
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
 
+  const initializePermissions = useCallback((octalPerms: string) => {
+    const initialCheckboxState = octalToPermissionsStateCheckboxes(octalPerms);
+    if (initialCheckboxState) {
+      setPermissions({
+        owner: initialCheckboxState.owner,
+        group: initialCheckboxState.group,
+        others: initialCheckboxState.others,
+        octal: octalPerms.padStart(3, '0'), // Ensure it's at least 3 digits for display, allow 4 for SUID/SGID/Sticky
+      });
+    } else {
+      // Fallback if octal parsing fails
+      setPermissions({
+          owner: { read: false, write: false, execute: false },
+          group: { read: false, write: false, execute: false },
+          others: { read: false, write: false, execute: false },
+          octal: octalPerms || '000'
+      });
+    }
+  }, []);
+
+
   useEffect(() => {
     if (isOpen) {
-      const initialPerms = stringToPermissionsState(currentPermissions);
-      if (initialPerms && initialPerms.owner && initialPerms.group && initialPerms.others) {
-        const octal = permissionsStateToOctal(initialPerms as Pick<PermissionsState, 'owner' | 'group' | 'others'>);
-        setPermissions({
-            owner: initialPerms.owner,
-            group: initialPerms.group,
-            others: initialPerms.others,
-            octal: octal,
-        });
-      } else {
-        // Fallback if parsing fails, though currentPermissions should be valid from API
-        setPermissions({
-            owner: { read: false, write: false, execute: false },
-            group: { read: false, write: false, execute: false },
-            others: { read: false, write: false, execute: false },
-            octal: '000'
-        });
-      }
-      setError(null); // Reset error on open
+      initializePermissions(currentOctalPermissions);
+      setError(null); 
     }
-  }, [isOpen, currentPermissions]);
+  }, [isOpen, currentOctalPermissions, initializePermissions]);
+
 
   const handleCheckboxChange = (type: 'owner' | 'group' | 'others', perm: keyof PermissionSet, checked: boolean) => {
     setPermissions(prev => {
-      const newState = {
+      const newCheckboxState = {
         ...prev,
         [type]: { ...prev[type], [perm]: checked },
       };
-      newState.octal = permissionsStateToOctal(newState);
-      return newState;
+      const baseOctal = permissionsStateCheckboxesToOctal3(newCheckboxState);
+      // Preserve SUID/SGID/Sticky bit if present from original 4-digit octal
+      const prefix = prev.octal.length === 4 ? prev.octal[0] : '';
+      newCheckboxState.octal = prefix + baseOctal;
+      return newCheckboxState;
     });
   };
 
   const handleOctalChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newOctal = e.target.value.replace(/[^0-7]/g, '').slice(0, 4); // Allow up to 4 digits, only 0-7
     setPermissions(prev => {
-        let updatedFromOctal = octalToPermissionsState(newOctal.length >= 3 ? newOctal.slice(-3) : "000"); // Use last 3 digits for checkboxes
+        const updatedFromOctal = octalToPermissionsStateCheckboxes(newOctal);
         if (updatedFromOctal) {
             return { ...prev, ...updatedFromOctal, octal: newOctal };
         }
-        return { ...prev, octal: newOctal }; // Only update octal if parsing fails for checkboxes
+        // If input is incomplete (e.g., "7") or invalid for checkboxes, just update octal string
+        return { ...prev, octal: newOctal }; 
     });
   };
 
   const handleSubmit = async () => {
     setIsLoading(true);
     setError(null);
-    if (!/^[0-7]{3,4}$/.test(permissions.octal)) {
+    if (!/^[0-7]{3,4}$/.test(permissions.octal) || permissions.octal.length === 0) {
         setError("Octal mode must be 3 or 4 digits (e.g., 755 or 0755).");
         setIsLoading(false);
         return;
@@ -203,11 +193,11 @@ export default function PermissionsDialog({
         {(['read', 'write', 'execute'] as const).map((perm) => (
           <div key={`${type}-${perm}`} className="flex items-center space-x-2">
             <Checkbox
-              id={`${type}-${perm}`}
+              id={`${type}-${perm}-${targetPath.replace(/[^a-zA-Z0-9]/g, "")}`} // Make ID more unique
               checked={permissions[type][perm]}
               onCheckedChange={(checked) => handleCheckboxChange(type, perm, !!checked)}
             />
-            <Label htmlFor={`${type}-${perm}`} className="capitalize text-sm font-normal">{perm}</Label>
+            <Label htmlFor={`${type}-${perm}-${targetPath.replace(/[^a-zA-Z0-9]/g, "")}`} className="capitalize text-sm font-normal">{perm}</Label>
           </div>
         ))}
       </div>
@@ -226,7 +216,7 @@ export default function PermissionsDialog({
         </DialogHeader>
         <div className="py-4 space-y-4">
            <div className="text-sm">
-            Current: <span className="font-mono bg-muted px-1 py-0.5 rounded">{currentPermissions} ({permissions.octal ? '0' + permissions.octal : 'N/A'})</span>
+            Current: <span className="font-mono bg-muted px-1 py-0.5 rounded">{currentRwxPermissions} ({currentOctalPermissions})</span>
           </div>
 
           {renderPermissionCheckboxes('owner', 'Owner')}
@@ -243,13 +233,10 @@ export default function PermissionsDialog({
               className="font-mono mt-1"
               maxLength={4}
             />
-             {error && !error.includes("Octal mode must be 3 or 4 digits") && ( // Only show general errors here
+             {error && (
                 <Alert variant="destructive" className="mt-3">
                     <AlertDescription>{error}</AlertDescription>
                 </Alert>
-            )}
-            {error && error.includes("Octal mode must be 3 or 4 digits") && (
-                 <p className="text-xs text-destructive mt-1">{error}</p>
             )}
           </div>
         </div>

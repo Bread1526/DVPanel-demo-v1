@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import {
   MoreHorizontal, Folder, File as FileIcon, Upload, Download, Edit3, Trash2, KeyRound, Search, ArrowLeft, Loader2, AlertTriangle, Save, X,
-  FileCode2, FileJson, FileText, ImageIcon, Archive, Shell, FileTerminal, AudioWaveform, VideoIcon, Database, List, Shield, Github, Settings2
+  FileCode2, FileJson, FileText, ImageIcon, Archive, Shell, FileTerminal, AudioWaveform, VideoIcon, Database, List, Shield, Github, Settings2, ServerCog
 } from "lucide-react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
@@ -19,14 +19,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import path from 'path-browserify';
 import { format } from 'date-fns';
-import PermissionsDialog from './components/permissions-dialog'; // Import the new dialog
+import PermissionsDialog from './components/permissions-dialog';
 
 interface FileItem {
   name: string;
   type: 'folder' | 'file' | 'unknown';
   size?: number | null;
-  modified?: string | null;
-  permissions?: string | null;
+  modified?: string | null; // ISO string
+  permissions?: string | null; // "rwxrwxrwx" format
+  octalPermissions?: string | null; // "0755" format
 }
 
 const DAEMON_API_BASE_PATH = '/api/panel-daemon';
@@ -51,6 +52,7 @@ function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactN
     case 'js': case 'jsx': return <FileCode2 className="h-5 w-5 text-yellow-500" />;
     case 'ts': case 'tsx': return <FileCode2 className="h-5 w-5 text-sky-500" />;
     case 'json': return <FileJson className="h-5 w-5 text-yellow-600" />;
+    case 'yaml': case 'yml': return <ServerCog className="h-5 w-5 text-indigo-400" />; // Using ServerCog for YAML
     case 'txt': case 'md': case 'log': return <FileText className="h-5 w-5 text-gray-500" />;
     case 'png': case 'jpg': case 'jpeg': case 'gif': case 'svg': case 'webp': case 'ico': return <ImageIcon className="h-5 w-5 text-purple-500" />;
     case 'zip': case 'tar': case 'gz': case 'rar': case '7z': return <Archive className="h-5 w-5 text-amber-700" />;
@@ -79,11 +81,13 @@ export default function FilesPage() {
   const [editingFilePath, setEditingFilePath] = useState<string | null>(null);
   const [editingFileContent, setEditingFileContent] = useState<string>("");
   const [isEditorLoading, setIsEditorLoading] = useState(false);
+  const [isEditorSaving, setIsEditorSaving] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
 
   const [isPermissionsDialogOpen, setIsPermissionsDialogOpen] = useState(false);
   const [permissionDialogTargetPath, setPermissionDialogTargetPath] = useState<string>("");
   const [permissionDialogCurrentPerms, setPermissionDialogCurrentPerms] = useState<string>("");
+  const [permissionDialogCurrentOctalPerms, setPermissionDialogCurrentOctalPerms] = useState<string>("");
 
 
   const fetchFiles = useCallback(async (pathToFetch: string) => {
@@ -109,6 +113,7 @@ export default function FilesPage() {
           size: f.size,
           modified: f.modified,
           permissions: f.permissions,
+          octalPermissions: f.octalPermissions,
         })));
         setCurrentPath(data.path || pathToFetch);
       } else {
@@ -188,6 +193,32 @@ export default function FilesPage() {
     }
   };
 
+  const handleSaveFileContent = async () => {
+    if (!editingFilePath || editingFileContent === null) return;
+    setIsEditorSaving(true);
+    setEditorError(null);
+    try {
+      const response = await fetch(`${DAEMON_API_BASE_PATH}/file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: editingFilePath, content: editingFileContent }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || result.details || 'Failed to save file.');
+      }
+      toast({ title: 'Success', description: result.message || `File ${editingFile?.name} saved.` });
+      closeEditorDialog();
+      // Optionally, re-fetch files if save might change metadata like size/modified, though less critical for content save.
+      // fetchFiles(currentPath); 
+    } catch (e: any) {
+      setEditorError(e.message || "An unexpected error occurred while saving.");
+      toast({ title: "Error Saving File", description: e.message, variant: "destructive" });
+    } finally {
+      setIsEditorSaving(false);
+    }
+  };
+
   const closeEditorDialog = () => {
     setEditingFilePath(null);
     setEditingFile(null);
@@ -198,7 +229,8 @@ export default function FilesPage() {
   const handlePermissionsClick = (file: FileItem) => {
     const fullPath = path.join(currentPath, file.name).replace(/\\/g, '/');
     setPermissionDialogTargetPath(fullPath);
-    setPermissionDialogCurrentPerms(file.permissions || "---------");
+    setPermissionDialogCurrentPerms(file.permissions || "---------"); // rwx string
+    setPermissionDialogCurrentOctalPerms(file.octalPermissions || "000"); // octal string
     setIsPermissionsDialogOpen(true);
   };
 
@@ -326,7 +358,7 @@ export default function FilesPage() {
                       <TableCell className="text-muted-foreground capitalize">{file.type}</TableCell>
                       <TableCell className="text-muted-foreground">{formatBytes(file.size)}</TableCell>
                       <TableCell className="text-muted-foreground">{file.modified ? format(new Date(file.modified), 'PPpp') : 'N/A'}</TableCell>
-                      <TableCell className="text-muted-foreground font-mono text-xs">{file.permissions || 'N/A'}</TableCell>
+                      <TableCell className="text-muted-foreground font-mono text-xs">{file.octalPermissions || 'N/A'}</TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -365,11 +397,11 @@ export default function FilesPage() {
 
       {editingFile && editingFilePath && (
         <Dialog open={!!editingFilePath} onOpenChange={(isOpen) => { if (!isOpen) closeEditorDialog(); }}>
-          <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-5xl h-[80vh] p-0 flex flex-col rounded-2xl backdrop-blur-sm">
+          <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-6xl h-[85vh] p-0 flex flex-col rounded-2xl backdrop-blur-sm">
             <DialogHeader className="p-6 pb-4 border-b">
-              <DialogTitle>Viewing: {editingFile.name}</DialogTitle>
+              <DialogTitle>Editing: {editingFile.name}</DialogTitle>
               <DialogDescription>
-                Path: {editingFilePath}
+                Path: <span className="font-mono">{editingFilePath}</span>
               </DialogDescription>
             </DialogHeader>
             <div className="flex-grow overflow-hidden">
@@ -379,28 +411,35 @@ export default function FilesPage() {
                   <p className="ml-2">Loading content...</p>
                 </div>
               ) : editorError ? (
-                <div className="flex flex-col justify-center items-center h-full text-destructive">
+                <div className="flex flex-col justify-center items-center h-full text-destructive p-4">
                   <AlertTriangle className="h-8 w-8 mb-2" />
-                  <p>Error loading file: {editorError}</p>
+                  <p className="font-semibold">Error Loading File</p>
+                  <p className="text-sm text-center">{editorError}</p>
                 </div>
               ) : (
                 <ScrollArea className="h-full bg-background">
                   <Textarea
                     value={editingFileContent}
-                    readOnly
+                    onChange={(e) => setEditingFileContent(e.target.value)}
                     className="h-full w-full resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-4 font-mono text-sm"
                     placeholder="File content will appear here..."
                   />
                 </ScrollArea>
               )}
             </div>
-            <DialogFooter className="p-6 pt-4 border-t">
-              <Button type="button" variant="outline" onClick={closeEditorDialog}>
-                <X className="mr-2 h-4 w-4" /> Close
-              </Button>
-              <Button type="button" disabled className="shadow-md hover:scale-105 transform transition-transform duration-150">
-                <Save className="mr-2 h-4 w-4" /> Save Changes
-              </Button>
+            <DialogFooter className="p-4 pt-3 border-t flex justify-between items-center">
+              <div className="text-xs text-muted-foreground">
+                Chars: {editingFileContent.length}
+              </div>
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" onClick={closeEditorDialog} disabled={isEditorSaving}>
+                  <X className="mr-2 h-4 w-4" /> Close
+                </Button>
+                <Button type="button" onClick={handleSaveFileContent} disabled={isEditorLoading || isEditorSaving} className="shadow-md hover:scale-105 transform transition-transform duration-150">
+                  {isEditorSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Save Changes
+                </Button>
+              </div>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -411,10 +450,12 @@ export default function FilesPage() {
           isOpen={isPermissionsDialogOpen}
           onOpenChange={setIsPermissionsDialogOpen}
           targetPath={permissionDialogTargetPath}
-          currentPermissions={permissionDialogCurrentPerms}
+          currentRwxPermissions={permissionDialogCurrentPerms}
+          currentOctalPermissions={permissionDialogCurrentOctalPerms}
           onPermissionsUpdate={handlePermissionsUpdate}
         />
       )}
     </div>
   );
 }
+
