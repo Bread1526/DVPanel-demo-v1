@@ -46,28 +46,35 @@ export default function ImageViewerDialog({
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !isMaximized) {
       // Center dialog when it opens or image changes, unless maximized
-      if (!isMaximized) {
-        setPosition({ x: window.innerWidth / 2 - 400, y: window.innerHeight / 2 - 300 }); // Assuming default 800x600
-      }
+      // Default dimensions (approximate, can be refined based on typical image sizes)
+      const defaultWidth = Math.min(800, window.innerWidth * 0.8); // e.g., 80% of vw or 800px
+      const defaultHeight = Math.min(600, window.innerHeight * 0.75); // e.g., 75% of vh or 600px
+      
+      setPosition({ 
+        x: window.innerWidth / 2 - defaultWidth / 2, 
+        y: window.innerHeight / 2 - defaultHeight / 2 
+      });
+    }
+    if (isOpen) {
       setIsLoading(true);
       setError(null);
     }
   }, [isOpen, imageSrc, isMaximized]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (isMaximized) return;
-    // Check if the mousedown is on the header itself, not on buttons inside it
-    if (e.target === e.currentTarget.closest('[role="dialog"]')?.querySelector('[data-dialog-header="true"]')) {
-        setIsDragging(true);
-        const dialogRect = dialogRef.current?.getBoundingClientRect();
-        if (dialogRect) {
-            setDragStart({
-                x: e.clientX - dialogRect.left,
-                y: e.clientY - dialogRect.top,
-            });
-        }
+    if (isMaximized || !dialogRef.current) return;
+    
+    const headerElement = dialogRef.current.querySelector('[data-dialog-header="true"]');
+    // Check if the mousedown is on the header itself or an element within it that isn't a button
+    if (headerElement && headerElement.contains(e.target as Node) && !(e.target as HTMLElement).closest('button')) {
+      setIsDragging(true);
+      const dialogRect = dialogRef.current.getBoundingClientRect();
+      setDragStart({
+        x: e.clientX - dialogRect.left,
+        y: e.clientY - dialogRect.top,
+      });
     }
   }, [isMaximized]);
 
@@ -76,14 +83,6 @@ export default function ImageViewerDialog({
     
     let newX = e.clientX - dragStart.x;
     let newY = e.clientY - dragStart.y;
-
-    // Boundary checks (optional, can make dragging feel constrained)
-    // const parentWidth = window.innerWidth;
-    // const parentHeight = window.innerHeight;
-    // const dialogWidth = dialogRef.current.offsetWidth;
-    // const dialogHeight = dialogRef.current.offsetHeight;
-    // newX = Math.max(0, Math.min(newX, parentWidth - dialogWidth));
-    // newY = Math.max(0, Math.min(newY, parentHeight - dialogHeight));
 
     setPosition({ x: newX, y: newY });
   }, [isDragging, dragStart, isMaximized]);
@@ -114,14 +113,10 @@ export default function ImageViewerDialog({
         const rect = dialogRef.current.getBoundingClientRect();
         setPrevPosition({ x: rect.left, y: rect.top });
       }
-      setPosition({x: 0, y: 0}); // Reset position for maximized view
+      setPosition({x: 0, y: 0}); 
     }
     setIsMaximized(!isMaximized);
   };
-
-  if (!isOpen) {
-    return null;
-  }
   
   const dialogStyle: React.CSSProperties = isMaximized
   ? {
@@ -140,29 +135,30 @@ export default function ImageViewerDialog({
       position: 'fixed',
       left: `${position.x}px`,
       top: `${position.y}px`,
-      transform: 'none', // Remove centering transform
+      transform: 'none', 
     };
-
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => {
-        if (!open && isMaximized) setIsMaximized(false); // Reset maximized state on close
+        if (!open && isMaximized) setIsMaximized(false); 
         onOpenChange(open);
     }}>
       <DialogContent
         ref={dialogRef}
         className={cn(
-          "sm:max-w-3xl p-0 flex flex-col shadow-2xl rounded-2xl overflow-hidden transition-all duration-300 ease-in-out",
-           isMaximized && "w-screen h-screen max-w-full max-h-full !rounded-none"
+          "p-0 flex flex-col shadow-2xl rounded-2xl overflow-hidden transition-all duration-300 ease-in-out",
+          isMaximized 
+            ? "w-screen h-screen max-w-full max-h-full !rounded-none" 
+            : "w-[90vw] max-w-3xl h-[75vh] max-h-[800px]" // Default dimensions when not maximized
         )}
         style={dialogStyle}
-        onOpenAutoFocus={(e) => e.preventDefault()} // Prevent auto-focus interfering with drag
-        hideCloseButton // We'll use our custom close button
+        onOpenAutoFocus={(e) => e.preventDefault()} 
+        hideCloseButton 
       >
         <DialogHeader
-          data-dialog-header="true" // Custom attribute to identify header for dragging
+          data-dialog-header="true" 
           className={cn(
-            "flex flex-row items-center justify-between p-3 pl-4 border-b bg-muted/60",
+            "flex-shrink-0 flex flex-row items-center justify-between p-3 pl-4 border-b bg-muted/60",
             !isMaximized && "cursor-grab active:cursor-grabbing"
           )}
           onMouseDown={handleMouseDown}
@@ -180,7 +176,11 @@ export default function ImageViewerDialog({
           </div>
         </DialogHeader>
 
-        <div className={cn("relative flex-grow flex items-center justify-center bg-background/80 backdrop-blur-sm p-2", isMaximized ? "p-4" : "p-2")}>
+        <div className={cn(
+            "relative flex-grow flex items-center justify-center bg-background/80 backdrop-blur-sm min-h-0", // Added min-h-0 for flex-grow
+            isMaximized ? "p-4" : "p-2"
+          )}
+        >
           {isLoading && (
             <div className="absolute inset-0 flex items-center justify-center">
               <Loader2 className="h-10 w-10 animate-spin text-primary" />
@@ -194,7 +194,11 @@ export default function ImageViewerDialog({
             </div>
           )}
           {imageSrc && !error && (
-            <div className={cn("relative w-full h-full flex items-center justify-center", isDragging && "pointer-events-none")}>
+            <div className={cn(
+                "relative w-full h-full flex items-center justify-center", 
+                isDragging && "pointer-events-none"
+              )}
+            >
                  <Image
                     src={imageSrc}
                     alt={imageAlt || 'Displayed image'}
@@ -205,7 +209,7 @@ export default function ImageViewerDialog({
                         setError('Failed to load image resource.');
                         setIsLoading(false);
                     }}
-                    unoptimized // Good for direct API served images that might not have optimization headers
+                    unoptimized 
                     data-ai-hint="file preview"
                   />
             </div>
@@ -215,7 +219,7 @@ export default function ImageViewerDialog({
            )}
         </div>
 
-        <DialogFooter className="p-2 border-t bg-muted/60 flex-shrink-0">
+        <DialogFooter className="flex-shrink-0 p-2 border-t bg-muted/60">
           <div className="flex justify-between w-full items-center">
             <Button
               variant="outline"
