@@ -52,7 +52,7 @@ function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactN
     case 'js': case 'jsx': return <FileCode2 className="h-5 w-5 text-yellow-500" />;
     case 'ts': case 'tsx': return <FileCode2 className="h-5 w-5 text-sky-500" />;
     case 'json': return <FileJson className="h-5 w-5 text-yellow-600" />;
-    case 'yaml': case 'yml': return <ServerCog className="h-5 w-5 text-indigo-400" />; // Using ServerCog for YAML
+    case 'yaml': case 'yml': return <ServerCog className="h-5 w-5 text-indigo-400" />;
     case 'txt': case 'md': case 'log': return <FileText className="h-5 w-5 text-gray-500" />;
     case 'png': case 'jpg': case 'jpeg': case 'gif': case 'svg': case 'webp': case 'ico': return <ImageIcon className="h-5 w-5 text-purple-500" />;
     case 'zip': case 'tar': case 'gz': case 'rar': case '7z': return <Archive className="h-5 w-5 text-amber-700" />;
@@ -397,37 +397,44 @@ export default function FilesPage() {
 
       {editingFile && editingFilePath && (
         <Dialog open={!!editingFilePath} onOpenChange={(isOpen) => { if (!isOpen) closeEditorDialog(); }}>
-          <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-6xl h-[85vh] p-0 flex flex-col rounded-2xl backdrop-blur-sm">
-            <DialogHeader className="p-6 pb-4 border-b">
+          <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-7xl h-[90vh] p-0 flex flex-col rounded-2xl backdrop-blur-sm">
+            <DialogHeader className="p-4 pb-3 border-b">
               <DialogTitle>Editing: {editingFile.name}</DialogTitle>
               <DialogDescription>
-                Path: <span className="font-mono">{editingFilePath}</span>
+                Path: <span className="font-mono text-xs">{editingFilePath}</span>
               </DialogDescription>
             </DialogHeader>
-            <div className="flex-grow overflow-hidden">
-              {isEditorLoading ? (
-                <div className="flex justify-center items-center h-full">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                  <p className="ml-2">Loading content...</p>
-                </div>
-              ) : editorError ? (
-                <div className="flex flex-col justify-center items-center h-full text-destructive p-4">
-                  <AlertTriangle className="h-8 w-8 mb-2" />
-                  <p className="font-semibold">Error Loading File</p>
-                  <p className="text-sm text-center">{editorError}</p>
-                </div>
-              ) : (
-                <ScrollArea className="h-full bg-background">
-                  <Textarea
-                    value={editingFileContent}
-                    onChange={(e) => setEditingFileContent(e.target.value)}
-                    className="h-full w-full resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-4 font-mono text-sm"
-                    placeholder="File content will appear here..."
-                  />
-                </ScrollArea>
-              )}
+            <div className="flex-grow overflow-hidden flex"> {/* Added flex here */}
+              {/* Visual Line Number Gutter Placeholder */}
+              <div className="w-12 bg-muted/50 border-r border-border py-2 px-1 text-right text-muted-foreground text-xs select-none overflow-y-hidden">
+                {/* This is a placeholder. Real line numbers require JS sync with textarea scroll/content. */}
+                {/* For now, it's just a visual gutter. */}
+              </div>
+              <div className="flex-grow overflow-hidden"> {/* This div will contain the ScrollArea */}
+                {isEditorLoading ? (
+                  <div className="flex justify-center items-center h-full">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <p className="ml-2">Loading content...</p>
+                  </div>
+                ) : editorError ? (
+                  <div className="flex flex-col justify-center items-center h-full text-destructive p-4">
+                    <AlertTriangle className="h-8 w-8 mb-2" />
+                    <p className="font-semibold">Error Loading File</p>
+                    <p className="text-sm text-center">{editorError}</p>
+                  </div>
+                ) : (
+                  <ScrollArea className="h-full w-full bg-muted/30"> {/* Distinct background for editor area */}
+                    <Textarea
+                      value={editingFileContent}
+                      onChange={(e) => setEditingFileContent(e.target.value)}
+                      className="h-full w-full resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-2 font-mono text-sm leading-relaxed tracking-wide"
+                      placeholder="File content will appear here..."
+                    />
+                  </ScrollArea>
+                )}
+              </div>
             </div>
-            <DialogFooter className="p-4 pt-3 border-t flex justify-between items-center">
+            <DialogFooter className="p-3 border-t flex justify-between items-center">
               <div className="text-xs text-muted-foreground">
                 Chars: {editingFileContent.length}
               </div>
