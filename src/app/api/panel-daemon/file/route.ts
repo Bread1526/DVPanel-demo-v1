@@ -4,17 +4,31 @@ import { NextResponse, type NextRequest } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
-const BASE_DIR = '/srv/www'; // Or a more configurable path
+const BASE_DIR = '/srv/www'; // Or a more configurable path, ensure it's absolute.
 
-function resolveSafePath(userPath: string | undefined | null): string {
-  if (!userPath) {
-    throw new Error('File path is required.');
+function resolveSafePath(relativePath: string): string {
+  // Normalize the relative path to resolve ".." and "." segments.
+  const normalizedRelativePath = path.normalize(relativePath);
+
+  // Prevent paths that try to go above the root of the relative path structure
+  if (normalizedRelativePath.startsWith('..') || normalizedRelativePath.includes(path.sep + '..')) {
+     console.error(
+      `[API Security] Access Denied (Invalid Path Structure - File): relativePath='${relativePath}', normalizedRelativePath='${normalizedRelativePath}'`
+    );
+    throw new Error('Access denied: Invalid path structure.');
   }
-  const resolvedPath = path.resolve(BASE_DIR, userPath);
-  if (!resolvedPath.startsWith(path.resolve(BASE_DIR))) {
+
+  // Join with BASE_DIR and normalize again for the final absolute path
+  const absolutePath = path.normalize(path.join(BASE_DIR, normalizedRelativePath));
+
+  // Final security check: ensure the resolved path is still within or at BASE_DIR
+  if (!absolutePath.startsWith(BASE_DIR)) {
+    console.error(
+      `[API Security] Access Denied (Outside Base Directory - File): relativePath='${relativePath}', normalizedRelativePath='${normalizedRelativePath}', absolutePath='${absolutePath}', BASE_DIR='${BASE_DIR}'`
+    );
     throw new Error('Access denied: Path is outside the allowed directory.');
   }
-  return resolvedPath;
+  return absolutePath;
 }
 
 export async function GET(request: NextRequest) {
@@ -29,16 +43,13 @@ export async function GET(request: NextRequest) {
     const filePath = resolveSafePath(requestedPath);
 
     if (!fs.existsSync(filePath)) {
-      return NextResponse.json({ error: 'File not found.' }, { status: 404 });
+      return NextResponse.json({ error: 'File not found.', details: `Path: ${filePath}` }, { status: 404 });
     }
     if (fs.statSync(filePath).isDirectory()) {
-      return NextResponse.json({ error: 'Path is a directory, not a file.' }, { status: 400 });
+      return NextResponse.json({ error: 'Path is a directory, not a file.', details: `Path: ${filePath}` }, { status: 400 });
     }
 
     const content = fs.readFileSync(filePath, 'utf-8');
-    // For file content, it's often better to send as plain text
-    // but Next.js API routes typically wrap in NextResponse.json or similar.
-    // Sending as text/plain:
     return new NextResponse(content, {
       status: 200,
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
