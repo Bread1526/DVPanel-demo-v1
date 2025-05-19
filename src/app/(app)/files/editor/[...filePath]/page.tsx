@@ -5,18 +5,19 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import CodeEditor from '@/components/ui/code-editor'; // Corrected to default import
+import CodeEditor from '@/components/ui/code-editor'; 
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Save, ArrowLeft, Camera, Search as SearchIcon } from "lucide-react";
+import { Loader2, Save, ArrowLeft, Camera, Search as SearchIcon, ShieldAlert } from "lucide-react";
 import path from 'path-browserify';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
   if (!filename) return 'plaintext';
   const extension = filename.split('.').pop()?.toLowerCase() || '';
   switch (extension) {
-    case 'js': case 'jsx': return 'javascript';
-    case 'ts': case 'tsx': return 'typescript';
+    case 'js': case 'jsx': return 'javascript'; // jsx: true will be handled by CodeMirror
+    case 'ts': case 'tsx': return 'typescript'; // tsx: true will be handled by CodeMirror
     case 'html': case 'htm': return 'html';
     case 'css': case 'scss': return 'css';
     case 'json': return 'json';
@@ -35,6 +36,7 @@ export default function FileEditorPage() {
 
   const [fileContent, setFileContent] = useState<string>('');
   const [originalFileContent, setOriginalFileContent] = useState<string>('');
+  const [isWritable, setIsWritable] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,12 +76,17 @@ export default function FileEditorPage() {
         const errData = await response.json().catch(() => ({ error: `Error fetching file: ${response.statusText}`, details: `Path: ${decodedFilePath}` }));
         throw new Error(errData.error || `Failed to fetch file content. Status: ${response.status}`);
       }
-      const textContent = await response.text();
-      setFileContent(textContent);
-      setOriginalFileContent(textContent);
+      const data = await response.json(); // Expect { content: string, writable: boolean }
+      if (typeof data.content !== 'string' || typeof data.writable !== 'boolean') {
+        throw new Error("Invalid response format from server when fetching file content.");
+      }
+      setFileContent(data.content);
+      setOriginalFileContent(data.content);
+      setIsWritable(data.writable);
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred while fetching file content.");
       toast({ title: "Error Loading File", description: e.message, variant: "destructive" });
+      setIsWritable(false); // Assume not writable on error
     } finally {
       setIsLoading(false);
     }
@@ -98,9 +105,13 @@ export default function FileEditorPage() {
     }
   }, [decodedFilePath, encodedFilePath, fetchFileContent, toast]);
 
-  const handleSaveChanges = async () => {
+  const handleSaveChanges = useCallback(async () => {
     if (!decodedFilePath) {
       toast({ title: "Error", description: "No active file to save.", variant: "destructive" });
+      return;
+    }
+    if (!isWritable) {
+      toast({ title: "Cannot Save", description: "This file is not writable.", variant: "destructive" });
       return;
     }
     setIsSaving(true);
@@ -123,7 +134,24 @@ export default function FileEditorPage() {
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [decodedFilePath, fileContent, fileName, isWritable, toast]);
+
+  // Keyboard shortcut for Save (Ctrl+S or Cmd+S)
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+        event.preventDefault();
+        if (!isSaving && isWritable && hasUnsavedChanges) {
+          handleSaveChanges();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isSaving, isWritable, hasUnsavedChanges, handleSaveChanges]);
+
 
   if (isLoading) {
     return (
@@ -134,7 +162,7 @@ export default function FileEditorPage() {
     );
   }
   
-  if (error && !isLoading) {
+  if (error && !isLoading) { // Ensure error is shown only after loading finishes
     return (
       <div className="p-4">
         <PageHeader title="Error Loading File" description={error} />
@@ -145,7 +173,7 @@ export default function FileEditorPage() {
     );
   }
 
-  if (!decodedFilePath && !isLoading) {
+  if (!decodedFilePath && !isLoading) { // Handle case where decodedFilePath is empty after loading
      return (
       <div className="p-4">
         <PageHeader title="Invalid File Path" description="The file path specified in the URL is invalid or missing." />
@@ -171,7 +199,7 @@ export default function FileEditorPage() {
       {/* Toolbar */}
       <div className="flex-shrink-0 flex items-center justify-between p-2 border-b bg-muted/50">
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={handleSaveChanges} disabled={isSaving || !hasUnsavedChanges} className="shadow-sm hover:scale-105">
+          <Button variant="ghost" size="sm" onClick={handleSaveChanges} disabled={isSaving || !isWritable || !hasUnsavedChanges} className="shadow-sm hover:scale-105">
             {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
             Save
           </Button>
@@ -189,8 +217,19 @@ export default function FileEditorPage() {
           <span className="mx-1">|</span>
           <span>Lines: {fileContent.split('\n').length}</span>
           {hasUnsavedChanges && <span className="ml-1 font-semibold text-amber-500">* Unsaved</span>}
+          {!isWritable && <span className="ml-2 font-semibold text-destructive">(Read-only)</span>}
         </div>
       </div>
+
+      {!isWritable && (
+        <Alert variant="destructive" className="m-2 rounded-md">
+          <ShieldAlert className="h-4 w-4" />
+          <AlertTitle>Read-only Mode</AlertTitle>
+          <AlertDescription>
+            This file is not writable. Changes cannot be saved.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Code Editor Area */}
       <div className="flex-grow relative p-0 bg-background min-h-0">
@@ -198,7 +237,7 @@ export default function FileEditorPage() {
           value={fileContent}
           onChange={setFileContent}
           language={fileLanguage}
-          readOnly={isSaving}
+          readOnly={isSaving || !isWritable}
           className="h-full w-full border-0 rounded-none"
         />
       </div>

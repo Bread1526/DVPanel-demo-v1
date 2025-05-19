@@ -73,6 +73,16 @@ export async function GET(request: NextRequest) {
     const forViewing = searchParams.get('view') === 'true';
     const mimeType = getMimeType(filePath);
     
+    let isWritable = false;
+    try {
+      fs.accessSync(filePath, fs.constants.W_OK);
+      isWritable = true;
+    } catch (e) {
+      // File is not writable or doesn't exist (though we checked existsSync above)
+      isWritable = false;
+      console.warn(`[API /panel-daemon/file GET] File not writable: ${filePath}`);
+    }
+    
     // For text-based files to be viewed in editor or certain known types
     const viewableTextMimeTypes = ['text/', 'application/javascript', 'application/json', 'application/x-yaml', 'application/xml'];
     const isViewableTextFile = viewableTextMimeTypes.some(prefix => mimeType.startsWith(prefix));
@@ -96,11 +106,9 @@ export async function GET(request: NextRequest) {
     } else {
       // For viewing text-based files in the editor
       const content = fs.readFileSync(filePath, 'utf-8');
-      console.log(`[API /panel-daemon/file GET] Successfully read file for viewing: ${filePath}`);
-      return new NextResponse(content, {
-        status: 200,
-        headers: { 'Content-Type': `${mimeType}; charset=utf-8` },
-      });
+      console.log(`[API /panel-daemon/file GET] Successfully read file for viewing: ${filePath}, Writable: ${isWritable}`);
+      // Return content and writable status
+      return NextResponse.json({ content, writable: isWritable, path: requestedPath });
     }
 
   } catch (error: any) {
@@ -127,15 +135,20 @@ export async function POST(request: NextRequest) {
     const filePath = resolveSafePath(requestedPath);
     console.log(`[API /panel-daemon/file POST] Attempting to write file: ${filePath}`);
 
-    // Optionally, check if it's a directory before writing (fs.statSync(filePath).isDirectory())
-    // Though writeFileSync would typically fail or overwrite depending on OS if it's a directory.
-
+    // Check if writable before attempting to write
+    try {
+      fs.accessSync(filePath, fs.constants.W_OK);
+    } catch (e) {
+      console.warn(`[API /panel-daemon/file POST] File not writable: ${filePath}`);
+      return NextResponse.json({ error: 'File is not writable.', details: `Path: ${filePath}` }, { status: 403 });
+    }
+    
     fs.writeFileSync(filePath, content, 'utf-8');
 
     console.log(`[API /panel-daemon/file POST] Successfully wrote content to ${filePath}.`);
     return NextResponse.json({ success: true, message: `File ${path.basename(filePath)} saved successfully.` });
 
-  } catch (error: any) {
+  } catch (error: any) Mapped "{ error: 'Failed to save file.', details: error.message }"
     console.error('[API /panel-daemon/file POST] Error writing file:', error);
     if (error.message.startsWith('Access denied')) {
       return NextResponse.json({ error: error.message, details: `Attempted path: ${request.nextUrl.searchParams.get('path')}` }, { status: 403 });
