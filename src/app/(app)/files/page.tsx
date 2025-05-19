@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { MoreHorizontal, Folder, File as FileIcon, Upload, Download, Edit3, Trash2, KeyRound, Search, ArrowLeft, Loader2, AlertTriangle } from "lucide-react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
-import { loadPanelSettings, type PanelSettingsData } from '@/app/(app)/settings/actions';
+// Removed: import { loadPanelSettings, type PanelSettingsData } from '@/app/(app)/settings/actions';
 import { useToast } from "@/hooks/use-toast";
 import path from 'path-browserify'; // Using path-browserify for client-side path manipulation
 
@@ -24,10 +24,10 @@ interface FileItem {
 }
 
 const DAEMON_API_VERSION = 'v1';
+const DEFAULT_DAEMON_URL = `http://localhost:3005/api/${DAEMON_API_VERSION}`;
 
 export default function FilesPage() {
-  const [daemonSettings, setDaemonSettings] = useState<PanelSettingsData | null>(null);
-  const [daemonUrl, setDaemonUrl] = useState<string | null>(null);
+  const [daemonUrl, setDaemonUrl] = useState<string>(DEFAULT_DAEMON_URL); // Default to localhost:3005
   const [currentPath, setCurrentPath] = useState<string>('/'); // Start at root
   const [files, setFiles] = useState<FileItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -35,39 +35,15 @@ export default function FilesPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const { toast } = useToast();
 
-  useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const result = await loadPanelSettings();
-        if (result.data) {
-          setDaemonSettings(result.data);
-          const url = `http://${result.data.daemonIp || 'localhost'}:${result.data.daemonPort || '3005'}/api/${DAEMON_API_VERSION}`;
-          setDaemonUrl(url);
-        } else {
-          setError("Failed to load daemon settings. Please configure them in Panel Settings.");
-          setIsLoading(false);
-        }
-      } catch (e) {
-        console.error("Error loading panel settings for File Manager:", e);
-        setError("Error loading panel settings. Check console.");
-        setIsLoading(false);
-      }
-    };
-    fetchSettings();
-  }, []);
+  // Removed useEffect for fetching panel settings. Daemon URL is now defaulted.
 
   const fetchFiles = useCallback(async (pathToFetch: string) => {
-    if (!daemonUrl) {
-      //setError("Daemon URL not configured. Cannot fetch files.");
-      // setIsLoading(false); // Moved loading state management
-      return;
-    }
     setIsLoading(true);
     setError(null);
     try {
       const response = await fetch(`${daemonUrl}/files?path=${encodeURIComponent(pathToFetch)}`);
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({ error: 'Failed to fetch files from daemon.' }));
+        const errData = await response.json().catch(() => ({ error: 'Failed to fetch files from daemon. Ensure it is running and accessible.' }));
         throw new Error(errData.error || `HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
@@ -88,16 +64,20 @@ export default function FilesPage() {
       console.error("Error fetching files:", e);
       setError(e.message || "An unknown error occurred while fetching files.");
       setFiles([]); // Clear files on error
+      toast({
+        title: "File Manager Error",
+        description: e.message || "Could not connect to the daemon or fetch files. Please ensure it's running correctly.",
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
     }
-  }, [daemonUrl]);
+  }, [daemonUrl, toast]); // Removed dependency on panelSettings, kept toast
 
   useEffect(() => {
-    if (daemonUrl) {
-      fetchFiles(currentPath);
-    }
-  }, [daemonUrl, fetchFiles, currentPath]); // fetchFiles is stable, currentPath triggers refetch
+    // Fetch files on initial mount with the default daemon URL and currentPath
+    fetchFiles(currentPath);
+  }, [fetchFiles, currentPath]); // fetchFiles is stable, currentPath triggers refetch
 
   const handleFolderClick = (folderName: string) => {
     const newPath = path.join(currentPath, folderName);
@@ -113,7 +93,7 @@ export default function FilesPage() {
   };
 
   const getBreadcrumbSegments = () => {
-    if (currentPath === '/') return [{ name: '/', path: '/' }];
+    if (currentPath === '/') return [{ name: 'Root /', path: '/' }];
     const segments = currentPath.split('/').filter(Boolean);
     return [{ name: 'Root /', path: '/' }, ...segments.map((segment, index) => ({
       name: segment,
@@ -129,10 +109,10 @@ export default function FilesPage() {
     <div>
       <PageHeader 
         title="Root File Manager" 
-        description={daemonUrl ? `Manage files via daemon at ${daemonUrl}` : "Configure daemon settings to enable file management."}
+        description={`Manage files via daemon. Defaulting to ${DEFAULT_DAEMON_URL}.`}
         actions={
           <div className="flex gap-2">
-            <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150" disabled={!daemonUrl}>
+            <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
               <Upload className="mr-2 h-4 w-4" /> Upload
             </Button>
           </div>
@@ -156,7 +136,6 @@ export default function FilesPage() {
                 className="pl-8 w-full sm:w-[250px]" 
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                disabled={!daemonUrl}
               />
             </div>
           </div>
