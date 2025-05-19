@@ -101,6 +101,7 @@ export default function FilesPage() {
           const errData = await response.json();
           errorMsg = errData.error || errData.details || errorMsg;
         } catch (parseError) {
+          // If parsing JSON fails, try to get text, otherwise stick with original errorMsg
           errorMsg = await response.text().catch(() => errorMsg);
         }
         throw new Error(errorMsg);
@@ -178,6 +179,7 @@ export default function FilesPage() {
     setEditingFileContent("");
 
     try {
+      // Pass ?view=true to suggest to the API we want plain text if possible
       const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(fullPath)}&view=true`);
       if (!response.ok) {
         const errData = await response.json().catch(() => ({ error: `Failed to load file content. Status: ${response.status}` }));
@@ -209,7 +211,8 @@ export default function FilesPage() {
       }
       toast({ title: 'Success', description: result.message || `File ${editingFile?.name} saved.` });
       closeEditorDialog();
-      fetchFiles(currentPath); 
+      // Optionally, re-fetch files if needed, though usually not for content save unless metadata changes
+      // fetchFiles(currentPath); 
     } catch (e: any) {
       setEditorError(e.message || "An unexpected error occurred while saving.");
       toast({ title: "Error Saving File", description: e.message, variant: "destructive" });
@@ -408,7 +411,7 @@ export default function FilesPage() {
               <div className="w-12 bg-muted/50 border-r border-border py-2 px-1 text-right text-muted-foreground text-xs select-none overflow-y-hidden shrink-0">
                 {/* This is a placeholder. Real line numbers require JS sync with textarea scroll/content. */}
               </div>
-              <div className="flex-grow overflow-hidden flex flex-col"> {/* Editor area: flex column to allow ScrollArea to grow */}
+              <div className="flex-grow flex flex-col"> {/* Editor area: flex column to allow ScrollArea to grow */}
                 {isEditorLoading ? (
                   <div className="flex justify-center items-center h-full">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -421,7 +424,7 @@ export default function FilesPage() {
                     <p className="text-sm text-center">{editorError}</p>
                   </div>
                 ) : (
-                  <ScrollArea className="flex-grow w-full bg-background"> {/* ScrollArea takes available space */}
+                  <ScrollArea className="flex-grow h-full w-full bg-background"> {/* ScrollArea takes available space, added h-full */}
                     <Textarea
                       value={editingFileContent}
                       onChange={(e) => setEditingFileContent(e.target.value)}
