@@ -1,27 +1,31 @@
 
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   MoreHorizontal, Folder, File as FileIconDefault, Upload, Download, Edit3, Trash2, KeyRound, Search, ArrowLeft, Loader2, AlertTriangle,
-  FileCode2, FileJson, FileText, ImageIcon, Archive, Shell, FileTerminal, AudioWaveform, VideoIcon, Database, List, Shield, Github, Settings2, ServerCog
+  FileCode2, FileJson, FileText, ImageIcon, Archive, Shell, FileTerminal, AudioWaveform, VideoIcon, Database, List, Shield, Github, Settings2, ServerCog,
+  Camera, Search as SearchIcon, ShieldAlert, FolderPlus, FilePlus, X
 } from "lucide-react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { useToast } from "@/hooks/use-toast";
 import path from 'path-browserify';
-import { format, formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
 import PermissionsDialog from './components/permissions-dialog';
-import { useRouter } from 'next/navigation'; // Import useRouter
+import { useRouter } from 'next/navigation';
+import CodeEditor from '@/components/ui/code-editor';
 
 interface FileItem {
   name: string;
-  type: 'folder' | 'file' | 'unknown';
+  type: 'folder' | 'file' | 'link' | 'unknown';
   size?: number | null;
   modified?: string | null; // ISO string
   permissions?: string | null; // rwx string
@@ -41,16 +45,17 @@ function formatBytes(bytes?: number | null, decimals = 2) {
 
 function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactNode {
   if (fileType === 'folder') return <Folder className="h-5 w-5 text-primary" />;
+  if (fileType === 'link') return <FileIconDefault className="h-5 w-5 text-purple-400" />; // Or a dedicated link icon
   if (fileType === 'unknown') return <FileIconDefault className="h-5 w-5 text-muted-foreground" />;
 
   const extension = filename.split('.').pop()?.toLowerCase() || '';
   switch (extension) {
+    case 'json': return <FileJson className="h-5 w-5 text-yellow-600" />;
+    case 'yaml': case 'yml': return <ServerCog className="h-5 w-5 text-indigo-400" />;
     case 'html': case 'htm': return <FileCode2 className="h-5 w-5 text-orange-500" />;
     case 'css': case 'scss': case 'sass': return <FileCode2 className="h-5 w-5 text-blue-500" />;
     case 'js': case 'jsx': return <FileCode2 className="h-5 w-5 text-yellow-500" />;
     case 'ts': case 'tsx': return <FileCode2 className="h-5 w-5 text-sky-500" />;
-    case 'json': return <FileJson className="h-5 w-5 text-yellow-600" />;
-    case 'yaml': case 'yml': return <ServerCog className="h-5 w-5 text-indigo-400" />;
     case 'txt': case 'md': case 'log': return <FileText className="h-5 w-5 text-gray-500" />;
     case 'png': case 'jpg': case 'jpeg': case 'gif': case 'svg': case 'webp': case 'ico': return <ImageIcon className="h-5 w-5 text-purple-500" />;
     case 'zip': case 'tar': case 'gz': case 'rar': case '7z': return <Archive className="h-5 w-5 text-amber-700" />;
@@ -74,12 +79,19 @@ export default function FilesPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const { toast } = useToast();
-  const router = useRouter(); // Initialize router
+  const router = useRouter();
 
   const [isPermissionsDialogOpen, setIsPermissionsDialogOpen] = useState(false);
   const [permissionDialogTargetPath, setPermissionDialogTargetPath] = useState<string>("");
   const [permissionDialogCurrentRwxPerms, setPermissionDialogCurrentRwxPerms] = useState<string>("");
   const [permissionDialogCurrentOctalPerms, setPermissionDialogCurrentOctalPerms] = useState<string>("");
+
+  // State for "New File/Folder" dialog
+  const [isCreateItemDialogOpen, setIsCreateItemDialogOpen] = useState(false);
+  const [createItemType, setCreateItemType] = useState<'file' | 'folder' | null>(null);
+  const [newItemName, setNewItemName] = useState('');
+  const [isCreatingItem, setIsCreatingItem] = useState(false);
+
 
   const fetchFiles = useCallback(async (pathToFetch: string) => {
     setIsLoading(true);
@@ -94,7 +106,7 @@ export default function FilesPage() {
       }
       const data = await response.json();
       if (data && Array.isArray(data.files)) {
-        setFiles(data.files.map((f: any) => ({ ...f })));
+        setFiles(data.files);
         setCurrentPath(data.path || pathToFetch);
       } else {
         setFiles([]);
@@ -156,6 +168,39 @@ export default function FilesPage() {
     file.name.toLowerCase().includes(searchTerm.toLowerCase())
   ), [files, searchTerm]);
 
+  const openCreateItemDialog = (type: 'file' | 'folder') => {
+    setCreateItemType(type);
+    setNewItemName('');
+    setIsCreateItemDialogOpen(true);
+  };
+
+  const handleCreateItem = async () => {
+    if (!createItemType || !newItemName.trim()) {
+      toast({ title: "Error", description: "Name cannot be empty.", variant: "destructive" });
+      return;
+    }
+    setIsCreatingItem(true);
+    try {
+      const response = await fetch(`${DAEMON_API_BASE_PATH}/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: currentPath, name: newItemName, type: createItemType }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || `Failed to create ${createItemType}.`);
+      }
+      toast({ title: "Success", description: result.message || `${createItemType} "${newItemName}" created.` });
+      setIsCreateItemDialogOpen(false);
+      fetchFiles(currentPath); // Refresh file list
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setIsCreatingItem(false);
+    }
+  };
+
+
   return (
     <div className="flex flex-col h-full">
       <PageHeader
@@ -163,6 +208,12 @@ export default function FilesPage() {
         description="Browse and manage files on the server."
         actions={
           <div className="flex gap-2">
+            <Button variant="outline" onClick={() => openCreateItemDialog('file')} className="shadow-md hover:scale-105 transform transition-transform duration-150">
+              <FilePlus className="mr-2 h-4 w-4" /> New File
+            </Button>
+            <Button variant="outline" onClick={() => openCreateItemDialog('folder')} className="shadow-md hover:scale-105 transform transition-transform duration-150">
+              <FolderPlus className="mr-2 h-4 w-4" /> New Folder
+            </Button>
             <Button variant="outline" className="shadow-md hover:scale-105 transform transition-transform duration-150">
               <Upload className="mr-2 h-4 w-4" /> Upload
             </Button>
@@ -212,7 +263,7 @@ export default function FilesPage() {
             </BreadcrumbList>
           </Breadcrumb>
         </CardHeader>
-        <CardContent className="flex-grow overflow-y-auto"> {/* Make this scrollable */}
+        <CardContent className="flex-grow overflow-y-auto">
           {isLoading && (
             <div className="flex justify-center items-center py-10 h-full">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -271,6 +322,9 @@ export default function FilesPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                             <DropdownMenuItem onSelect={() => handleItemAction(file)}>
+                                <Edit3 className="mr-2 h-4 w-4" /> {file.type === 'file' ? 'View/Edit' : 'Open Folder'}
+                            </DropdownMenuItem>
                             {file.type === 'file' && (
                               <DropdownMenuItem
                                 onSelect={(e) => { e.preventDefault(); window.location.href = `${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(fullPathToItem)}`; }}
@@ -278,12 +332,10 @@ export default function FilesPage() {
                                 <Download className="mr-2 h-4 w-4" /> Download
                               </DropdownMenuItem>
                             )}
-                             <DropdownMenuItem onSelect={() => handleItemAction(file)}>
-                                <Edit3 className="mr-2 h-4 w-4" /> {file.type === 'file' ? 'View/Edit' : 'Open Folder'}
-                            </DropdownMenuItem>
                             <DropdownMenuItem onSelect={() => handlePermissionsClick(file)}>
                                 <KeyRound className="mr-2 h-4 w-4" /> Permissions
                             </DropdownMenuItem>
+                            <DropdownMenuSeparator />
                             <DropdownMenuItem className="text-destructive hover:!text-destructive-foreground focus:!bg-destructive focus:!text-destructive-foreground">
                               <Trash2 className="mr-2 h-4 w-4" /> Delete
                             </DropdownMenuItem>
@@ -309,6 +361,39 @@ export default function FilesPage() {
           onPermissionsUpdate={handlePermissionsUpdate}
         />
       )}
+
+      <Dialog open={isCreateItemDialogOpen} onOpenChange={setIsCreateItemDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl backdrop-blur-sm">
+          <DialogHeader>
+            <DialogTitle>Create New {createItemType === 'file' ? 'File' : 'Folder'}</DialogTitle>
+            <DialogDescription>
+              Enter the name for the new {createItemType} in <span className="font-mono">{currentPath}</span>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Label htmlFor="newItemName" className="sr-only">Name</Label>
+            <Input
+              id="newItemName"
+              value={newItemName}
+              onChange={(e) => setNewItemName(e.target.value)}
+              placeholder={createItemType === 'file' ? 'e.g., new-file.txt' : 'e.g., new-folder'}
+              onKeyDown={(e) => e.key === 'Enter' && !isCreatingItem && handleCreateItem()}
+            />
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline" disabled={isCreatingItem}>
+                <X className="mr-2 h-4 w-4" /> Cancel
+              </Button>
+            </DialogClose>
+            <Button type="button" onClick={handleCreateItem} disabled={isCreatingItem || !newItemName.trim()} className="shadow-md hover:scale-105 transform transition-transform duration-150">
+              {isCreatingItem ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (createItemType === 'file' ? <FilePlus className="mr-2 h-4 w-4"/> : <FolderPlus className="mr-2 h-4 w-4"/>)}
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
