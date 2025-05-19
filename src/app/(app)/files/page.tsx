@@ -327,11 +327,11 @@ export default function FilesPage() {
                   <p>Error loading file: {editorError}</p>
                 </div>
               ) : (
-                <ScrollArea className="h-full border rounded-md">
+                <ScrollArea className="h-full border rounded-md bg-background">
                   <Textarea
                     value={editingFileContent}
                     readOnly // For now, make it read-only. Editing requires a save mechanism.
-                    className="h-full w-full resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-4 font-mono text-sm"
+                    className="h-full w-full resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-2 font-mono text-sm"
                     placeholder="File content will appear here..."
                   />
                 </ScrollArea>
@@ -351,3 +351,4 @@ export default function FilesPage() {
     </div>
   );
 }
+
