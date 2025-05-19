@@ -60,7 +60,7 @@ body {
     --primary-foreground: 210 40% 98%; /* Light text on primary */
     --secondary: 222 30% 20%; /* Darker, less saturated secondary */
     --secondary-foreground: 220 10% 70%;
-    --muted: 222 30% 18%; /* Muted background for line numbers, slightly different from card */
+    --muted: 222 40% 18%; /* Adjusted for line numbers, slightly different from card */
     --muted-foreground: 220 10% 55%; /* Muted text for dark */
     --accent: 262 83% 58%; /* #7c3aed violet */
     --accent-foreground: 260 80% 95%; /* Light text on accent */
@@ -116,6 +116,19 @@ body {
     -ms-overflow-style: none;  /* IE and Edge */
     scrollbar-width: none;  /* Firefox */
   }
+
+  /* CodeMirror specific overrides if needed */
+  .cm-editor {
+    @apply h-full w-full;
+  }
+  .cm-gutters {
+    background-color: hsl(var(--muted)) !important; /* Match line number background */
+    border-right: 1px solid hsl(var(--border)) !important;
+  }
+  .cm-content {
+    font-family: 'Menlo', 'Monaco', 'Consolas', 'Courier New', monospace;
+    font-size: 0.875rem; /* text-sm */
+  }
 }
 
 @keyframes shrink-width {
@@ -126,5 +139,3 @@ body {
     width: 0%;
   }
 }
-
-    

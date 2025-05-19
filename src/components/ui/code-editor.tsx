@@ -1,85 +1,112 @@
 
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Textarea } from '@/components/ui/textarea';
+import React, { useState, useEffect, useCallback } from 'react';
+import CodeMirror from '@uiw/react-codemirror';
+import { javascript } from '@codemirror/lang-javascript';
+import { html } from '@codemirror/lang-html';
+import { css } from '@codemirror/lang-css';
+import { json } from '@codemirror/lang-json';
+import { python } from '@codemirror/lang-python';
+// import { shell } from '@codemirror/lang-shell'; // Removed shell import
+import { oneDark } from '@codemirror/theme-one-dark'; 
+import { EditorView } from '@codemirror/view'; 
 import { cn } from '@/lib/utils';
 
 interface CodeEditorProps {
   value: string;
   onChange: (value: string) => void;
-  language?: string; 
+  language?: string;
   readOnly?: boolean;
   className?: string;
+  height?: string; 
 }
 
 const CodeEditor: React.FC<CodeEditorProps> = ({
   value,
   onChange,
-  language,
+  language = 'plaintext',
   readOnly = false,
   className,
+  height = '100%', 
 }) => {
-  const [lineNumbers, setLineNumbers] = useState<string>("1");
-  const linesRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const calculateLineNumbers = useCallback((textValue: string) => {
-    const lines = textValue.split('\\n').length;
-    const numbers = Array.from({ length: Math.max(1, lines) }, (_, i) => i + 1).join('\\n');
-    setLineNumbers(numbers);
-  }, []);
+  const [extensions, setExtensions] = useState<any[]>([]);
 
   useEffect(() => {
-    calculateLineNumbers(value);
-  }, [value, calculateLineNumbers]);
-
-  const handleTextareaScroll = () => {
-    if (linesRef.current && textareaRef.current) {
-      linesRef.current.scrollTop = textareaRef.current.scrollTop;
+    const commonExtensions = [
+      oneDark, 
+      EditorView.lineWrapping, 
+    ];
+    
+    let langExtension;
+    switch (language.toLowerCase()) {
+      case 'javascript':
+      case 'jsx':
+      case 'typescript':
+      case 'tsx':
+        langExtension = javascript({ jsx: true, typescript: true });
+        break;
+      case 'html':
+      case 'htm':
+        langExtension = html();
+        break;
+      case 'css':
+      case 'scss': 
+        langExtension = css();
+        break;
+      case 'json':
+        langExtension = json();
+        break;
+      case 'python':
+      case 'py':
+        langExtension = python();
+        break;
+      // case 'shell': // Removed shell cases
+      // case 'bash':
+      // case 'sh':
+      //   langExtension = shell();
+      //   break;
+      default:
+        // For plaintext or unknown, use JavaScript as a fallback for basic highlighting
+        langExtension = javascript({ jsx: true, typescript: true }); 
     }
-  };
+    
+    setExtensions([langExtension, ...commonExtensions]);
+
+  }, [language]);
   
-  const handleTextareaInput = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-    onChange(event.target.value);
-    // Recalculate line numbers on input as well
-    calculateLineNumbers(event.target.value); 
-  };
-
-
-  // Basic language detection for placeholder
-  const detectedLanguage = language || 'plaintext';
+  const handleEditorChange = useCallback(
+    (val: string) => {
+      if (!readOnly) {
+        onChange(val);
+      }
+    },
+    [onChange, readOnly]
+  );
 
   return (
-    <div className={cn("flex h-full w-full bg-background font-mono text-sm border border-input rounded-md overflow-hidden", className)}>
-      <div
-        ref={linesRef}
-        className="line-numbers sticky left-0 top-0 h-full select-none overflow-y-hidden whitespace-pre-wrap bg-muted p-2 pr-3 text-right text-muted-foreground no-scrollbar"
-        style={{ 
-          lineHeight: '1.625rem', /* Match textarea's leading-relaxed roughly */
-          minWidth: '40px',
-          paddingTop: '0.5rem', /* Align with textarea's p-2 */
-          paddingBottom: '0.5rem' 
-        }}
-        aria-hidden="true"
-      >
-        {lineNumbers}
-      </div>
-      <Textarea
-        ref={textareaRef}
+    <div className={cn("h-full w-full border border-input rounded-md overflow-hidden", className)}
+         style={{backgroundColor: 'hsl(var(--muted))'}} 
+    >
+      <CodeMirror
         value={value}
-        onChange={handleTextareaInput} // Use combined handler
-        onScroll={handleTextareaScroll}
+        height={height}
+        extensions={extensions}
+        onChange={handleEditorChange}
         readOnly={readOnly}
-        className="h-full flex-grow resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-2 bg-transparent leading-relaxed tracking-wide no-scrollbar"
-        placeholder={`Enter ${detectedLanguage} code here... (Syntax highlighting not yet implemented)`}
-        spellCheck="false"
-        wrap="off" 
+        theme={oneDark} 
+        basicSetup={{
+          lineNumbers: true,
+          foldGutter: true,
+          highlightActiveLine: true,
+          highlightSelectionMatches: true,
+          autocompletion: true,
+          closeBrackets: true,
+        }}
+        className="h-full w-full text-sm" 
       />
     </div>
   );
 };
 
 export default CodeEditor;
-
-    

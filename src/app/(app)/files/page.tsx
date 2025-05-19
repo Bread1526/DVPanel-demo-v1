@@ -25,7 +25,7 @@ interface FileItem {
   type: 'folder' | 'file' | 'unknown';
   size?: number | null;
   modified?: string | null; // ISO string
-  permissions?: string | null; // "rwxrwxrwx" format - kept for display if needed
+  permissions?: string | null; // "rwxrwxrwx" format
   octalPermissions?: string | null; // "0755" format
 }
 
@@ -72,14 +72,15 @@ function getLanguageFromFilename(filename: string): string {
   const extension = filename.split('.').pop()?.toLowerCase() || '';
   switch (extension) {
     case 'js': case 'jsx': return 'javascript';
-    case 'ts': case 'tsx': return 'typescript';
+    case 'ts': case 'tsx': return 'typescript'; // CodeMirror javascript lang supports typescript
     case 'html': case 'htm': return 'html';
     case 'css': case 'scss': return 'css';
     case 'json': return 'json';
-    case 'yaml': case 'yml': return 'yaml';
-    case 'md': return 'markdown';
+    case 'yaml': case 'yml': return 'yaml'; // May need a specific CM lang for YAML or use plaintext
+    case 'md': return 'markdown'; // May need a specific CM lang for Markdown or use plaintext
     case 'sh': case 'bash': return 'shell';
-    default: return 'plaintext';
+    case 'py': return 'python';
+    default: return 'plaintext'; // Fallback for CodeMirror
   }
 }
 
@@ -128,8 +129,8 @@ export default function FilesPage() {
           type: f.type,
           size: f.size,
           modified: f.modified,
-          permissions: f.permissions, // rwx string
-          octalPermissions: f.octalPermissions, // e.g., "0755"
+          permissions: f.permissions, 
+          octalPermissions: f.octalPermissions,
         })));
         setCurrentPath(data.path || pathToFetch);
       } else {
@@ -422,7 +423,7 @@ export default function FilesPage() {
               </DialogDescription>
             </DialogHeader>
             
-            <div className="flex-grow overflow-hidden p-1"> {/* Added p-1 for slight inset for the editor box */}
+            <div className="flex-grow overflow-hidden p-1">
               {isEditorLoading ? (
                 <div className="flex justify-center items-center h-full">
                   <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -439,7 +440,8 @@ export default function FilesPage() {
                     value={editingFileContent}
                     onChange={setEditingFileContent}
                     language={editingFileLanguage}
-                    className="h-full w-full" // CodeEditor will fill this padded div
+                    className="h-full w-full"
+                    readOnly={false} // Or dynamically set if some files should be read-only
                  />
               )}
             </div>
@@ -475,5 +477,3 @@ export default function FilesPage() {
     </div>
   );
 }
-
-    
