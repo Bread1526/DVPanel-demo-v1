@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -35,18 +35,15 @@ export default function FileEditorPage() {
   const router = useRouter();
   const { toast } = useToast();
 
-  // The filePath param will be an array of segments if the path has slashes
-  // We need to decode it and join it back
   const encodedFilePathArray = params.filePath as string[] | undefined;
   const filePath = useMemo(() => {
     if (!encodedFilePathArray || encodedFilePathArray.length === 0) return null;
-    // The dynamic route [...filePath] gives an array, but we passed a single encoded string.
-    // So, encodedFilePathArray should have one element which is the URI encoded full path.
     try {
+      // The dynamic route [...filePath] gives an array, but we passed a single encoded string in the first segment.
       return decodeURIComponent(encodedFilePathArray[0]);
     } catch (e) {
       console.error("Error decoding file path from URL:", e);
-      return null; // Or handle error appropriately
+      return null; 
     }
   }, [encodedFilePathArray]);
   
@@ -72,7 +69,6 @@ export default function FileEditorPage() {
           const errData = await response.json();
           errorMsg = errData.error || errData.details || errorMsg;
         } catch (parseError) {
-          // Try to get text if JSON parsing fails
           errorMsg = await response.text().catch(() => errorMsg);
         }
         throw new Error(errorMsg);
@@ -96,7 +92,7 @@ export default function FileEditorPage() {
     if (filePath) {
       console.log("[FileEditorPage] useEffect - filePath identified:", filePath);
       fetchFileContent(filePath);
-    } else if (encodedFilePathArray) { // If filePath is null due to decoding error but we have the raw params
+    } else if (encodedFilePathArray) { 
       console.error("[FileEditorPage] useEffect - Invalid file path after decoding. Raw params:", encodedFilePathArray);
       setError("Invalid file path in URL.");
       setIsLoading(false);
@@ -127,7 +123,7 @@ export default function FileEditorPage() {
         throw new Error(result.error || result.details || 'Failed to save file.');
       }
       toast({ title: 'Success', description: result.message || `File ${fileName} saved.` });
-      setOriginalContent(fileContent); // Update original content to reflect saved state
+      setOriginalContent(fileContent); 
       setUnsavedChanges(false);
       console.log("[FileEditorPage] File saved successfully:", filePath);
     } catch (e: any) {
@@ -143,7 +139,7 @@ export default function FileEditorPage() {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (unsavedChanges) {
         e.preventDefault();
-        e.returnValue = ''; // Standard for most browsers
+        e.returnValue = ''; 
       }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -208,7 +204,7 @@ export default function FileEditorPage() {
               onChange={handleContentChange}
               language={language}
               readOnly={isSaving}
-              className="h-full w-full border-0 rounded-none" // Ensure editor takes full space of parent
+              className="h-full w-full border-0 rounded-none" 
             />
           )}
         </CardContent>
