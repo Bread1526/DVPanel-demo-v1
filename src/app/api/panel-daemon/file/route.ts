@@ -10,15 +10,44 @@ const BASE_DIR = process.env.FILE_MANAGER_BASE_DIR || '/';
 console.log(`[API /panel-daemon/file] Using BASE_DIR: ${BASE_DIR}`);
 
 function resolveSafePath(relativePath: string): string {
+  // Normalize the user-provided path to prevent directory traversal
   const normalizedUserPath = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '');
-  const absolutePath = path.normalize(path.join(BASE_DIR, normalizedUserPath));
+  let absolutePath: string;
 
   if (BASE_DIR === '/') {
+    // If BASE_DIR is root, resolve relativePath directly from root
+    // but ensure it's treated as an absolute path for security checks later
+    // path.join will handle making it absolute if it starts with /
+    // or relative to cwd if it doesn't, which is not what we want if relativePath is like "etc/passwd"
+    // So, we ensure normalizedUserPath starts with / if it's meant to be from the fs root.
+    // However, userPath is usually relative TO BASE_DIR.
+    // The critical part is that the FINAL absolutePath must be checked.
+
+    // Safest way: join then normalize. path.join will correctly handle if normalizedUserPath starts with /
+    absolutePath = path.normalize(path.join(BASE_DIR, normalizedUserPath));
+
+    // Additional check if BASE_DIR is '/'
+    // If normalizedUserPath was absolute (e.g. "/etc/passwd"), path.join("/", "/etc/passwd") is "/etc/passwd"
+    // We need to ensure that even if BASE_DIR is '/', we are not inadvertently creating a path outside
+    // what might be an intended chroot or sandboxed environment if that were in place.
+    // For now, this check is minimal, relying on the startsWith check below.
+  } else {
+    absolutePath = path.normalize(path.join(BASE_DIR, normalizedUserPath));
+  }
+
+  // Security Check: Ensure the resolved absolute path is still within the BASE_DIR
+  // This handles cases like `/` for relativePath when BASE_DIR is not `/`
+  // or if normalizedUserPath tries `../../` extensively.
+  if (BASE_DIR === '/') {
+    // If BASE_DIR is '/', any absolute path is "within" it.
+    // The main concern is not exposing sensitive system files.
+    // This requires careful server permissions.
+    // We check if it's an absolute path, which it should be by now.
     if (!path.isAbsolute(absolutePath)) {
-      console.error(
-        `[API Security] Access Denied (Path not absolute - File): relativePath='${relativePath}', absolutePath='${absolutePath}', BASE_DIR='${BASE_DIR}'`
-      );
-      throw new Error('Access denied: Resolved path is not absolute.');
+        console.error(
+            `[API Security] Path construction error (Not Absolute): relativePath='${relativePath}', absolutePath='${absolutePath}', BASE_DIR='${BASE_DIR}'`
+        );
+        throw new Error('Access denied: Invalid path resolution.');
     }
   } else if (!absolutePath.startsWith(BASE_DIR + path.sep) && absolutePath !== BASE_DIR) {
     console.error(
@@ -35,9 +64,10 @@ function getMimeType(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   switch (ext) {
     case '.txt': return 'text/plain';
-    case '.html': return 'text/html';
+    case '.html': case '.htm': return 'text/html';
     case '.css': return 'text/css';
-    case '.js': return 'application/javascript';
+    case '.js': case '.jsx': return 'application/javascript';
+    case '.ts': case '.tsx': return 'application/typescript';
     case '.json': return 'application/json';
     case '.yaml': case '.yml': return 'application/x-yaml';
     case '.png': return 'image/png';
@@ -78,18 +108,15 @@ export async function GET(request: NextRequest) {
       fs.accessSync(filePath, fs.constants.W_OK);
       isWritable = true;
     } catch (e) {
-      // File is not writable or doesn't exist (though we checked existsSync above)
       isWritable = false;
       console.warn(`[API /panel-daemon/file GET] File not writable: ${filePath}`);
     }
     
-    // For text-based files to be viewed in editor or certain known types
-    const viewableTextMimeTypes = ['text/', 'application/javascript', 'application/json', 'application/x-yaml', 'application/xml'];
+    const viewableTextMimeTypes = ['text/', 'application/javascript', 'application/json', 'application/x-yaml', 'application/xml', 'application/typescript'];
     const isViewableTextFile = viewableTextMimeTypes.some(prefix => mimeType.startsWith(prefix));
 
 
     if (!forViewing || !isViewableTextFile) {
-      // For download or non-text files
       const stats = fs.statSync(filePath);
       const data: ReadableStream<Uint8Array> = Stream.Readable.toWeb(fs.createReadStream(filePath)) as ReadableStream<Uint8Array>;
       const filename = path.basename(filePath);
@@ -104,10 +131,8 @@ export async function GET(request: NextRequest) {
         },
       });
     } else {
-      // For viewing text-based files in the editor
       const content = fs.readFileSync(filePath, 'utf-8');
       console.log(`[API /panel-daemon/file GET] Successfully read file for viewing: ${filePath}, Writable: ${isWritable}`);
-      // Return content and writable status
       return NextResponse.json({ content, writable: isWritable, path: requestedPath });
     }
 
@@ -128,19 +153,27 @@ export async function POST(request: NextRequest) {
     if (!requestedPath || typeof requestedPath !== 'string') {
       return NextResponse.json({ error: 'File path is required and must be a string.' }, { status: 400 });
     }
-    if (typeof content !== 'string') { // Content can be an empty string
+    if (typeof content !== 'string') { 
       return NextResponse.json({ error: 'File content is required and must be a string.' }, { status: 400 });
     }
 
     const filePath = resolveSafePath(requestedPath);
     console.log(`[API /panel-daemon/file POST] Attempting to write file: ${filePath}`);
 
-    // Check if writable before attempting to write
     try {
       fs.accessSync(filePath, fs.constants.W_OK);
     } catch (e) {
-      console.warn(`[API /panel-daemon/file POST] File not writable: ${filePath}`);
-      return NextResponse.json({ error: 'File is not writable.', details: `Path: ${filePath}` }, { status: 403 });
+      // If the file doesn't exist, accessSync will throw ENOENT. 
+      // We should still allow writing (creating) the file if the directory is writable.
+      // For now, let's assume if accessSync fails (not W_OK or ENOENT), it's a permission issue on existing file or dir.
+      // A more robust check would verify directory writability if file doesn't exist.
+      const fileExists = fs.existsSync(filePath);
+      if (fileExists) { // If file exists but not writable
+        console.warn(`[API /panel-daemon/file POST] File not writable: ${filePath}`);
+        return NextResponse.json({ error: 'File is not writable.', details: `Path: ${filePath}` }, { status: 403 });
+      }
+      // If file doesn't exist, we'll let writeFileSync attempt to create it.
+      // It will fail if directory permissions are insufficient.
     }
     
     fs.writeFileSync(filePath, content, 'utf-8');
@@ -148,7 +181,7 @@ export async function POST(request: NextRequest) {
     console.log(`[API /panel-daemon/file POST] Successfully wrote content to ${filePath}.`);
     return NextResponse.json({ success: true, message: `File ${path.basename(filePath)} saved successfully.` });
 
-  } catch (error: any) Mapped "{ error: 'Failed to save file.', details: error.message }"
+  } catch (error: any) {
     console.error('[API /panel-daemon/file POST] Error writing file:', error);
     if (error.message.startsWith('Access denied')) {
       return NextResponse.json({ error: error.message, details: `Attempted path: ${request.nextUrl.searchParams.get('path')}` }, { status: 403 });
