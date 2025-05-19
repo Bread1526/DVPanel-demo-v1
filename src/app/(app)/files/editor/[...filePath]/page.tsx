@@ -1,15 +1,26 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import CodeEditor from '@/components/ui/code-editor';
+import { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Save, ArrowLeft, Camera, Search as SearchIcon, ShieldAlert } from "lucide-react";
+import { Loader2, Save, ArrowLeft, Camera, Search as SearchIcon, ShieldAlert, FileWarning } from "lucide-react";
 import path from 'path-browserify';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { openSearchPanel } from '@codemirror/search';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
@@ -33,6 +44,7 @@ export default function FileEditorPage() {
   const params = useParams();
   const router = useRouter();
   const { toast } = useToast();
+  const editorRef = useRef<ReactCodeMirrorRef>(null);
 
   const [fileContent, setFileContent] = useState<string>('');
   const [originalFileContent, setOriginalFileContent] = useState<string>('');
@@ -42,6 +54,7 @@ export default function FileEditorPage() {
   const [error, setError] = useState<string | null>(null);
 
   const encodedFilePathFromParams = params.filePath;
+
   const decodedFilePath = useMemo(() => {
     const pathArray = Array.isArray(encodedFilePathFromParams) ? encodedFilePathFromParams : [encodedFilePathFromParams];
     const joinedPath = pathArray.join('/');
@@ -149,6 +162,27 @@ export default function FileEditorPage() {
     };
   }, [isSaving, isWritable, hasUnsavedChanges, handleSaveChanges]);
 
+  const handleFind = useCallback(() => {
+    if (editorRef.current && editorRef.current.view) {
+      openSearchPanel(editorRef.current.view);
+    } else {
+      toast({
+        title: "Find Action",
+        description: "Editor not ready or use Ctrl+F (Cmd+F).",
+      });
+    }
+  }, [toast]);
+
+  const handleCreateSnapshot = useCallback(() => {
+    // Placeholder: Log content to console
+    console.log("SNAPSHOT CREATED (Placeholder):", { path: decodedFilePath, content: fileContent, timestamp: new Date().toISOString() });
+    toast({
+      title: "Snapshot Created (Placeholder)",
+      description: "File content logged to browser console. Full snapshot functionality pending.",
+    });
+    // Future: Call backend API to save snapshot
+  }, [decodedFilePath, fileContent, toast]);
+
 
   if (isLoading) {
     return (
@@ -208,19 +242,31 @@ export default function FileEditorPage() {
           <Button 
             variant="ghost" 
             size="sm" 
-            onClick={() => toast({ title: "Find Action", description: "Find in file functionality coming soon!" })} 
+            onClick={handleFind}
             className="shadow-sm hover:scale-105"
           >
             <SearchIcon className="mr-2 h-4 w-4" /> Find
           </Button>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={() => toast({ title: "Snapshots Action", description: "File snapshots functionality coming soon!" })} 
-            className="shadow-sm hover:scale-105"
-          >
-            <Camera className="mr-2 h-4 w-4" /> Snapshots
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="shadow-sm hover:scale-105"
+              >
+                <Camera className="mr-2 h-4 w-4" /> Snapshots
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={handleCreateSnapshot}>
+                Create Snapshot
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
+                (Snapshots will expire after 3 new ones are above that snapshot and it has been 3 weeks unless marked as locked)
+              </DropdownMenuLabel>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         <div className="text-xs text-muted-foreground flex items-center gap-2 mr-2">
           <span>Lang: {fileLanguage}</span>
@@ -235,7 +281,7 @@ export default function FileEditorPage() {
 
       {!isWritable && (
         <Alert variant="destructive" className="m-2 rounded-md">
-          <ShieldAlert className="h-4 w-4" />
+          <FileWarning className="h-4 w-4" /> {/* Changed icon to FileWarning for better context */}
           <AlertTitle>Read-only Mode</AlertTitle>
           <AlertDescription>
             This file is not writable. Changes cannot be saved.
@@ -245,6 +291,7 @@ export default function FileEditorPage() {
 
       <div className="flex-grow relative p-0 bg-background min-h-0">
         <CodeEditor
+          ref={editorRef}
           value={fileContent}
           onChange={setFileContent}
           language={fileLanguage}
