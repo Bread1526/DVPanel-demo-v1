@@ -1,5 +1,4 @@
 
-// src/app/api/panel-daemon/files/route.ts
 import { NextResponse, type NextRequest } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -23,21 +22,32 @@ function modeToRwxString(mode: number, isDirectory: boolean): string {
 }
 
 function modeToOctalString(mode: number): string {
-  // Extract only the permission bits (last 3 octal digits)
-  return (mode & 0o777).toString(8).padStart(3, '0');
+  // Ensure it represents file/dir type correctly + permissions
+  const type = fs.lstatSync(path.resolve(BASE_DIR)).mode & fs.constants.S_IFMT; // Get file type bits
+  return ((type | (mode & 0o7777))).toString(8).padStart(4, '0'); // SUID,SGID,Sticky + rwx
 }
 
 
 function resolveSafePath(relativePath: string): string {
   const normalizedUserPath = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '');
-  const absolutePath = path.normalize(path.join(BASE_DIR, normalizedUserPath));
+  let absolutePath: string;
+
+  if (path.isAbsolute(normalizedUserPath) && BASE_DIR === '/') {
+    absolutePath = normalizedUserPath;
+  } else if (path.isAbsolute(normalizedUserPath) && BASE_DIR !== '/') {
+     console.warn(`[API Security] Attempt to use absolute path '${normalizedUserPath}' when BASE_DIR is '${BASE_DIR}'.`);
+     absolutePath = path.normalize(path.join(BASE_DIR, path.basename(normalizedUserPath)));
+  }
+  else {
+    absolutePath = path.normalize(path.join(BASE_DIR, normalizedUserPath));
+  }
 
   if (BASE_DIR === '/') {
     if (!path.isAbsolute(absolutePath)) {
       console.error(
-        `[API Security] Access Denied (Path not absolute - Files): relativePath='${relativePath}', absolutePath='${absolutePath}', BASE_DIR='${BASE_DIR}'`
+        `[API Security] Path construction error (Not Absolute - Files): relativePath='${relativePath}', absolutePath='${absolutePath}', BASE_DIR='${BASE_DIR}'`
       );
-      throw new Error('Access denied: Resolved path is not absolute.');
+      throw new Error('Access denied: Invalid path resolution.');
     }
   } else if (!absolutePath.startsWith(BASE_DIR + path.sep) && absolutePath !== BASE_DIR) {
     console.error(
@@ -55,14 +65,14 @@ export async function GET(request: NextRequest) {
 
   try {
     const dirPath = resolveSafePath(requestedPath);
-    console.log(`[API /panel-daemon/files] Attempting to list directory: ${dirPath} (requested relative: ${requestedPath})`);
+    console.log(`[API /panel-daemon/files GET] Attempting to list directory: ${dirPath} (requested relative: ${requestedPath})`);
 
     if (!fs.existsSync(dirPath)) {
-      console.warn(`[API /panel-daemon/files] Path not found: ${dirPath}`);
+      console.warn(`[API /panel-daemon/files GET] Path not found: ${dirPath}`);
       return NextResponse.json({ error: 'Path not found.', details: `Path: ${dirPath}` }, { status: 404 });
     }
     if (!fs.statSync(dirPath).isDirectory()) {
-      console.warn(`[API /panel-daemon/files] Path is not a directory: ${dirPath}`);
+      console.warn(`[API /panel-daemon/files GET] Path is not a directory: ${dirPath}`);
       return NextResponse.json({ error: 'Path is not a directory.', details: `Path: ${dirPath}` }, { status: 400 });
     }
 
@@ -71,9 +81,9 @@ export async function GET(request: NextRequest) {
       const entryPath = path.join(dirPath, entry.name);
       let stats;
       try {
-        stats = fs.statSync(entryPath);
+        stats = fs.lstatSync(entryPath); // Use lstat to handle symlinks correctly
       } catch (e: any) {
-        console.warn(`[API /panel-daemon/files] Failed to stat ${entryPath}: ${e.message}`);
+        console.warn(`[API /panel-daemon/files GET] Failed to stat ${entryPath}: ${e.message}`);
         const typeFromDirent = entry.isDirectory() ? 'folder' : (entry.isFile() ? 'file' : 'unknown');
         return {
           name: entry.name,
@@ -81,13 +91,13 @@ export async function GET(request: NextRequest) {
           size: null,
           modified: null,
           permissions: '---------',
-          octalPermissions: '000',
+          octalPermissions: "0000",
         };
       }
 
       return {
         name: entry.name,
-        type: stats.isDirectory() ? 'folder' : (stats.isFile() ? 'file' : 'unknown'),
+        type: stats.isDirectory() ? 'folder' : (stats.isFile() ? 'file' : (stats.isSymbolicLink() ? 'link' : 'unknown')),
         size: stats.size,
         modified: stats.mtime.toISOString(),
         permissions: modeToRwxString(stats.mode, stats.isDirectory()),
@@ -95,13 +105,14 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    const clientPath = ('/' + requestedPath).replace(/\/+/g, '/');
+    // Construct the client-facing path to return, ensuring it starts with '/'
+    const clientPath = ('/' + path.normalize(requestedPath).replace(/\\/g, '/')).replace(/\/+/g, '/');
     
-    console.log(`[API /panel-daemon/files] Successfully listed ${result.length} entries for clientPath: ${clientPath}`);
+    console.log(`[API /panel-daemon/files GET] Successfully listed ${result.length} entries for clientPath: ${clientPath}`);
     return NextResponse.json({ path: clientPath, files: result });
 
   } catch (error: any) {
-    console.error('[API /panel-daemon/files] Error listing files:', error);
+    console.error('[API /panel-daemon/files GET] Error listing files:', error.message, error.stack);
     if (error.message.startsWith('Access denied')) {
       return NextResponse.json({ error: error.message, details: `Requested path: ${requestedPath}` }, { status: 403 });
     }
