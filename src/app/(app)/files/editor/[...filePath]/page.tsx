@@ -5,14 +5,14 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import CodeEditor from '@/components/ui/code-editor'; // Default import
+import CodeEditor from '@/components/ui/code-editor';
 import { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Save, ArrowLeft, Camera, Search as SearchIcon, FileWarning } from "lucide-react";
 import path from 'path-browserify';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { openSearchPanel } from '@codemirror/search';
-import Image from 'next/image'; // Import next/image
+// Image component and related logic are removed as image viewing is handled on files/page.tsx
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,14 +21,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico'];
-
-function isImageExtension(filename: string): boolean {
-  if (!filename) return false;
-  const extension = path.extname(filename).toLowerCase();
-  return imageExtensions.includes(extension);
-}
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
@@ -40,7 +32,7 @@ function getLanguageFromFilename(filename: string): string {
     case 'html': case 'htm': return 'html';
     case 'css': case 'scss': return 'css';
     case 'json': return 'json';
-    case 'yaml': case 'yml': return 'yaml'; // Updated to 'yaml' for CodeMirror
+    case 'yaml': case 'yml': return 'yaml';
     case 'md': return 'markdown';
     case 'sh': case 'bash': return 'shell';
     case 'py': return 'python';
@@ -60,9 +52,6 @@ export default function FileEditorPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [isImageFile, setIsImageFile] = useState<boolean>(false);
-  const [imageError, setImageError] = useState<string | null>(null);
-
 
   const encodedFilePathFromParams = params.filePath;
 
@@ -90,39 +79,9 @@ export default function FileEditorPage() {
       setIsLoading(false);
       return;
     }
-
-    const isImage = isImageExtension(fileName);
-    setIsImageFile(isImage);
     setIsLoading(true);
     setError(null);
-    setImageError(null);
 
-    if (isImage) {
-      // For images, we don't fetch content for the editor,
-      // but we still need to check writability from the view=true endpoint.
-      // The actual image will be loaded by the <Image> tag using the direct file endpoint.
-      try {
-        const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}&view=true`); // Fetch metadata like writability
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({ error: `Error fetching image metadata: ${response.statusText}` }));
-          throw new Error(errData.error || `Failed to fetch image metadata. Status: ${response.status}`);
-        }
-        const data = await response.json();
-        if (typeof data.writable !== 'boolean') {
-          throw new Error("Invalid response format from server when fetching image metadata.");
-        }
-        setIsWritable(data.writable);
-      } catch (e: any) {
-        setError(e.message || "An unexpected error occurred while fetching image metadata.");
-        toast({ title: "Error Loading Image Info", description: e.message, variant: "destructive" });
-        setIsWritable(false); // Assume not writable on error
-      } finally {
-        setIsLoading(false);
-      }
-      return; // No need to fetch content for editor if it's an image
-    }
-
-    // For non-image files, fetch content for the editor
     try {
       const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}&view=true`);
       if (!response.ok) {
@@ -143,7 +102,7 @@ export default function FileEditorPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [decodedFilePath, fileName, toast]);
+  }, [decodedFilePath, toast]);
 
   useEffect(() => {
     if (decodedFilePath) {
@@ -159,10 +118,6 @@ export default function FileEditorPage() {
   }, [decodedFilePath, encodedFilePathFromParams, fetchFileContent, toast]);
 
   const handleSaveChanges = useCallback(async () => {
-    if (isImageFile) {
-      toast({ title: "Info", description: "Image editing is not supported directly here." });
-      return;
-    }
     if (!decodedFilePath) {
       toast({ title: "Error", description: "No active file to save.", variant: "destructive" });
       return;
@@ -191,13 +146,13 @@ export default function FileEditorPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [decodedFilePath, fileContent, fileName, isWritable, toast, isImageFile]);
+  }, [decodedFilePath, fileContent, fileName, isWritable, toast]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key === 's') {
         event.preventDefault();
-        if (!isImageFile && !isSaving && isWritable && hasUnsavedChanges) {
+        if (!isSaving && isWritable && hasUnsavedChanges) {
           handleSaveChanges();
         }
       }
@@ -206,10 +161,9 @@ export default function FileEditorPage() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isSaving, isWritable, hasUnsavedChanges, handleSaveChanges, isImageFile]);
+  }, [isSaving, isWritable, hasUnsavedChanges, handleSaveChanges]);
 
   const handleFind = useCallback(() => {
-    if (isImageFile) return;
     if (editorRef.current && editorRef.current.view) {
         editorRef.current.view.dispatch({ effects: openSearchPanel.of() });
     } else {
@@ -218,16 +172,15 @@ export default function FileEditorPage() {
         description: "Editor not ready or use Ctrl+F (Cmd+F).",
       });
     }
-  }, [toast, isImageFile]);
+  }, [toast]);
 
   const handleCreateSnapshot = useCallback(() => {
-    if (isImageFile) return;
     console.log("SNAPSHOT CREATED (Placeholder):", { path: decodedFilePath, content: fileContent, timestamp: new Date().toISOString() });
     toast({
       title: "Snapshot Created (Placeholder)",
       description: "File content logged to browser console. Full snapshot functionality pending.",
     });
-  }, [decodedFilePath, fileContent, toast, isImageFile]);
+  }, [decodedFilePath, fileContent, toast]);
 
 
   if (isLoading) {
@@ -239,7 +192,7 @@ export default function FileEditorPage() {
     );
   }
   
-  if (error && !isLoading && !isImageFile) { // Only show generic error if not an image that might have its own error
+  if (error && !isLoading) {
     return (
       <div className="p-4">
         <PageHeader title="Error Loading File" description={error} />
@@ -261,8 +214,6 @@ export default function FileEditorPage() {
     );
   }
 
-  const imageUrl = `${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath || '')}`;
-
   return (
     <div className="flex flex-col h-full max-h-[calc(100vh-var(--header-height,6rem)-2rem)]">
       <PageHeader
@@ -275,122 +226,77 @@ export default function FileEditorPage() {
         }
       />
       
-      {!isImageFile && (
-        <div className="flex-shrink-0 flex items-center justify-between p-2 border-b bg-muted/50">
-          <div className="flex items-center gap-1">
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={handleSaveChanges} 
-              disabled={isSaving || !isWritable || !hasUnsavedChanges} 
-              className="shadow-sm hover:scale-105"
-            >
-              {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-              Save
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={handleFind}
-              className="shadow-sm hover:scale-105"
-            >
-              <SearchIcon className="mr-2 h-4 w-4" /> Find
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="shadow-sm hover:scale-105"
-                >
-                  <Camera className="mr-2 h-4 w-4" /> Snapshots
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuItem onSelect={handleCreateSnapshot}>
-                  Create Snapshot
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
-                  (Snapshots will expire after 3 new ones are above that snapshot and it has been 3 weeks unless marked as locked)
-                </DropdownMenuLabel>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-          <div className="text-xs text-muted-foreground flex items-center gap-2 mr-2">
-            <span>Lang: {fileLanguage}</span>
-            <span className="mx-1">|</span>
-            <span>Chars: {fileContent.length}</span>
-            <span className="mx-1">|</span>
-            <span>Lines: {fileContent.split('\n').length}</span>
-            {hasUnsavedChanges && <span className="ml-1 font-semibold text-amber-500">* Unsaved</span>}
-            {!isWritable && <span className="ml-2 font-semibold text-destructive">(Read-only)</span>}
-          </div>
+      <div className="flex-shrink-0 flex items-center justify-between p-2 border-b bg-muted/50">
+        <div className="flex items-center gap-1">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={handleSaveChanges} 
+            disabled={isSaving || !isWritable || !hasUnsavedChanges} 
+            className="shadow-sm hover:scale-105"
+          >
+            {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            Save
+          </Button>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={handleFind}
+            className="shadow-sm hover:scale-105"
+          >
+            <SearchIcon className="mr-2 h-4 w-4" /> Find
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="shadow-sm hover:scale-105"
+              >
+                <Camera className="mr-2 h-4 w-4" /> Snapshots
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={handleCreateSnapshot}>
+                Create Snapshot
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
+                (Snapshots will expire after 3 new ones are above that snapshot and it has been 3 weeks unless marked as locked)
+              </DropdownMenuLabel>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-      )}
-
-      {isImageFile ? (
-        <div className="flex-grow flex flex-col items-center justify-center p-4 bg-background">
-          {isLoading ? (
-            <Loader2 className="h-12 w-12 animate-spin text-primary" />
-          ) : error ? ( // Error specific to image loading after metadata check
-             <div className="p-4 text-center">
-                <AlertTitle>Error Loading Image</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
-             </div>
-          ) : (
-            <>
-              <div className="relative w-full max-w-4xl h-auto aspect-auto max-h-[70vh] shadow-lg rounded-md overflow-hidden border">
-                <Image
-                  src={imageUrl}
-                  alt={`Image preview for ${fileName}`}
-                  layout="fill"
-                  objectFit="contain"
-                  unoptimized // Useful if your API endpoint doesn't support Next.js image optimization headers
-                  onError={() => setImageError("Failed to load image. The file might be corrupted or not a valid image.")}
-                  data-ai-hint="file preview"
-                />
-              </div>
-              {imageError && (
-                <Alert variant="destructive" className="mt-4 max-w-4xl">
-                  <FileWarning className="h-4 w-4" />
-                  <AlertTitle>Image Display Error</AlertTitle>
-                  <AlertDescription>{imageError}</AlertDescription>
-                </Alert>
-              )}
-               {!isWritable && (
-                <Alert variant="destructive" className="mt-4 max-w-4xl">
-                    <FileWarning className="h-4 w-4" />
-                    <AlertTitle>Read-only</AlertTitle>
-                    <AlertDescription>This file is not writable (permissions might be restricted on the server).</AlertDescription>
-                </Alert>
-                )}
-            </>
-          )}
+        <div className="text-xs text-muted-foreground flex items-center gap-2 mr-2">
+          <span>Lang: {fileLanguage}</span>
+          <span className="mx-1">|</span>
+          <span>Chars: {fileContent.length}</span>
+          <span className="mx-1">|</span>
+          <span>Lines: {fileContent.split('\n').length}</span>
+          {hasUnsavedChanges && <span className="ml-1 font-semibold text-amber-500">* Unsaved</span>}
+          {!isWritable && <span className="ml-2 font-semibold text-destructive">(Read-only)</span>}
         </div>
-      ) : (
-        <>
-          {!isWritable && (
-            <Alert variant="destructive" className="m-2 rounded-md">
-              <FileWarning className="h-4 w-4" />
-              <AlertTitle>Read-only Mode</AlertTitle>
-              <AlertDescription>
-                This file is not writable. Changes cannot be saved.
-              </AlertDescription>
-            </Alert>
-          )}
-          <div className="flex-grow relative p-0 bg-background min-h-0">
-            <CodeEditor
-              ref={editorRef}
-              value={fileContent}
-              onChange={setFileContent}
-              language={fileLanguage}
-              readOnly={isSaving || !isWritable}
-              className="h-full w-full border-0 rounded-none" // Ensure editor takes full height
-            />
-          </div>
-        </>
+      </div>
+      
+      {!isWritable && (
+        <Alert variant="destructive" className="m-2 rounded-md">
+          <FileWarning className="h-4 w-4" />
+          <AlertTitle>Read-only Mode</AlertTitle>
+          <AlertDescription>
+            This file is not writable. Changes cannot be saved.
+          </AlertDescription>
+        </Alert>
       )}
+      <div className="flex-grow relative p-0 bg-background min-h-0">
+        <CodeEditor
+          ref={editorRef}
+          value={fileContent}
+          onChange={setFileContent}
+          language={fileLanguage}
+          readOnly={isSaving || !isWritable}
+          className="h-full w-full border-0 rounded-none" // Ensure editor takes full height
+        />
+      </div>
     </div>
   );
 }

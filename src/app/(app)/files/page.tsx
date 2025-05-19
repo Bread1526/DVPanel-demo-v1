@@ -14,15 +14,16 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   MoreHorizontal, Folder, File as FileIconDefault, Upload, Download, Edit3, Trash2, KeyRound, Search, ArrowLeft, Loader2, AlertTriangle,
   FileCode2, FileJson, FileText, ImageIcon, Archive, Shell, FileTerminal, AudioWaveform, VideoIcon, Database, List, Shield, Github, Settings2, ServerCog,
-  FolderPlus, FilePlus, X
+  FolderPlus, FilePlus, X, FileWarning
 } from "lucide-react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { useToast } from "@/hooks/use-toast";
 import path from 'path-browserify';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format as formatDate } from 'date-fns';
 import PermissionsDialog from './components/permissions-dialog';
+import ImageViewerDialog from './components/image-viewer-dialog'; // New import
 import { useRouter } from 'next/navigation';
-import CodeEditor from '@/components/ui/code-editor';
+// CodeEditor is no longer imported here as editor is on a separate page
 
 interface FileItem {
   name: string;
@@ -44,47 +45,38 @@ function formatBytes(bytes?: number | null, decimals = 2) {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 }
 
-function getLanguageFromFilename(filename: string): string {
-  if (!filename) return 'plaintext';
-  const extension = filename.split('.').pop()?.toLowerCase() || '';
-  switch (extension) {
-    case 'js': case 'jsx': return 'javascript';
-    case 'ts': case 'tsx': return 'typescript';
-    case 'html': case 'htm': return 'html';
-    case 'css': case 'scss': return 'css';
-    case 'json': return 'json';
-    case 'yaml': case 'yml': return 'yaml';
-    case 'py': return 'python';
-    case 'sh': case 'bash': return 'shell';
-    default: return 'plaintext';
-  }
+const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico'];
+function isImageExtension(filename: string): boolean {
+  if (!filename) return false;
+  const extension = path.extname(filename).toLowerCase();
+  return imageExtensions.includes(extension);
 }
 
 function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactNode {
   if (fileType === 'folder') return <Folder className="h-5 w-5 text-primary" />;
-  if (fileType === 'link') return <FileIconDefault className="h-5 w-5 text-purple-400" />;
+  if (fileType === 'link') return <FileIconDefault className="h-5 w-5 text-purple-400" />; // Example for symlinks
   if (fileType === 'unknown') return <FileIconDefault className="h-5 w-5 text-muted-foreground" />;
 
-  const extension = filename.split('.').pop()?.toLowerCase() || '';
+  const extension = path.extname(filename).toLowerCase();
   switch (extension) {
-    case 'json': return <FileJson className="h-5 w-5 text-yellow-600" />;
-    case 'yaml': case 'yml': return <ServerCog className="h-5 w-5 text-indigo-400" />;
-    case 'html': case 'htm': return <FileCode2 className="h-5 w-5 text-orange-500" />;
-    case 'css': case 'scss': case 'sass': return <FileCode2 className="h-5 w-5 text-blue-500" />;
-    case 'js': case 'jsx': return <FileCode2 className="h-5 w-5 text-yellow-500" />;
-    case 'ts': case 'tsx': return <FileCode2 className="h-5 w-5 text-sky-500" />;
-    case 'txt': case 'md': case 'log': return <FileText className="h-5 w-5 text-gray-500" />;
-    case 'png': case 'jpg': case 'jpeg': case 'gif': case 'svg': case 'webp': case 'ico': return <ImageIcon className="h-5 w-5 text-purple-500" />;
-    case 'zip': case 'tar': case 'gz': case 'rar': case '7z': return <Archive className="h-5 w-5 text-amber-700" />;
-    case 'sh': case 'bash': return <Shell className="h-5 w-5 text-green-600" />;
-    case 'bat': case 'cmd': return <FileTerminal className="h-5 w-5 text-gray-700" />;
-    case 'mp3': case 'wav': case 'ogg': return <AudioWaveform className="h-5 w-5 text-pink-500" />;
-    case 'mp4': case 'mov': case 'avi': case 'mkv': return <VideoIcon className="h-5 w-5 text-red-500" />;
-    case 'db': case 'sqlite': case 'sql': return <Database className="h-5 w-5 text-indigo-500" />;
-    case 'csv': case 'xls': case 'xlsx': return <List className="h-5 w-5 text-green-700" />;
-    case 'exe': case 'dmg': case 'app': return <Settings2 className="h-5 w-5 text-gray-800" />;
-    case 'pem': case 'crt': case 'key': return <Shield className="h-5 w-5 text-teal-500" />;
-    case 'gitignore': case 'gitattributes': case 'gitmodules': return <Github className="h-5 w-5 text-neutral-700" />;
+    case '.json': return <FileJson className="h-5 w-5 text-yellow-600" />;
+    case '.yaml': case '.yml': return <ServerCog className="h-5 w-5 text-indigo-400" />;
+    case '.html': case '.htm': return <FileCode2 className="h-5 w-5 text-orange-500" />;
+    case '.css': case '.scss': case '.sass': return <FileCode2 className="h-5 w-5 text-blue-500" />;
+    case '.js': case '.jsx': return <FileCode2 className="h-5 w-5 text-yellow-500" />;
+    case '.ts': case '.tsx': return <FileCode2 className="h-5 w-5 text-sky-500" />;
+    case '.txt': case '.md': case '.log': return <FileText className="h-5 w-5 text-gray-500" />;
+    case '.png': case '.jpg': case '.jpeg': case '.gif': case '.svg': case '.webp': case '.ico': return <ImageIcon className="h-5 w-5 text-purple-500" />;
+    case '.zip': case '.tar': case '.gz': case '.rar': case '.7z': return <Archive className="h-5 w-5 text-amber-700" />;
+    case '.sh': case '.bash': return <Shell className="h-5 w-5 text-green-600" />;
+    case '.bat': case '.cmd': return <FileTerminal className="h-5 w-5 text-gray-700" />;
+    case '.mp3': case '.wav': case '.ogg': return <AudioWaveform className="h-5 w-5 text-pink-500" />;
+    case '.mp4': case '.mov': case '.avi': case '.mkv': return <VideoIcon className="h-5 w-5 text-red-500" />;
+    case '.db': case '.sqlite': case '.sql': return <Database className="h-5 w-5 text-indigo-500" />;
+    case '.csv': case '.xls': case '.xlsx': return <List className="h-5 w-5 text-green-700" />;
+    case '.exe': case '.dmg': case '.app': return <Settings2 className="h-5 w-5 text-gray-800" />;
+    case '.pem': case '.crt': case '.key': return <Shield className="h-5 w-5 text-teal-500" />;
+    case '.gitignore': case '.gitattributes': case '.gitmodules': return <Github className="h-5 w-5 text-neutral-700" />;
     default: return <FileIconDefault className="h-5 w-5 text-muted-foreground" />;
   }
 }
@@ -103,11 +95,17 @@ export default function FilesPage() {
   const [permissionDialogCurrentRwxPerms, setPermissionDialogCurrentRwxPerms] = useState<string>("");
   const [permissionDialogCurrentOctalPerms, setPermissionDialogCurrentOctalPerms] = useState<string>("");
 
-  // State for "New File/Folder" dialog
   const [isCreateItemDialogOpen, setIsCreateItemDialogOpen] = useState(false);
   const [createItemType, setCreateItemType] = useState<'file' | 'folder' | null>(null);
   const [newItemName, setNewItemName] = useState('');
   const [isCreatingItem, setIsCreatingItem] = useState(false);
+  
+  // State for Image Viewer Dialog
+  const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
+  const [currentImageViewerSrc, setCurrentImageViewerSrc] = useState<string | null>(null);
+  const [currentImageViewerAlt, setCurrentImageViewerAlt] = useState<string | null>(null);
+  const [imageFilesInCurrentDir, setImageFilesInCurrentDir] = useState<FileItem[]>([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState<number>(0);
 
   const fetchFiles = useCallback(async (pathToFetch: string) => {
     setIsLoading(true);
@@ -121,17 +119,16 @@ export default function FilesPage() {
         throw new Error(errorMsg);
       }
       const data = await response.json();
-      if (data && Array.isArray(data.files)) {
-        setFiles(data.files);
-        setCurrentPath(data.path || pathToFetch);
-      } else {
-        setFiles([]);
-        setCurrentPath(data.path || pathToFetch);
-      }
+      const fetchedFiles = (data && Array.isArray(data.files)) ? data.files : [];
+      setFiles(fetchedFiles);
+      setCurrentPath(data.path || pathToFetch);
+      // Update list of image files for the viewer when directory content changes
+      setImageFilesInCurrentDir(fetchedFiles.filter((f: FileItem) => f.type === 'file' && isImageExtension(f.name)));
     } catch (e: any) {
       const errorMessage = e.message || "An unknown error occurred while fetching files.";
       setError(errorMessage);
       setFiles([]);
+      setImageFilesInCurrentDir([]);
       toast({ title: "File Manager Error", description: `Could not fetch files: ${errorMessage}.`, variant: "destructive" });
     } finally {
       setIsLoading(false);
@@ -147,9 +144,21 @@ export default function FilesPage() {
     if (fileItem.type === 'folder') {
       setCurrentPath(fullPath);
     } else if (fileItem.type === 'file') {
-      router.push(`/files/editor/${encodeURIComponent(fullPath)}`);
+      if (isImageExtension(fileItem.name)) {
+        const imageIndex = imageFilesInCurrentDir.findIndex(f => f.name === fileItem.name);
+        if (imageIndex !== -1) {
+          setCurrentImageIndex(imageIndex);
+          setCurrentImageViewerSrc(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(fullPath)}`);
+          setCurrentImageViewerAlt(fileItem.name);
+          setIsImageViewerOpen(true);
+        } else {
+            toast({title: "Error", description: "Could not find image in current directory list.", variant: "destructive"});
+        }
+      } else {
+        router.push(`/files/editor/${encodeURIComponent(fullPath)}`);
+      }
     }
-  }, [currentPath, router]);
+  }, [currentPath, router, imageFilesInCurrentDir, toast]);
 
   const handleBreadcrumbClick = useCallback((index: number) => {
     const segments = currentPath.split('/').filter(Boolean);
@@ -158,7 +167,7 @@ export default function FilesPage() {
     setCurrentPath(newPath.replace(/\\/g, '/'));
   }, [currentPath]);
 
-  const getBreadcrumbSegments = useMemo(() => {
+  const breadcrumbSegments = useMemo(() => {
     if (currentPath === '/') return [{ name: 'Root', path: '/' }];
     const segments = currentPath.split('/').filter(Boolean);
     return [{ name: 'Root', path: '/' }, ...segments.map((segment, index) => ({
@@ -178,6 +187,28 @@ export default function FilesPage() {
   const handlePermissionsUpdate = () => {
     setIsPermissionsDialogOpen(false);
     fetchFiles(currentPath);
+  };
+  
+  const handleNextImage = () => {
+    if (currentImageIndex < imageFilesInCurrentDir.length - 1) {
+      const nextIndex = currentImageIndex + 1;
+      const nextImageFile = imageFilesInCurrentDir[nextIndex];
+      const fullPath = path.join(currentPath, nextImageFile.name).replace(/\\/g, '/');
+      setCurrentImageViewerSrc(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(fullPath)}`);
+      setCurrentImageViewerAlt(nextImageFile.name);
+      setCurrentImageIndex(nextIndex);
+    }
+  };
+
+  const handlePreviousImage = () => {
+    if (currentImageIndex > 0) {
+      const prevIndex = currentImageIndex - 1;
+      const prevImageFile = imageFilesInCurrentDir[prevIndex];
+      const fullPath = path.join(currentPath, prevImageFile.name).replace(/\\/g, '/');
+      setCurrentImageViewerSrc(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(fullPath)}`);
+      setCurrentImageViewerAlt(prevImageFile.name);
+      setCurrentImageIndex(prevIndex);
+    }
   };
 
   const filteredFiles = useMemo(() => files.filter(file =>
@@ -208,7 +239,7 @@ export default function FilesPage() {
       }
       toast({ title: "Success", description: result.message || `${createItemType} "${newItemName}" created.` });
       setIsCreateItemDialogOpen(false);
-      fetchFiles(currentPath); // Refresh file list
+      fetchFiles(currentPath); 
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
     } finally {
@@ -258,7 +289,7 @@ export default function FilesPage() {
           </div>
           <Breadcrumb className="mt-4">
             <BreadcrumbList>
-              {getBreadcrumbSegments.map((segment, index, arr) => (
+              {breadcrumbSegments.map((segment, index, arr) => (
                 <React.Fragment key={segment.path + '-' + index}>
                   <BreadcrumbItem>
                     {index === arr.length - 1 ? (
@@ -338,9 +369,9 @@ export default function FilesPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                              <DropdownMenuItem onSelect={() => handleFileDoubleClick(file)}>
-                                <Edit3 className="mr-2 h-4 w-4" /> {file.type === 'file' ? 'View/Edit' : 'Open Folder'}
+                                <Edit3 className="mr-2 h-4 w-4" /> {file.type === 'file' ? (isImageExtension(file.name) ? 'View Image' : 'View/Edit') : 'Open Folder'}
                             </DropdownMenuItem>
-                            {file.type === 'file' && (
+                            {file.type === 'file' && !isImageExtension(file.name) && ( // Only show download for non-image files in dropdown for now
                               <DropdownMenuItem
                                 onSelect={(e) => { e.preventDefault(); window.location.href = `${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(fullPathToItem)}`; }}
                               >
@@ -374,6 +405,19 @@ export default function FilesPage() {
           currentRwxPermissions={permissionDialogCurrentRwxPerms}
           currentOctalPermissions={permissionDialogCurrentOctalPerms}
           onPermissionsUpdate={handlePermissionsUpdate}
+        />
+      )}
+      
+      {ImageViewerDialog && (
+        <ImageViewerDialog
+            isOpen={isImageViewerOpen}
+            onOpenChange={setIsImageViewerOpen}
+            imageSrc={currentImageViewerSrc}
+            imageAlt={currentImageViewerAlt}
+            onNext={handleNextImage}
+            onPrevious={handlePreviousImage}
+            hasNext={currentImageIndex < imageFilesInCurrentDir.length - 1}
+            hasPrevious={currentImageIndex > 0}
         />
       )}
 
