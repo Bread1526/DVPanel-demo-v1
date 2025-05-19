@@ -1,9 +1,207 @@
 
-// This file is no longer used as the editor functionality has been moved
-// into a dialog within /src/app/(app)/files/page.tsx.
-// You can safely delete this file and its containing directory:
-// /src/app/(app)/files/editor/
+'use client';
 
-export default function FileEditorPage_DEPRECATED() {
-  return null;
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { PageHeader } from "@/components/page-header";
+import { Button } from "@/components/ui/button";
+import { CodeEditor } from '@/components/ui/code-editor';
+import { useToast } from "@/hooks/use-toast";
+import { Loader2, Save, ArrowLeft, Camera, Search as SearchIcon } from "lucide-react";
+import path from 'path-browserify';
+
+// Helper function to get language from filename
+function getLanguageFromFilename(filename: string): string {
+  if (!filename) return 'plaintext';
+  const extension = filename.split('.').pop()?.toLowerCase() || '';
+  switch (extension) {
+    case 'js': case 'jsx': return 'javascript';
+    case 'ts': case 'tsx': return 'typescript';
+    case 'html': case 'htm': return 'html';
+    case 'css': case 'scss': return 'css';
+    case 'json': return 'json';
+    case 'yaml': case 'yml': return 'yaml';
+    case 'md': return 'markdown';
+    case 'sh': case 'bash': return 'shell';
+    case 'py': return 'python';
+    default: return 'plaintext';
+  }
+}
+
+export default function FileEditorPage() {
+  const params = useParams();
+  const router = useRouter();
+  const { toast } = useToast();
+
+  const [fileContent, setFileContent] = useState<string>('');
+  const [originalFileContent, setOriginalFileContent] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const encodedFilePathFromParams = params.filePath;
+  const encodedFilePath = useMemo(() => {
+    return Array.isArray(encodedFilePathFromParams) ? encodedFilePathFromParams.join('/') : encodedFilePathFromParams;
+  }, [encodedFilePathFromParams]);
+
+  const decodedFilePath = useMemo(() => {
+    if (!encodedFilePath) return '';
+    try {
+      return decodeURIComponent(encodedFilePath);
+    } catch (e) {
+      console.error("Failed to decode file path:", e);
+      return '';
+    }
+  }, [encodedFilePath]);
+
+  const fileName = useMemo(() => path.basename(decodedFilePath || 'Untitled'), [decodedFilePath]);
+  const fileLanguage = useMemo(() => getLanguageFromFilename(fileName), [fileName]);
+  const hasUnsavedChanges = useMemo(() => fileContent !== originalFileContent, [fileContent, originalFileContent]);
+
+  const DAEMON_API_BASE_PATH = '/api/panel-daemon';
+
+  const fetchFileContent = useCallback(async () => {
+    if (!decodedFilePath) {
+      setError("File path is invalid or missing.");
+      setIsLoading(false);
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}&view=true`);
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({ error: `Error fetching file: ${response.statusText}`, details: `Path: ${decodedFilePath}` }));
+        throw new Error(errData.error || `Failed to fetch file content. Status: ${response.status}`);
+      }
+      const textContent = await response.text();
+      setFileContent(textContent);
+      setOriginalFileContent(textContent);
+    } catch (e: any) {
+      setError(e.message || "An unexpected error occurred while fetching file content.");
+      toast({ title: "Error Loading File", description: e.message, variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [decodedFilePath, toast]);
+
+  useEffect(() => {
+    if (decodedFilePath) {
+      fetchFileContent();
+    } else if (encodedFilePath) { // If encodedFilePath exists but decoded is empty (due to error)
+      setIsLoading(false);
+      setError("Invalid file path parameter.");
+      toast({title: "Error", description: "Invalid file path provided in URL.", variant: "destructive"});
+    } else {
+        setIsLoading(false);
+        setError("No file path provided in URL.");
+    }
+  }, [decodedFilePath, encodedFilePath, fetchFileContent, toast]);
+
+  const handleSaveChanges = async () => {
+    if (!decodedFilePath) {
+      toast({ title: "Error", description: "No active file to save.", variant: "destructive" });
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(`${DAEMON_API_BASE_PATH}/file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: decodedFilePath, content: fileContent }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || result.details || 'Failed to save file.');
+      }
+      toast({ title: 'Success', description: result.message || `File ${fileName} saved.` });
+      setOriginalFileContent(fileContent); 
+    } catch (e: any) {
+      setError(e.message || "An unexpected error occurred while saving.");
+      toast({ title: "Error Saving File", description: e.message, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center h-[calc(100vh-10rem)]"> {/* Adjust height as needed */}
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="ml-4 text-muted-foreground">Loading file content...</p>
+      </div>
+    );
+  }
+  
+  if (error && !isLoading) {
+    return (
+      <div className="p-4">
+        <PageHeader title="Error Loading File" description={error} />
+        <Button onClick={() => router.push('/files')} variant="outline">
+          <ArrowLeft className="mr-2 h-4 w-4" /> Back to File Manager
+        </Button>
+      </div>
+    );
+  }
+
+  if (!decodedFilePath && !isLoading) {
+     return (
+      <div className="p-4">
+        <PageHeader title="Invalid File Path" description="The file path specified in the URL is invalid or missing." />
+        <Button onClick={() => router.push('/files')} variant="outline">
+          <ArrowLeft className="mr-2 h-4 w-4" /> Back to File Manager
+        </Button>
+      </div>
+    );
+  }
+
+
+  return (
+    <div className="flex flex-col h-full max-h-[calc(100vh-var(--header-height,6rem)-2rem)]"> {/* Adjust overall height */}
+      <PageHeader
+        title={`${fileName}`}
+        description={<span className="font-mono text-xs break-all">{decodedFilePath}</span>}
+        actions={
+          <Button onClick={() => router.push('/files')} variant="outline" className="shadow-md hover:scale-105">
+            <ArrowLeft className="mr-2 h-4 w-4" /> Back to Files
+          </Button>
+        }
+      />
+      {/* Toolbar */}
+      <div className="flex-shrink-0 flex items-center justify-between p-2 border-b bg-muted/50">
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" onClick={handleSaveChanges} disabled={isSaving || !hasUnsavedChanges} className="shadow-sm hover:scale-105">
+            {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            Save
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => toast({ title: "Find Action", description: "Find in file functionality coming soon!" })} className="shadow-sm hover:scale-105">
+            <SearchIcon className="mr-2 h-4 w-4" /> Find
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => toast({ title: "Snapshots Action", description: "File snapshots functionality coming soon!" })} className="shadow-sm hover:scale-105">
+            <Camera className="mr-2 h-4 w-4" /> Snapshots
+          </Button>
+        </div>
+        <div className="text-xs text-muted-foreground flex items-center gap-2 mr-2">
+          <span>Lang: {fileLanguage}</span>
+          <span className="mx-1">|</span>
+          <span>Chars: {fileContent.length}</span>
+          <span className="mx-1">|</span>
+          <span>Lines: {fileContent.split('\n').length}</span>
+          {hasUnsavedChanges && <span className="ml-1 font-semibold text-amber-500">* Unsaved</span>}
+        </div>
+      </div>
+
+      {/* Code Editor Area */}
+      <div className="flex-grow relative p-0 bg-background min-h-0">
+        <CodeEditor
+          value={fileContent}
+          onChange={setFileContent}
+          language={fileLanguage}
+          readOnly={isSaving}
+          className="h-full w-full border-0 rounded-none"
+        />
+      </div>
+    </div>
+  );
 }
