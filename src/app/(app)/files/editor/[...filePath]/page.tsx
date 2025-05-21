@@ -5,7 +5,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import CodeEditor from '@/components/ui/code-editor'; // Corrected import if it's default
+import CodeEditor from '@/components/ui/code-editor';
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { useToast } from "@/hooks/use-toast";
 import { 
@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { v4 as uuidv4 } from 'uuid';
 import { format, formatDistanceToNowStrict } from 'date-fns';
-import SnapshotViewerDialog from '../components/snapshot-viewer-dialog'; // Corrected import path
+import SnapshotViewerDialog from '../components/snapshot-viewer-dialog';
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
@@ -48,7 +48,8 @@ function getLanguageFromFilename(filename: string): string {
     case 'json': return 'json';
     case 'yaml': case 'yml': return 'yaml';
     case 'md': return 'markdown';
-    case 'sh': case 'bash': return 'shell';
+    // case 'sh': case 'bash': // Shell support removed due to npm install issues for @codemirror/lang-shell
+    //   return 'shell';
     case 'py': return 'python';
     default: return 'plaintext';
   }
@@ -83,7 +84,7 @@ export default function FileEditorPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [isImage, setIsImage] = useState<boolean>(false);
+  const [isImageFile, setIsImageFile] = useState<boolean>(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
   
@@ -109,11 +110,6 @@ export default function FileEditorPage() {
   }, [encodedFilePathFromParams]);
 
   const fileName = useMemo(() => path.basename(decodedFilePath || 'Untitled'), [decodedFilePath]);
-  // Removed fileLanguage memo, will use editorLanguage state
-
-  useEffect(() => {
-    setEditorLanguage(getLanguageFromFilename(fileName));
-  }, [fileName]);
 
   const hasUnsavedChanges = useMemo(() => fileContent !== originalFileContent, [fileContent, originalFileContent]);
 
@@ -130,11 +126,12 @@ export default function FileEditorPage() {
     setError(null);
     setImageError(null);
     const currentIsImage = isImageExtension(fileName);
-    setIsImage(currentIsImage);
+    setIsImageFile(currentIsImage);
+    setEditorLanguage(getLanguageFromFilename(fileName));
 
     try {
       const settingsResult = await loadPanelSettings();
-      if (settingsResult.data) {
+      if (settingsResult.status === 'success' && settingsResult.data) {
         setGlobalDebugModeActive(settingsResult.data.debugMode);
       } else {
         console.warn("Could not load panel settings for debug mode status, using default false.");
@@ -150,14 +147,17 @@ export default function FileEditorPage() {
        try {
             const metaResponse = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}&view=true`);
             if (!metaResponse.ok) {
-                console.warn(`Failed to fetch metadata for image ${fileName}. Status: ${metaResponse.status}`);
-                setIsWritable(false);
+                const errData = await metaResponse.json().catch(() => ({ error: `Failed to fetch metadata for image. Status: ${metaResponse.status}` }));
+                console.warn(`Failed to fetch metadata for image ${fileName}: ${errData.error}`);
+                setImageError(errData.error || `Failed to fetch metadata for image ${fileName}.`);
+                setIsWritable(false); 
             } else {
                 const metaData = await metaResponse.json();
                 setIsWritable(metaData.writable);
             }
-        } catch (e) {
+        } catch (e: any) {
             console.warn(`Error fetching metadata for image ${fileName}:`, e);
+            setImageError(e.message || "An unexpected error occurred while fetching image metadata.");
             setIsWritable(false);
         }
       setIsLoading(false);
@@ -168,7 +168,7 @@ export default function FileEditorPage() {
       const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}&view=true`);
       if (!response.ok) {
         const errData = await response.json().catch(() => ({ error: `Error fetching file: ${response.statusText}`, details: `Path: ${decodedFilePath}` }));
-        throw new Error(errData.error || `Failed to fetch file content. Status: ${response.status}`);
+        throw new Error(errData.error || errData.details || `Failed to fetch file content. Status: ${response.status}`);
       }
       const data = await response.json();
       if (typeof data.content !== 'string' || typeof data.writable !== 'boolean') {
@@ -176,16 +176,15 @@ export default function FileEditorPage() {
       }
       setFileContent(data.content);
       setOriginalFileContent(data.content);
-      setEditorLanguage(getLanguageFromFilename(fileName));
       setIsWritable(data.writable);
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred while fetching file content.");
-      toast({ title: "Error Loading File", description: e.message, variant: "destructive" });
+      // Toast call moved to useEffect listening on 'error' state
       setIsWritable(false);
     } finally {
       setIsLoading(false);
     }
-  }, [decodedFilePath, fileName, toast]);
+  }, [decodedFilePath, fileName, DAEMON_API_BASE_PATH]);
 
   useEffect(() => {
     if (decodedFilePath) {
@@ -193,12 +192,19 @@ export default function FileEditorPage() {
     } else if (encodedFilePathFromParams) {
       setIsLoading(false);
       setError("Invalid file path parameter.");
-      toast({title: "Error", description: "Invalid file path provided in URL.", variant: "destructive"});
+      // Toast call moved to useEffect listening on 'error' state
     } else {
       setIsLoading(false);
       setError("No file path provided in URL.");
     }
-  }, [decodedFilePath, encodedFilePathFromParams, fetchFileContent, toast]);
+  }, [decodedFilePath, encodedFilePathFromParams, fetchFileContent]);
+
+  // useEffect to show toast when error state changes
+  useEffect(() => {
+    if (error) {
+      toast({ title: "File Editor Error", description: error, variant: "destructive" });
+    }
+  }, [error, toast]);
 
   const handleSaveChanges = useCallback(async () => {
     if (!decodedFilePath) {
@@ -210,7 +216,8 @@ export default function FileEditorPage() {
       return;
     }
     setIsSaving(true);
-    setError(null);
+    // Clear previous general errors before saving
+    // setError(null); // Removed to allow specific save errors to be shown by new effect
     try {
       const response = await fetch(`${DAEMON_API_BASE_PATH}/file`, {
         method: 'POST',
@@ -224,12 +231,11 @@ export default function FileEditorPage() {
       toast({ title: 'Success', description: result.message || `File ${fileName} saved.` });
       setOriginalFileContent(fileContent);
     } catch (e: any) {
-      setError(e.message || "An unexpected error occurred while saving.");
-      toast({ title: "Error Saving File", description: e.message, variant: "destructive" });
+      setError(e.message || "An unexpected error occurred while saving."); // This will trigger the error toast effect
     } finally {
       setIsSaving(false);
     }
-  }, [decodedFilePath, fileContent, fileName, isWritable, toast]);
+  }, [decodedFilePath, fileContent, fileName, isWritable, toast, DAEMON_API_BASE_PATH]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -248,7 +254,6 @@ export default function FileEditorPage() {
 
   const handleFind = useCallback(() => {
     if (editorRef.current && editorRef.current.view) {
-      // Ensure openSearchPanel is correctly used; it typically takes no arguments or specific options
       editorRef.current.view.dispatch({ effects: openSearchPanel.of() });
     } else {
       toast({
@@ -314,19 +319,20 @@ export default function FileEditorPage() {
   }, [snapshots, toast]);
 
   const handleToggleLockSnapshot = useCallback((snapshotId: string) => {
-    setSnapshots(prevSnapshots =>
-      prevSnapshots.map(s =>
+    setSnapshots(prevSnapshots => {
+      const updatedSnapshots = prevSnapshots.map(s =>
         s.id === snapshotId ? { ...s, isLocked: !s.isLocked } : s
-      )
-    );
-    const lockedSnapshot = snapshots.find(s => s.id === snapshotId); // Re-find to get updated isLocked status
-    if (lockedSnapshot) { // Check if found (it should be)
-      toast({
-        title: `Snapshot ${lockedSnapshot.isLocked ? "Locked" : "Unlocked"}`,
-        description: `Snapshot from ${format(new Date(lockedSnapshot.timestamp), 'HH:mm:ss')} is now ${lockedSnapshot.isLocked ? "locked" : "unlocked"}.`,
-      });
-    }
-  }, [snapshots, toast]);
+      );
+      const updatedSnapshot = updatedSnapshots.find(s => s.id === snapshotId);
+      if (updatedSnapshot) {
+        toast({
+          title: `Snapshot ${updatedSnapshot.isLocked ? "Locked" : "Unlocked"}`,
+          description: `Snapshot from ${format(new Date(updatedSnapshot.timestamp), 'HH:mm:ss')} is now ${updatedSnapshot.isLocked ? "locked" : "unlocked"}.`,
+        });
+      }
+      return updatedSnapshots;
+    });
+  }, [toast]);
 
   const handleViewSnapshotInPopup = (snapshot: Snapshot) => {
     setSelectedSnapshotForViewer(snapshot);
@@ -342,10 +348,10 @@ export default function FileEditorPage() {
     );
   }
   
-  if (error && !isImage) { 
+  if (error && !isImageFile && !isLoading) { // Only show full page error for non-image file loading issues
     return (
       <div className="p-4">
-        <PageHeader title="Error Loading File" description={error} />
+        <PageHeader title="Error Loading File" description={error /* error state now triggers toast via useEffect */} />
         <Button onClick={() => router.push('/files')} variant="outline">
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to File Manager
         </Button>
@@ -376,7 +382,7 @@ export default function FileEditorPage() {
         }
       />
       
-      {isImage ? (
+      {isImageFile ? (
         <div className="flex-grow flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
           {imageError ? (
             <Alert variant="destructive">
@@ -389,10 +395,13 @@ export default function FileEditorPage() {
               src={imageSrc} 
               alt={fileName} 
               className="max-w-full max-h-full object-contain rounded-md shadow-lg" 
-              onError={() => setImageError('Failed to load image resource.')} 
+              onError={() => {
+                setImageError('Failed to load image resource.');
+                // Toast call moved to useEffect listening on 'error' state (or 'imageError' if specific handling needed)
+              }}
             />
           ) : (
-            <Loader2 className="h-8 w-8 animate-spin text-primary" /> 
+             <Loader2 className="h-8 w-8 animate-spin text-primary" /> 
           )}
         </div>
       ) : (
@@ -487,7 +496,7 @@ export default function FileEditorPage() {
           </div>
           
           {!isWritable && (
-            <Alert variant="destructive" className="m-2 rounded-md">
+            <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
               <FileWarning className="h-4 w-4" />
               <AlertTitle>Read-only Mode</AlertTitle>
               <AlertDescription>
@@ -517,3 +526,4 @@ export default function FileEditorPage() {
     </div>
   );
 }
+
