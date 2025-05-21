@@ -5,10 +5,20 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import CodeEditor from '@/components/ui/code-editor';
+import CodeEditor from '@/components/ui/code-editor'; // Corrected import if it's default
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Save, ArrowLeft, Camera, Search as SearchIcon, FileWarning, Lock, Unlock, Eye } from "lucide-react";
+import { 
+  Loader2, 
+  Save, 
+  ArrowLeft, 
+  Camera, 
+  Search as SearchIcon, 
+  FileWarning, 
+  Lock, 
+  Unlock, 
+  Eye 
+} from "lucide-react";
 import path from 'path-browserify';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { openSearchPanel } from '@codemirror/search';
@@ -24,7 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { v4 as uuidv4 } from 'uuid';
 import { format, formatDistanceToNowStrict } from 'date-fns';
-import SnapshotViewerDialog from './components/snapshot-viewer-dialog'; // New import
+import SnapshotViewerDialog from '../components/snapshot-viewer-dialog'; // Corrected import path
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
@@ -56,7 +66,7 @@ interface Snapshot {
   timestamp: string; // ISO string
   content: string;
   language: string;
-  isLocked?: boolean; // New property
+  isLocked?: boolean;
 }
 
 const MAX_SNAPSHOTS = 10;
@@ -99,7 +109,7 @@ export default function FileEditorPage() {
   }, [encodedFilePathFromParams]);
 
   const fileName = useMemo(() => path.basename(decodedFilePath || 'Untitled'), [decodedFilePath]);
-  const fileLanguage = useMemo(() => getLanguageFromFilename(fileName), [fileName]);
+  // Removed fileLanguage memo, will use editorLanguage state
 
   useEffect(() => {
     setEditorLanguage(getLanguageFromFilename(fileName));
@@ -126,9 +136,13 @@ export default function FileEditorPage() {
       const settingsResult = await loadPanelSettings();
       if (settingsResult.data) {
         setGlobalDebugModeActive(settingsResult.data.debugMode);
+      } else {
+        console.warn("Could not load panel settings for debug mode status, using default false.");
+        setGlobalDebugModeActive(false);
       }
     } catch (settingsError) {
-      console.warn("Could not load panel settings for debug mode status:", settingsError);
+      console.warn("Error loading panel settings for debug mode status:", settingsError);
+      setGlobalDebugModeActive(false);
     }
 
     if (currentIsImage) {
@@ -234,6 +248,7 @@ export default function FileEditorPage() {
 
   const handleFind = useCallback(() => {
     if (editorRef.current && editorRef.current.view) {
+      // Ensure openSearchPanel is correctly used; it typically takes no arguments or specific options
       editorRef.current.view.dispatch({ effects: openSearchPanel.of() });
     } else {
       toast({
@@ -247,20 +262,18 @@ export default function FileEditorPage() {
     setSnapshots(prevSnapshots => {
       let updatedSnapshots = [...prevSnapshots];
       if (updatedSnapshots.length >= MAX_SNAPSHOTS) {
-        // Try to remove the oldest unlocked snapshot
         const oldestUnlockedIndex = updatedSnapshots.slice().reverse().findIndex(s => !s.isLocked);
         if (oldestUnlockedIndex !== -1) {
           const actualIndexToRemove = updatedSnapshots.length - 1 - oldestUnlockedIndex;
           updatedSnapshots.splice(actualIndexToRemove, 1);
         } else {
-          // All are locked, cannot create new snapshot
           toast({
             title: "Snapshot Limit Reached",
-            description: `Cannot create new snapshot. All ${MAX_SNAPSHOTS} snapshot slots are locked. Please unlock or delete some.`,
+            description: `Cannot create new snapshot. All ${MAX_SNAPSHOTS} snapshot slots are locked.`,
             variant: "destructive",
             duration: 7000,
           });
-          return prevSnapshots; // Return original array
+          return prevSnapshots;
         }
       }
 
@@ -274,7 +287,7 @@ export default function FileEditorPage() {
       console.log("[FileEditorPage] CLIENT-SIDE SNAPSHOT CREATED:", { id: newSnapshot.id, timestamp: newSnapshot.timestamp, lang: newSnapshot.language, locked: newSnapshot.isLocked });
       toast({
         title: "Snapshot Created (Client-side)",
-        description: `Created snapshot at ${format(new Date(newSnapshot.timestamp), 'HH:mm:ss')}. This snapshot is temporary and will be lost on refresh.`,
+        description: `Created snapshot at ${format(new Date(newSnapshot.timestamp), 'HH:mm:ss')}. This snapshot is temporary.`,
       });
       return [newSnapshot, ...updatedSnapshots];
     });
@@ -306,11 +319,11 @@ export default function FileEditorPage() {
         s.id === snapshotId ? { ...s, isLocked: !s.isLocked } : s
       )
     );
-    const lockedSnapshot = snapshots.find(s => s.id === snapshotId);
-    if (lockedSnapshot) {
+    const lockedSnapshot = snapshots.find(s => s.id === snapshotId); // Re-find to get updated isLocked status
+    if (lockedSnapshot) { // Check if found (it should be)
       toast({
-        title: `Snapshot ${lockedSnapshot.isLocked ? "Unlocked" : "Locked"}`,
-        description: `Snapshot from ${format(new Date(lockedSnapshot.timestamp), 'HH:mm:ss')} is now ${lockedSnapshot.isLocked ? "unlocked" : "locked"}.`,
+        title: `Snapshot ${lockedSnapshot.isLocked ? "Locked" : "Unlocked"}`,
+        description: `Snapshot from ${format(new Date(lockedSnapshot.timestamp), 'HH:mm:ss')} is now ${lockedSnapshot.isLocked ? "locked" : "unlocked"}.`,
       });
     }
   }, [snapshots, toast]);
@@ -414,7 +427,7 @@ export default function FileEditorPage() {
                     <Camera className="mr-2 h-4 w-4" /> Snapshots
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-80"> {/* Increased width */}
+                <DropdownMenuContent align="start" className="w-80">
                   <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
                     Client-side Snapshots (lost on refresh)
                   </DropdownMenuLabel>
@@ -432,8 +445,8 @@ export default function FileEditorPage() {
                       <DropdownMenuGroup>
                         <DropdownMenuLabel className="text-xs px-2">Recent Snapshots ({snapshots.length} / {MAX_SNAPSHOTS})</DropdownMenuLabel>
                         {snapshots.map(snapshot => (
-                          <DropdownMenuItem key={snapshot.id} className="flex justify-between items-center" onSelect={(e) => e.preventDefault()}> {/* Prevent close on item click */}
-                            <span onClick={() => handleLoadSnapshot(snapshot.id)} className="cursor-pointer flex-grow hover:text-primary">
+                          <DropdownMenuItem key={snapshot.id} className="flex justify-between items-center" onSelect={(e) => e.preventDefault()}>
+                            <span onClick={() => handleLoadSnapshot(snapshot.id)} className="cursor-pointer flex-grow hover:text-primary text-xs">
                               {format(new Date(snapshot.timestamp), 'HH:mm:ss')} ({formatDistanceToNowStrict(new Date(snapshot.timestamp))} ago) - Lang: {snapshot.language}
                             </span>
                             <div className="flex items-center ml-2 gap-1">
@@ -504,5 +517,3 @@ export default function FileEditorPage() {
     </div>
   );
 }
-
-    
