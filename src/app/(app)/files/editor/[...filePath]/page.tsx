@@ -23,7 +23,7 @@ import {
   ChevronUp,
   ChevronDown,
   X,
-  CaseSensitive, // Import CaseSensitive
+  CaseSensitive,
 } from "lucide-react";
 import path from 'path-browserify';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -82,7 +82,7 @@ export interface Snapshot {
 }
 
 const MAX_SERVER_SNAPSHOTS = 10;
-const PRESET_SEARCH_TERMS = ["TODO", "FIXME", "NOTE"];
+const PRESET_SEARCH_TERMS = ["TODO", "FIXME", "NOTE"]; // Ensure this line is correct
 
 export default function FileEditorPage() {
   const params = useParams();
@@ -140,6 +140,7 @@ export default function FileEditorPage() {
 
   useEffect(() => {
     if (error) {
+      // Defer toast to next tick to avoid "update during render" issues
       setTimeout(() => toast({ title: "File Operation Error", description: error, variant: "destructive" }), 0);
     }
   }, [error, toast]);
@@ -149,6 +150,7 @@ export default function FileEditorPage() {
       setTimeout(() => toast({ title: "Snapshot Operation Error", description: snapshotError, variant: "destructive" }), 0);
     }
   }, [snapshotError, toast]);
+
 
   const fetchSnapshots = useCallback(async () => {
     if (!decodedFilePath || isImageFile) return;
@@ -160,7 +162,7 @@ export default function FileEditorPage() {
       if (!response.ok) {
         let errData;
         let errorText = `Failed to fetch snapshots. Status: ${response.status}`;
-        try {
+         try {
           errData = await response.json();
           if (globalDebugModeActive) console.log("[FileEditorPage] fetchSnapshots API Error JSON:", errData);
           errorText = errData.error || errData.details || errData.message || errorText;
@@ -185,7 +187,7 @@ export default function FileEditorPage() {
     } finally {
       setIsLoadingSnapshots(false);
     }
-  }, [decodedFilePath, globalDebugModeActive, isImageFile]);
+  }, [decodedFilePath, globalDebugModeActive, isImageFile, toast]); // Added toast
 
   const fetchFileContent = useCallback(async () => {
     if (!decodedFilePath) {
@@ -262,7 +264,7 @@ export default function FileEditorPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [decodedFilePath, fileName, fetchSnapshots]);
+  }, [decodedFilePath, fileName, fetchSnapshots, toast]); // Added toast
 
   useEffect(() => {
     if (!decodedFilePath && encodedFilePathFromParams) {
@@ -291,7 +293,8 @@ export default function FileEditorPage() {
       });
       
       const result = await response.json();
-      if (globalDebugModeActive) console.log("[FileEditorPage] handleCreateSnapshot: API Response Status:", response.status, "Body:", result);
+      if (globalDebugModeActive) console.log("[FileEditorPage] handleCreateSnapshot: API Response Status:", response.status, "Body:", JSON.stringify(result).substring(0,200) + "...");
+
 
       if (!response.ok) {
         const errorMsg = result.error || result.details || `API Error ${response.status}: ${result.message || "Failed to create snapshot."}`;
@@ -307,7 +310,7 @@ export default function FileEditorPage() {
       }
     } catch (e: any) {
       const apiErrorMsg = e.message || "An unexpected error occurred while creating the snapshot.";
-      if (globalDebugModeActive) console.error("[FileEditorPage] handleCreateSnapshot API Error:", e);
+       if (globalDebugModeActive) console.error("[FileEditorPage] handleCreateSnapshot API Error:", e);
       setSnapshotError(apiErrorMsg);
     } finally {
       setIsCreatingSnapshot(false);
@@ -316,7 +319,7 @@ export default function FileEditorPage() {
 
   const handleSaveChanges = useCallback(async () => {
     if (!decodedFilePath || !isWritable || isImageFile) {
-       setTimeout(() => toast({ title: "Cannot Save", description: !decodedFilePath ? "No active file." : !isWritable ? "File not writable." : "Image saving not supported here.", variant: "destructive" }),0);
+      setTimeout(() => toast({ title: "Cannot Save", description: !decodedFilePath ? "No active file." : !isWritable ? "File not writable." : "Image saving not supported here.", variant: "destructive" }),0);
       return;
     }
 
@@ -390,9 +393,9 @@ export default function FileEditorPage() {
   const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newQuery = e.target.value;
     setSearchQuery(newQuery);
-    if (newQuery.trim()) { // Only search if query is not empty
+    if (newQuery.trim()) { 
       performSearch(newQuery);
-    } else { // Clear results if query is empty
+    } else { 
       setSearchMatches([]);
       setCurrentMatchIndex(-1);
     }
@@ -424,30 +427,32 @@ export default function FileEditorPage() {
   const toggleCaseSensitiveSearch = () => {
     const newCaseSensitivity = !isCaseSensitiveSearch;
     setIsCaseSensitiveSearch(newCaseSensitivity);
+    // Re-run search with new sensitivity if query is not empty
     if (searchQuery.trim()) {
-        performSearch(searchQuery); // Re-run search with new sensitivity
+        performSearch(searchQuery); 
     }
   };
 
   const handlePresetSearch = (term: string) => {
     setSearchQuery(term);
-    performSearch(term);
+    performSearch(term); // Call performSearch with the new term
   };
 
   useEffect(() => { 
     if (!isSearchWidgetOpen) {
-      // setSearchQuery(""); // Keep query for reopening, clear matches
+      // Keep searchQuery for reopening, clear matches
       setSearchMatches([]);
       setCurrentMatchIndex(-1);
-      if (editorRef.current?.view) { 
+      // Deselect text in editor if a search was active
+      if (editorRef.current?.view && searchMatches.length > 0) { 
         const view = editorRef.current.view;
         // Only clear selection if there was an active search selection
-        if (searchMatches.length > 0 && view.state.selection.main.from !== view.state.selection.main.to) {
+        if (view.state.selection.main.from !== view.state.selection.main.to) {
              view.dispatch({ selection: EditorSelection.single(view.state.selection.main.anchor) });
         }
       }
     }
-  }, [isSearchWidgetOpen, searchMatches.length]); // Added searchMatches.length to dependencies
+  }, [isSearchWidgetOpen, searchMatches.length]); 
   
   const handleLoadSnapshot = useCallback((snapshotToLoad: Snapshot) => {
      setTimeout(() => {
@@ -470,6 +475,8 @@ export default function FileEditorPage() {
   }, [toast, fileName]);
 
   const handleToggleLockSnapshot = useCallback(async (snapshotId: string) => {
+    // Placeholder for server-side lock toggling
+    // For now, just update client-side state and show a toast
     setServerSnapshots(prev => 
         prev.map(s => s.id === snapshotId ? {...s, isLocked: !s.isLocked} : s)
     );
@@ -481,6 +488,8 @@ export default function FileEditorPage() {
   }, [serverSnapshots, toast]);
 
   const handleDeleteSnapshot = useCallback(async (snapshotIdToDelete: string) => {
+    // Placeholder for server-side deletion
+    // For now, just update client-side state and show a toast
     setServerSnapshots(prev => prev.filter(s => s.id !== snapshotIdToDelete));
      setTimeout(() => toast({ title: "Snapshot Deleted (Client)", description: "Server-side deletion is not yet implemented."}), 0);
   }, [toast]);
@@ -822,4 +831,3 @@ export default function FileEditorPage() {
     </div>
   );
 }
-
