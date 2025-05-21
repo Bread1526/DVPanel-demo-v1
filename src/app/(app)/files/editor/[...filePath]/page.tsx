@@ -5,14 +5,13 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import CodeEditor from '@/components/ui/code-editor';
-import { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
+import CodeEditor, { type ReactCodeMirrorRef } from '@/components/ui/code-editor'; // Assuming ReactCodeMirrorRef is exported
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Save, ArrowLeft, Camera, Search as SearchIcon, FileWarning } from "lucide-react";
 import path from 'path-browserify';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { openSearchPanel } from '@codemirror/search';
-// Image component and related logic are removed as image viewing is handled on files/page.tsx
+import { loadPanelSettings } from '@/app/(app)/settings/actions';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,7 +19,10 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuGroup,
 } from "@/components/ui/dropdown-menu";
+import { v4 as uuidv4 } from 'uuid';
+import { format, formatDistanceToNowStrict } from 'date-fns';
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
@@ -40,6 +42,12 @@ function getLanguageFromFilename(filename: string): string {
   }
 }
 
+interface Snapshot {
+  id: string;
+  timestamp: string; // ISO string
+  content: string;
+}
+
 export default function FileEditorPage() {
   const params = useParams();
   const router = useRouter();
@@ -52,6 +60,8 @@ export default function FileEditorPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [globalDebugModeActive, setGlobalDebugModeActive] = useState<boolean>(false);
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
 
   const encodedFilePathFromParams = params.filePath;
 
@@ -83,6 +93,16 @@ export default function FileEditorPage() {
     setError(null);
 
     try {
+      // Fetch global debug mode status
+      try {
+        const settingsResult = await loadPanelSettings();
+        if (settingsResult.data) {
+          setGlobalDebugModeActive(settingsResult.data.debugMode);
+        }
+      } catch (settingsError) {
+        console.warn("Could not load panel settings for debug mode status:", settingsError);
+      }
+      
       const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}&view=true`);
       if (!response.ok) {
         const errData = await response.json().catch(() => ({ error: `Error fetching file: ${response.statusText}`, details: `Path: ${decodedFilePath}` }));
@@ -98,7 +118,7 @@ export default function FileEditorPage() {
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred while fetching file content.");
       toast({ title: "Error Loading File", description: e.message, variant: "destructive" });
-      setIsWritable(false);
+      setIsWritable(false); // Assume not writable if content fetch fails
     } finally {
       setIsLoading(false);
     }
@@ -175,12 +195,36 @@ export default function FileEditorPage() {
   }, [toast]);
 
   const handleCreateSnapshot = useCallback(() => {
-    console.log("SNAPSHOT CREATED (Placeholder):", { path: decodedFilePath, content: fileContent, timestamp: new Date().toISOString() });
+    const newSnapshot: Snapshot = {
+      id: uuidv4(),
+      timestamp: new Date().toISOString(),
+      content: fileContent,
+    };
+    setSnapshots(prevSnapshots => [newSnapshot, ...prevSnapshots]); // Add to the beginning
+    console.log("SNAPSHOT CREATED (Client-side):", newSnapshot);
     toast({
-      title: "Snapshot Created (Placeholder)",
-      description: "File content logged to browser console. Full snapshot functionality pending.",
+      title: "Snapshot Created (Client-side)",
+      description: `Created snapshot at ${format(new Date(newSnapshot.timestamp), 'HH:mm:ss')}. This snapshot is temporary and will be lost on refresh.`,
     });
-  }, [decodedFilePath, fileContent, toast]);
+  }, [fileContent, toast]);
+
+  const handleLoadSnapshot = useCallback((snapshotId: string) => {
+    const snapshotToLoad = snapshots.find(s => s.id === snapshotId);
+    if (snapshotToLoad) {
+      setFileContent(snapshotToLoad.content);
+      setOriginalFileContent(snapshotToLoad.content); // Treat loaded snapshot as the new original
+      toast({
+        title: "Snapshot Loaded",
+        description: `Loaded snapshot from ${format(new Date(snapshotToLoad.timestamp), 'PPpp HH:mm:ss')}`,
+      });
+    } else {
+      toast({
+        title: "Error",
+        description: "Could not find the selected snapshot.",
+        variant: "destructive",
+      });
+    }
+  }, [snapshots, toast]);
 
 
   if (isLoading) {
@@ -256,13 +300,33 @@ export default function FileEditorPage() {
                 <Camera className="mr-2 h-4 w-4" /> Snapshots
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onSelect={handleCreateSnapshot}>
+            <DropdownMenuContent align="start" className="w-64">
+              <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
+                Client-side Snapshots (lost on refresh)
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                onSelect={handleCreateSnapshot} 
+                disabled={!globalDebugModeActive && !hasUnsavedChanges}
+              >
                 Create Snapshot
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
-                (Snapshots will expire after 3 new ones are above that snapshot and it has been 3 weeks unless marked as locked)
+              {snapshots.length > 0 ? (
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="text-xs px-2">Recent Snapshots</DropdownMenuLabel>
+                  {snapshots.slice(0, 5).map(snapshot => ( // Show latest 5
+                    <DropdownMenuItem key={snapshot.id} onSelect={() => handleLoadSnapshot(snapshot.id)}>
+                      Load: {format(new Date(snapshot.timestamp), 'HH:mm:ss')} ({formatDistanceToNowStrict(new Date(snapshot.timestamp))} ago)
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              ) : (
+                <DropdownMenuLabel className="text-xs text-muted-foreground px-2 italic">No snapshots yet.</DropdownMenuLabel>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs text-muted-foreground px-2 whitespace-normal">
+                (Server-side snapshots will expire after 3 new ones are above that snapshot and it has been 3 weeks unless marked as locked)
               </DropdownMenuLabel>
             </DropdownMenuContent>
           </DropdownMenu>
