@@ -561,7 +561,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
               </div>
               <div className="flex flex-wrap gap-1 pt-1">
                 {PRESET_SEARCH_TERMS.map(term => (
-                  <Button key={term} variant="outline" size="xs" className="text-xs px-1.5 py-0.5 h-auto" onClick={() => handlePresetSearch(term)}>{term}</Button>
+                  <Button key={term} variant="outline" className="text-xs px-1.5 py-0.5 h-auto" onClick={() => handlePresetSearch(term)}>{term}</Button>
                 ))}
               </div>
             </div>
@@ -583,3 +583,4 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     
 
     
+
