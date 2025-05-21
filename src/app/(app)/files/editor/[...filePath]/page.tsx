@@ -22,26 +22,12 @@ import {
   AlertTriangle,
   ChevronUp,
   ChevronDown,
+  X,
 } from "lucide-react";
 import path from 'path-browserify';
-import Image from 'next/image';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-  DialogClose,
-} from "@/components/ui/dialog";
-
-import { SearchCursor } from '@codemirror/search';
-import { EditorView } from '@codemirror/view';
-import { EditorSelection } from '@codemirror/state';
-
+import { Input } from "@/components/ui/input"; // For custom search input
+// Dialog components for custom find are removed
 import { loadPanelSettings } from '@/app/(app)/settings/actions';
 import {
   DropdownMenu,
@@ -56,6 +42,11 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { v4 as uuidv4 } from 'uuid';
 import { format, formatDistanceToNowStrict } from 'date-fns';
 import SnapshotViewerDialog from '../components/snapshot-viewer-dialog';
+
+import { SearchCursor } from '@codemirror/search';
+import { EditorView } from '@codemirror/view';
+import { EditorSelection } from '@codemirror/state';
+
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
@@ -91,7 +82,6 @@ export interface Snapshot {
 }
 
 const MAX_SERVER_SNAPSHOTS = 10;
-const PRESET_SEARCH_TERMS = ["TODO", "FIXME", "NOTE"];
 
 export default function FileEditorPage() {
   const params = useParams();
@@ -119,8 +109,8 @@ export default function FileEditorPage() {
   const [isSnapshotViewerOpen, setIsSnapshotViewerOpen] = useState(false);
   const [selectedSnapshotForViewer, setSelectedSnapshotForViewer] = useState<Snapshot | null>(null);
 
-  // State for custom find dialog
-  const [isFindDialogOpen, setIsFindDialogOpen] = useState(false);
+  // State for custom search widget
+  const [isSearchWidgetOpen, setIsSearchWidgetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMatches, setSearchMatches] = useState<Array<{ from: number; to: number }>>([]);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(-1);
@@ -146,18 +136,6 @@ export default function FileEditorPage() {
   const fileName = useMemo(() => path.basename(decodedFilePath || 'Untitled'), [decodedFilePath]);
   const hasUnsavedChanges = useMemo(() => fileContent !== originalFileContent, [fileContent, originalFileContent]);
 
-  useEffect(() => {
-    if (error && !isImageFile) {
-       setTimeout(() => toast({ title: "File Editor Error", description: error, variant: "destructive" }), 0);
-    }
-  }, [error, toast, isImageFile]);
-  
-  useEffect(() => {
-    if (snapshotError) {
-        setTimeout(() => toast({ title: "Snapshot Error", description: snapshotError, variant: "destructive" }), 0);
-    }
-  }, [snapshotError, toast]);
-
   const fetchSnapshots = useCallback(async () => {
     if (!decodedFilePath || isImageFile) return;
     if (globalDebugModeActive) console.log(`[FileEditorPage] fetchSnapshots CALLED for: ${decodedFilePath}`);
@@ -170,10 +148,12 @@ export default function FileEditorPage() {
         let errorText = `Failed to fetch snapshots. Status: ${response.status}`;
         try {
           errData = await response.json();
+          if (globalDebugModeActive) console.log("[FileEditorPage] fetchSnapshots API Error JSON:", errData);
           errorText = errData.error || errData.details || errorText;
         } catch (e) {
           const rawText = await response.text().catch(() => "Could not read error response.");
-          errorText = `${errorText}. Server response: ${rawText}`;
+          if (globalDebugModeActive) console.log("[FileEditorPage] fetchSnapshots API Error Text:", rawText);
+          errorText = `${errorText}. Server response: ${rawText.substring(0, 100)}`;
         }
         throw new Error(errorText);
       }
@@ -185,6 +165,7 @@ export default function FileEditorPage() {
       }
     } catch (e: any) {
       const errorMessage = e.message || "An unexpected error occurred while fetching snapshots.";
+      if (globalDebugModeActive) console.error("[FileEditorPage] fetchSnapshots Error:", e);
       setSnapshotError(errorMessage);
       setServerSnapshots([]);
     } finally {
@@ -252,6 +233,7 @@ export default function FileEditorPage() {
           }
           setFileContent(data.content);
           setOriginalFileContent(data.content);
+          setEditorLanguage(getLanguageFromFilename(fileName)); 
       } else {
           setFileContent(''); 
           setOriginalFileContent('');
@@ -280,7 +262,7 @@ export default function FileEditorPage() {
   
   const handleCreateSnapshot = useCallback(async () => {
     if (!decodedFilePath || isImageFile) {
-      setTimeout(() => toast({ title: isImageFile ? "Info" : "Error", description: isImageFile ? "Snapshots are not supported for image files." : "No active file to create snapshot for.", variant: isImageFile ? "default" : "destructive" }),0);
+       setTimeout(() => toast({ title: isImageFile ? "Info" : "Error", description: isImageFile ? "Snapshots are not supported for image files." : "No active file to create snapshot for.", variant: isImageFile ? "default" : "destructive" }),0);
       return;
     }
     if (globalDebugModeActive) console.log(`[FileEditorPage] handleCreateSnapshot CALLED for: ${decodedFilePath}, Lang: ${editorLanguage}, Content Length: ${fileContent.length}`);
@@ -296,32 +278,25 @@ export default function FileEditorPage() {
         body: JSON.stringify(snapshotData),
       });
       
-      let resultText = await response.text();
-      if (globalDebugModeActive) console.log("[FileEditorPage] handleCreateSnapshot: API Response Status:", response.status, "Body:", resultText);
+      const result = await response.json();
+      if (globalDebugModeActive) console.log("[FileEditorPage] handleCreateSnapshot: API Response Status:", response.status, "Body:", result);
 
       if (!response.ok) {
-        let errorMsg = `API Error: ${response.status}. ${resultText}`;
-        try {
-          const jsonError = JSON.parse(resultText);
-          errorMsg = jsonError.error || jsonError.details || errorMsg;
-        } catch (e) { /* ignore if not JSON */ }
+        const errorMsg = result.error || result.details || `API Error: ${response.status}. ${result.message || "Failed to create snapshot."}`;
         throw new Error(errorMsg);
       }
       
-      const result = JSON.parse(resultText);
-
-      setTimeout(() => toast({ title: 'Snapshot Created', description: result.message || `Snapshot for ${fileName} created.` }),0);
+       setTimeout(() => toast({ title: 'Snapshot Created', description: result.message || `Snapshot for ${fileName} created.` }),0);
       
       if(Array.isArray(result.snapshots)) {
         setServerSnapshots(result.snapshots);
       } else {
-        await fetchSnapshots();
+        await fetchSnapshots(); // Re-fetch to get the updated list if API doesn't return it directly
       }
     } catch (e: any) {
       const apiErrorMsg = e.message || "An unexpected error occurred while creating the snapshot.";
       if (globalDebugModeActive) console.error("[FileEditorPage] handleCreateSnapshot API Error:", e);
       setSnapshotError(apiErrorMsg);
-      setTimeout(() => toast({ title: 'Snapshot Error', description: apiErrorMsg, variant: 'destructive' }),0);
     } finally {
       setIsCreatingSnapshot(false);
     }
@@ -329,12 +304,12 @@ export default function FileEditorPage() {
 
   const handleSaveChanges = useCallback(async () => {
     if (!decodedFilePath || !isWritable || isImageFile) {
-      setTimeout(() => toast({ title: "Cannot Save", description: !decodedFilePath ? "No active file." : !isWritable ? "File not writable." : "Image saving not supported here.", variant: "destructive" }),0);
+       setTimeout(() => toast({ title: "Cannot Save", description: !decodedFilePath ? "No active file." : !isWritable ? "File not writable." : "Image saving not supported here.", variant: "destructive" }),0);
       return;
     }
 
-    if (hasUnsavedChanges) { // Only create snapshot if there are actual changes
-      await handleCreateSnapshot();
+    if (hasUnsavedChanges) {
+      await handleCreateSnapshot(); 
     }
 
     setIsSaving(true);
@@ -353,7 +328,6 @@ export default function FileEditorPage() {
       setOriginalFileContent(fileContent); 
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred while saving.");
-      setTimeout(() => toast({ title: "Save Error", description: e.message, variant: "destructive"}),0);
     } finally {
       setIsSaving(false);
     }
@@ -374,14 +348,11 @@ export default function FileEditorPage() {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [isSaving, isWritable, hasUnsavedChanges, handleSaveChanges, globalDebugModeActive, isImageFile]);
-
+  
   const performSearch = useCallback((query: string) => {
-    if (!editorRef.current?.view || !query) {
+    if (!editorRef.current?.view || !query.trim()) {
       setSearchMatches([]);
       setCurrentMatchIndex(-1);
-      if (query && editorRef.current?.view) {
-        setTimeout(() => toast({ title: "Not Found", description: `"${query}" was not found in the file.`, duration: 3000 }),0);
-      }
       return;
     }
     const view = editorRef.current.view;
@@ -400,28 +371,16 @@ export default function FileEditorPage() {
       });
     } else {
       setCurrentMatchIndex(-1);
-      setTimeout(() => toast({ title: "Not Found", description: `"${query}" was not found in the file.`, duration: 3000 }),0);
+      setTimeout(() => toast({ title: "Not Found", description: `"${query}" was not found in the file.`, duration: 2000 }),0);
     }
   }, [toast]);
 
   const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchQuery(e.target.value);
-  };
-
-  const handleSearchSubmit = (e?: React.FormEvent<HTMLFormElement>) => {
-    e?.preventDefault();
-    if (!searchQuery.trim()) {
-       setTimeout(() => toast({ title: "Empty Search", description: "Please enter text to search.", duration: 3000 }),0);
-      return;
-    }
-    performSearch(searchQuery);
+    const newQuery = e.target.value;
+    setSearchQuery(newQuery);
+    performSearch(newQuery); 
   };
   
-  const handlePresetSearch = (term: string) => {
-    setSearchQuery(term);
-    performSearch(term);
-  };
-
   const goToMatch = useCallback((index: number) => {
     if (editorRef.current?.view && searchMatches[index]) {
       const match = searchMatches[index];
@@ -433,60 +392,62 @@ export default function FileEditorPage() {
     }
   }, [searchMatches]);
 
-  const handleNextMatch = useCallback(() => {
+  const handleNextSearchMatch = useCallback(() => {
     if (searchMatches.length === 0) return;
     const nextIndex = (currentMatchIndex + 1) % searchMatches.length;
     goToMatch(nextIndex);
   }, [currentMatchIndex, searchMatches, goToMatch]);
 
-  const handlePreviousMatch = useCallback(() => {
+  const handlePreviousSearchMatch = useCallback(() => {
     if (searchMatches.length === 0) return;
     const prevIndex = (currentMatchIndex - 1 + searchMatches.length) % searchMatches.length;
     goToMatch(prevIndex);
   }, [currentMatchIndex, searchMatches, goToMatch]);
+
+  useEffect(() => { // Clear search if widget closes
+    if (!isSearchWidgetOpen) {
+      setSearchQuery("");
+      setSearchMatches([]);
+      setCurrentMatchIndex(-1);
+    }
+  }, [isSearchWidgetOpen]);
   
   const handleLoadSnapshot = useCallback((snapshotToLoad: Snapshot) => {
-    if (snapshotToLoad) {
-      setFileContent(snapshotToLoad.content);
-      setOriginalFileContent(snapshotToLoad.content); 
-      setEditorLanguage(snapshotToLoad.language);
-      setTimeout(() => toast({
-        title: "Snapshot Loaded",
-        description: `Loaded snapshot for ${fileName} from ${format(new Date(snapshotToLoad.timestamp), 'PP HH:mm:ss')}`,
-      }),0);
-    } else {
-      setTimeout(() => toast({
-        title: "Error",
-        description: "Could not find the selected snapshot.",
-        variant: "destructive",
-      }),0);
-    }
+     setTimeout(() => {
+      if (snapshotToLoad) {
+        setFileContent(snapshotToLoad.content);
+        setOriginalFileContent(snapshotToLoad.content); 
+        setEditorLanguage(snapshotToLoad.language);
+        toast({
+          title: "Snapshot Loaded",
+          description: `Loaded snapshot for ${fileName} from ${format(new Date(snapshotToLoad.timestamp), 'PP HH:mm:ss')}`,
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: "Could not find the selected snapshot.",
+          variant: "destructive",
+        });
+      }
+    }, 0);
   }, [toast, fileName]);
 
   const handleToggleLockSnapshot = useCallback(async (snapshotId: string) => {
-    const snapshotIndex = serverSnapshots.findIndex(s => s.id === snapshotId);
-    if (snapshotIndex === -1) {
-      setSnapshotError("Snapshot not found to toggle lock.");
-       setTimeout(() => toast({ title: "Snapshot Error", description: "Snapshot not found to toggle lock.", variant: "destructive"}),0);
-      return;
-    }
-    
-    const updatedSnapshot = { ...serverSnapshots[snapshotIndex], isLocked: !serverSnapshots[snapshotIndex].isLocked };
-    const updatedSnapshots = [...serverSnapshots];
-    updatedSnapshots[snapshotIndex] = updatedSnapshot;
-    setServerSnapshots(updatedSnapshots);
-
+     // TODO: API call to persist lock state on server
+    setServerSnapshots(prev => 
+        prev.map(s => s.id === snapshotId ? {...s, isLocked: !s.isLocked} : s)
+    );
+    const snapshot = serverSnapshots.find(s => s.id === snapshotId);
     setTimeout(() => toast({ 
-        title: updatedSnapshot.isLocked ? "Snapshot Locked (Client)" : "Snapshot Unlocked (Client)", 
-        description: "Server-side lock persistence is pending API implementation."
+        title: snapshot && !snapshot.isLocked ? "Snapshot Locked (Client)" : "Snapshot Unlocked (Client)", // Logic is reversed due to state update timing
+        description: "Server-side persistence pending API implementation."
     }), 0);
-    // TODO: Implement API call to persist lock state on server
   }, [serverSnapshots, toast]);
 
   const handleDeleteSnapshot = useCallback(async (snapshotIdToDelete: string) => {
+    // TODO: API call to delete snapshot on server
     setServerSnapshots(prev => prev.filter(s => s.id !== snapshotIdToDelete));
-    setTimeout(() => toast({ title: "Snapshot Deleted (Client)", description: "Server-side deletion is pending API implementation."}), 0);
-    // TODO: Implement API call to delete snapshot on server
+     setTimeout(() => toast({ title: "Snapshot Deleted (Client)", description: "Server-side deletion pending API implementation."}), 0);
   }, [toast]);
 
   const handleViewSnapshotInPopup = (snapshot: Snapshot) => {
@@ -495,25 +456,16 @@ export default function FileEditorPage() {
   };
 
   useEffect(() => {
-    if (!isFindDialogOpen) {
-      setSearchMatches([]);
-      setCurrentMatchIndex(-1);
-    }
-  }, [isFindDialogOpen]);
-
-  useEffect(() => {
-    // New effect to show error toasts from `setError` calls
-    if (error && !isLoading && !isImageFile) { // Avoid showing toast if loading or if it's an image loading error (handled separately)
+    if (error && !isLoading && !isImageFile) {
         setTimeout(() => toast({ title: "File Operation Error", description: error, variant: "destructive" }), 0);
     }
   }, [error, isLoading, isImageFile, toast]);
 
   useEffect(() => {
-    // New effect to show snapshot error toasts from `setSnapshotError` calls
-    if (snapshotError) {
+    if (snapshotError && !isImageFile) {
         setTimeout(() => toast({ title: "Snapshot Operation Error", description: snapshotError, variant: "destructive" }), 0);
     }
-  }, [snapshotError, toast]);
+  }, [snapshotError, toast, isImageFile]);
 
   if (isLoading) {
     return (
@@ -563,7 +515,7 @@ export default function FileEditorPage() {
         }
       />
       
-      <div className="flex-shrink-0 flex items-center justify-between p-2 border-b bg-muted/50">
+      <div className="flex items-center justify-between p-2 border-b bg-muted/50 flex-shrink-0">
         <div className="flex items-center gap-1">
           <TooltipProvider>
             <Tooltip>
@@ -588,12 +540,7 @@ export default function FileEditorPage() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => {
-                      setSearchQuery(""); 
-                      setSearchMatches([]);
-                      setCurrentMatchIndex(-1);
-                      setIsFindDialogOpen(true);
-                    }}
+                    onClick={() => setIsSearchWidgetOpen(prev => !prev)}
                     className="shadow-sm hover:scale-105"
                   >
                     <SearchIcon className="h-4 w-4" />
@@ -609,18 +556,17 @@ export default function FileEditorPage() {
         <div className="flex items-center gap-1 text-xs text-muted-foreground mr-1">
           {!isImageFile && (
             <TooltipProvider>
-              <Tooltip>
                 <DropdownMenu>
                   <TooltipTrigger asChild>
                     <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="shadow-sm hover:scale-105 w-7 h-7"
-                        disabled={isLoadingSnapshots || isImageFile}
-                      >
-                        {isLoadingSnapshots || isCreatingSnapshot ? <Loader2 className="h-3 w-3 animate-spin"/> : <Camera className="h-3 w-3" />}
-                      </Button>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="shadow-sm hover:scale-105 w-7 h-7"
+                            disabled={isLoadingSnapshots || isImageFile}
+                        >
+                            {isLoadingSnapshots || isCreatingSnapshot ? <Loader2 className="h-3 w-3 animate-spin"/> : <Camera className="h-3 w-3" />}
+                        </Button>
                     </DropdownMenuTrigger>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -676,7 +622,6 @@ export default function FileEditorPage() {
                     </DropdownMenuLabel>
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </Tooltip>
             </TooltipProvider>
           )}
           <span className="truncate max-w-[150px] sm:max-w-[200px]">{fileName}</span>
@@ -704,7 +649,7 @@ export default function FileEditorPage() {
           </AlertDescription>
         </Alert>
       )}
-      {error && (fileContent || isImageFile) && ( 
+      {error && (fileContent || isImageFile) && !isLoading && ( 
           <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
             <FileWarning className="h-4 w-4" />
             <AlertTitle>File Operation Error</AlertTitle>
@@ -729,12 +674,10 @@ export default function FileEditorPage() {
                 <p>Error loading image: {error}</p>
               </div>
             ) : (
-              <Image
+               <img // Using <img> for direct image display to avoid next/image issues with unoptimized external dynamic sources
                 src={`/api/panel-daemon/file?path=${encodeURIComponent(decodedFilePath)}`} 
                 alt={`Preview of ${fileName}`}
-                fill
-                style={{ objectFit: 'contain' }} 
-                unoptimized 
+                className="max-w-full max-h-full object-contain"
                 data-ai-hint="file preview"
                 onError={(e) => {
                   console.error("Image load error in editor:", e);
@@ -753,7 +696,42 @@ export default function FileEditorPage() {
             className="h-full w-full border-0 rounded-none" 
           />
         )}
+        
+        {/* Custom Search Widget */}
+        {isSearchWidgetOpen && !isImageFile && (
+          <div className="absolute top-2 right-2 z-10 bg-card p-3 rounded-lg shadow-lg border w-72 space-y-2">
+            <div className="flex items-center justify-between mb-1">
+                <p className="text-sm font-medium">Find in File</p>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsSearchWidgetOpen(false)}>
+                    <X className="h-4 w-4" />
+                </Button>
+            </div>
+            <Input
+              id="find-query-widget"
+              value={searchQuery}
+              onChange={handleSearchInputChange}
+              placeholder="Search..."
+              className="h-8 text-sm"
+              autoFocus
+              onKeyDown={(e) => { if (e.key === 'Enter') performSearch(searchQuery); }}
+            />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1">
+                <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={handlePreviousSearchMatch} disabled={searchMatches.length === 0}>
+                  <ChevronUp className="h-4 w-4" />
+                </Button>
+                <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={handleNextSearchMatch} disabled={searchMatches.length === 0}>
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {searchMatches.length > 0 ? `${currentMatchIndex + 1} of ${searchMatches.length}` : searchQuery ? "No matches" : ""}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
+
       {isSnapshotViewerOpen && selectedSnapshotForViewer && (
         <SnapshotViewerDialog
           isOpen={isSnapshotViewerOpen}
@@ -761,79 +739,7 @@ export default function FileEditorPage() {
           snapshot={selectedSnapshotForViewer}
         />
       )}
-
-      {/* Custom Find Dialog */}
-      <Dialog open={isFindDialogOpen} onOpenChange={setIsFindDialogOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl">
-          <DialogHeader>
-            <DialogTitle>Find in File</DialogTitle>
-            <DialogDescription>
-              Search for text within the current file.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleSearchSubmit}>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="find-query" className="text-right col-span-1">
-                  Search
-                </Label>
-                <Input
-                  id="find-query"
-                  value={searchQuery}
-                  onChange={handleSearchInputChange}
-                  className="col-span-3"
-                  placeholder="Enter text to find..."
-                  autoFocus
-                />
-              </div>
-              <div className="text-xs text-muted-foreground col-span-4 pl-[calc(25%+1rem)]">
-                Press Enter to search.
-              </div>
-              <div className="col-span-4">
-                <Label className="text-xs text-muted-foreground">Quick Search:</Label>
-                <div className="flex gap-2 mt-1 flex-wrap">
-                    {PRESET_SEARCH_TERMS.map(term => (
-                        <Button key={term} type="button" variant="outline" size="sm" onClick={() => handlePresetSearch(term)} className="text-xs px-2 py-1 h-auto">
-                            {term}
-                        </Button>
-                    ))}
-                </div>
-              </div>
-            </div>
-            <DialogFooter className="justify-between sm:flex-row flex-col-reverse gap-2 sm:gap-0">
-                <div className="flex items-center gap-1">
-                    <Button type="button" variant="outline" size="icon" onClick={handlePreviousMatch} disabled={searchMatches.length === 0}>
-                        <ChevronUp className="h-4 w-4" />
-                    </Button>
-                    <Button type="button" variant="outline" size="icon" onClick={handleNextMatch} disabled={searchMatches.length === 0}>
-                        <ChevronDown className="h-4 w-4" />
-                    </Button>
-                    {searchMatches.length > 0 && (
-                         <span className="text-sm text-muted-foreground ml-2">
-                           {currentMatchIndex + 1} of {searchMatches.length}
-                         </span>
-                    )}
-                     {searchMatches.length === 0 && searchQuery && currentMatchIndex === -1 && ( // Show "No matches" only after a search
-                         <span className="text-sm text-muted-foreground ml-2">
-                           No matches
-                         </span>
-                    )}
-                </div>
-              <div className="flex gap-2">
-                <DialogClose asChild>
-                  <Button type="button" variant="outline">
-                    Close
-                  </Button>
-                </DialogClose>
-                <Button type="submit" disabled={!searchQuery.trim()}>
-                  Find
-                </Button>
-              </div>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
     </div>
   );
 }
+
