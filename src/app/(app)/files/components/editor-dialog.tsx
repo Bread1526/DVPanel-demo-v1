@@ -9,7 +9,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Button, buttonVariants } from "@/components/ui/button"; // Added buttonVariants
+import { Button, buttonVariants } from "@/components/ui/button";
 import CodeEditor from '@/components/ui/code-editor';
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { useToast } from "@/hooks/use-toast";
@@ -94,7 +94,7 @@ interface OpenedTabInfo {
   language: string;
   unsavedChanges: boolean;
   isLoading: boolean;
-  isWritable: boolean | null;
+  isWritable: boolean | null; // null initially, then true/false
   error?: string | null;
 }
 
@@ -145,18 +145,17 @@ function getFileIcon(filename: string, fileType: FileItemForTree['type']): React
     case '.mp4': case '.mov': case '.avi': case '.mkv': return <VideoIconLucide className="h-4 w-4 text-red-500 shrink-0" />;
     case '.db': case '.sqlite': case '.sql': return <DatabaseIcon className="h-4 w-4 text-indigo-500 shrink-0" />;
     case '.csv': case '.xls': case '.xlsx': return <ListIcon className="h-4 w-4 text-green-700 shrink-0" />;
-    case '.exe': case '.dmg': case '.app': return <FileTextIcon className="h-4 w-4 text-gray-800 shrink-0" />;
+    case '.exe': case '.dmg': case '.app': return <FileTextIcon className="h-4 w-4 text-gray-800 shrink-0" />; // Changed to FileTextIcon as Settings2 was removed
     case '.pem': case '.crt': case '.key': return <ShieldIcon className="h-4 w-4 text-teal-500 shrink-0" />;
     case '.gitignore': case '.gitattributes': case '.gitmodules': return <GithubIcon className="h-4 w-4 text-neutral-700 shrink-0" />;
     default: return <FileIconDefault className="h-4 w-4 text-muted-foreground shrink-0" />;
   }
 }
 
-
 export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: EditorDialogProps) {
   const { toast } = useToast();
   const editorRef = useRef<ReactCodeMirrorRef>(null);
-  const activeTabPathRef = useRef<string | null>(null);
+  const activeTabPathRef = useRef<string | null>(null); // To track active tab for async operations
 
   const [openedTabs, setOpenedTabs] = useState<OpenedTabInfo[]>([]);
   const [activeTabPath, setActiveTabPathInternal] = useState<string | null>(null);
@@ -189,70 +188,108 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   const [prevPosition, setPrevPosition] = useState({ x: 0, y: 0});
   const dialogContentRef = useRef<HTMLDivElement>(null);
 
+  // Update activeTabPathRef whenever activeTabPath changes
+  useEffect(() => {
+    activeTabPathRef.current = activeTabPath;
+    if (globalDebugModeActive) console.log(`[EditorDialog] activeTabPathRef updated to: ${activeTabPath}`);
+  }, [activeTabPath, globalDebugModeActive]);
 
   const setActiveTabPath = useCallback((newPath: string | null) => {
     if (globalDebugModeActive) console.log(`[EditorDialog] setActiveTabPath called with: ${newPath}`);
     setActiveTabPathInternal(newPath);
   }, [globalDebugModeActive]);
 
-
   const activeTab = useMemo(() => {
     if (!activeTabPath) return null;
-    return openedTabs.find(tab => tab.path === activeTabPath);
-  }, [activeTabPath, openedTabs]);
+    const tab = openedTabs.find(tab => tab.path === activeTabPath);
+    if (globalDebugModeActive) console.log(`[EditorDialog] useMemo(activeTab): path='${activeTabPath}', found tab:`, tab ? {path: tab.path, isLoading: tab.isLoading, hasContent: tab.content !== null} : null);
+    return tab;
+  }, [activeTabPath, openedTabs, globalDebugModeActive]);
 
-  const editorContent = useMemo(() => activeTab?.content ?? "", [activeTab]);
+  const editorContent = useMemo(() => {
+    const content = activeTab?.content ?? "";
+    if (globalDebugModeActive) console.log(`[EditorDialog] useMemo(editorContent) for activeTabPath='${activeTabPath}': length=${content.length}`);
+    return content;
+  }, [activeTab, globalDebugModeActive, activeTabPath]);
+
   const editorLanguage = useMemo(() => activeTab?.language ?? "plaintext", [activeTab]);
   const hasUnsavedChanges = useMemo(() => activeTab?.unsavedChanges ?? false, [activeTab]);
   const isEditorLoading = useMemo(() => activeTab?.isLoading ?? false, [activeTab]);
-  const isCurrentFileWritable = useMemo(() => activeTab?.isWritable ?? true, [activeTab]);
+  const isCurrentFileWritable = useMemo(() => activeTab?.isWritable ?? false, [activeTab]); // Default to false if null
   const editorError = useMemo(() => activeTab?.error ?? null, [activeTab]);
 
-  useEffect(() => {
-    activeTabPathRef.current = activeTabPath;
-  }, [activeTabPath]);
-  
+
+  const handleOpenOrActivateTab = useCallback((filePath: string, fileName: string) => {
+    if (globalDebugModeActive) console.log(`[EditorDialog] handleOpenOrActivateTab: filePath=${filePath}, fileName=${fileName}`);
+    
+    setOpenedTabs(prevTabs => {
+      const existingTabIndex = prevTabs.findIndex(tab => tab.path === filePath);
+      let newTabs;
+      if (existingTabIndex !== -1) {
+        // Tab exists, move it to the end (most recently used)
+        const existingTab = prevTabs[existingTabIndex];
+        newTabs = [...prevTabs.slice(0, existingTabIndex), ...prevTabs.slice(existingTabIndex + 1), existingTab];
+      } else {
+        // New tab
+        const newTab: OpenedTabInfo = {
+          path: filePath,
+          name: fileName,
+          content: null, 
+          originalContent: null,
+          language: getLanguageFromFilename(fileName),
+          unsavedChanges: false,
+          isLoading: false, // Will be set to true by the content loading effect if needed
+          isWritable: null,
+          error: null,
+        };
+        newTabs = [...prevTabs, newTab];
+      }
+      return newTabs;
+    });
+    setActiveTabPath(filePath); // This will trigger the content loading useEffect
+  }, [globalDebugModeActive, setActiveTabPath]);
+
+  // Effect for initial setup when dialog opens or filePathToEdit changes
   useEffect(() => {
     if (globalDebugModeActive) console.log("[EditorDialog] Initialization useEffect - isOpen:", isOpen, "filePathToEdit:", filePathToEdit);
-    try {
-        if (isOpen) {
-          loadPanelSettings().then(settingsResult => {
-            setGlobalDebugModeActive(settingsResult.data?.debugMode ?? false);
-          });
-    
-          if (filePathToEdit) {
-            const initialDir = path.dirname(filePathToEdit);
-            setFileTreePath(initialDir === '.' || initialDir === '/' ? '/' : initialDir);
-            handleOpenOrActivateTab(filePathToEdit, path.basename(filePathToEdit));
-          } else {
-            setOpenedTabs([]);
-            setActiveTabPath(null);
-            setFileTreePath('/'); 
-          }
-          
-          setIsSearchWidgetOpen(false);
-          setSearchQuery("");
-          setSearchMatches([]);
-          setCurrentMatchIndex(-1);
-    
-          if (!isMaximized) {
-            const defaultWidth = Math.min(window.innerWidth * 0.9, 1200);
-            const defaultHeight = Math.min(window.innerHeight * 0.85, 900);
-            setPosition({
-              x: Math.max(0, window.innerWidth / 2 - defaultWidth / 2),
-              y: Math.max(0, window.innerHeight / 2 - defaultHeight / 2)
-            });
-          }
-        } else { 
-          setOpenedTabs([]); 
-          setActiveTabPath(null);
-          setServerSnapshots([]);
-          setFileTreePath('/');
-        }
-    } catch (e) {
-        console.error("[EditorDialog] Error in main initialization useEffect:", e);
+    if (isOpen) {
+      loadPanelSettings().then(settingsResult => {
+        setGlobalDebugModeActive(settingsResult.data?.debugMode ?? false);
+      }).catch(err => console.error("Failed to load panel settings for debug mode", err));
+
+      if (filePathToEdit) {
+        const initialDir = path.dirname(filePathToEdit);
+        setFileTreePath(initialDir === '.' || initialDir === '/' ? '/' : initialDir);
+        if (globalDebugModeActive) console.log(`[EditorDialog] Initializing: Opening/Activating tab for ${filePathToEdit}`);
+        handleOpenOrActivateTab(filePathToEdit, path.basename(filePathToEdit));
+      } else {
+        // If dialog opens without a specific file, reset tabs and active path
+        setOpenedTabs([]);
+        setActiveTabPath(null);
+        setFileTreePath('/'); 
+      }
+      
+      setIsSearchWidgetOpen(false);
+      setSearchQuery("");
+      setSearchMatches([]);
+      setCurrentMatchIndex(-1);
+
+      if (!isMaximized) {
+        const defaultWidth = Math.min(window.innerWidth * 0.9, 1200);
+        const defaultHeight = Math.min(window.innerHeight * 0.85, 900);
+        setPosition({
+          x: Math.max(0, window.innerWidth / 2 - defaultWidth / 2),
+          y: Math.max(0, window.innerHeight / 2 - defaultHeight / 2)
+        });
+      }
+    } else { 
+      // Dialog is closing, reset relevant states
+      setOpenedTabs([]); 
+      setActiveTabPath(null);
+      setServerSnapshots([]);
+      setFileTreePath('/');
     }
-  }, [isOpen, filePathToEdit, isMaximized, globalDebugModeActive]); 
+  }, [isOpen, filePathToEdit, isMaximized, handleOpenOrActivateTab, globalDebugModeActive]); 
 
 
   const fetchFileTreeItems = useCallback(async (pathToDisplay: string) => {
@@ -303,7 +340,9 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         throw new Error(errData.error || `Failed to fetch snapshots. Status: ${response.status}`);
       }
       const data = await response.json();
-      setServerSnapshots(Array.isArray(data.snapshots) ? data.snapshots : []);
+      const snapshots = Array.isArray(data.snapshots) ? data.snapshots : [];
+      if (globalDebugModeActive) console.log(`[EditorDialog] fetchSnapshots received ${snapshots.length} snapshots for ${currentFilePath}`);
+      setServerSnapshots(snapshots);
     } catch (e: any) {
       console.error("[EditorDialog] Error fetching snapshots:", e);
       setSnapshotError(e.message || "An unexpected error occurred while fetching snapshots.");
@@ -314,16 +353,21 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   }, [isOpen, globalDebugModeActive]);
 
 
+  // Effect for loading active tab content
   useEffect(() => {
+    if (!activeTabPath || !isOpen) return;
+
     const tabToLoad = openedTabs.find(tab => tab.path === activeTabPath);
+
     if (tabToLoad && tabToLoad.content === null && !tabToLoad.isLoading) {
-      if (globalDebugModeActive) console.log(`[EditorDialog] useEffect[activeTabPath, openedTabs] - Fetching content for active tab: ${activeTabPath}`);
-      
+      if (globalDebugModeActive) console.log(`[EditorDialog] Content Loading Effect: Fetching content for ${activeTabPath}`);
+
+      // Set isLoading true for the specific tab
       setOpenedTabs(prevTabs => prevTabs.map(t => 
         t.path === activeTabPath ? { ...t, isLoading: true, error: null } : t
       ));
 
-      fetch(`/api/panel-daemon/file?path=${encodeURIComponent(activeTabPath as string)}&view=true`)
+      fetch(`/api/panel-daemon/file?path=${encodeURIComponent(activeTabPath)}&view=true`)
         .then(async response => {
           if (!response.ok) {
             const errText = await response.text();
@@ -338,7 +382,8 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
           if (typeof data.writable !== 'boolean' || typeof data.content !== 'string') {
             throw new Error("Invalid response from server: missing 'writable' or 'content'.");
           }
-          if (activeTabPathRef.current === activeTabPath) {
+          if (activeTabPathRef.current === activeTabPath) { // Ensure tab is still active
+            if (globalDebugModeActive) console.log(`[EditorDialog] Content Loaded for ${activeTabPath}: writable=${data.writable}, content length=${data.content.length}`);
             setOpenedTabs(prevTabs => prevTabs.map(t => 
               t.path === activeTabPath ? { 
                 ...t, 
@@ -350,67 +395,43 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
                 error: null
               } : t
             ));
-            if (activeTabPath) fetchSnapshots(activeTabPath);
+            fetchSnapshots(activeTabPath); // Fetch snapshots after content is loaded
+          } else {
+            if (globalDebugModeActive) console.log(`[EditorDialog] Content Loaded for ${activeTabPath}, but tab changed. Not updating editor.`);
           }
         })
         .catch(e => {
           const errorMsg = e.message || "An unexpected error occurred while fetching file content.";
-          console.error("[EditorDialog] Error fetching file content:", e);
-          if (activeTabPathRef.current === activeTabPath) {
+          console.error("[EditorDialog] Error fetching file content for " + activeTabPath + ":", e);
+          if (activeTabPathRef.current === activeTabPath) { // Ensure tab is still active
             setOpenedTabs(prevTabs => prevTabs.map(t => 
               t.path === activeTabPath ? { ...t, error: errorMsg, isLoading: false, content: "", originalContent: "" } : t
             ));
           }
           setTimeout(() => toast({ title: "File Load Error", description: errorMsg, variant: "destructive" }), 0);
         });
-    } else if (tabToLoad && tabToLoad.content !== null && activeTabPath) {
+    } else if (tabToLoad && tabToLoad.content !== null) {
+      // Content is already loaded, ensure snapshots are fetched if this tab just became active (or refetched)
+      // This might be redundant if fetchSnapshots is called elsewhere reliably.
+      // Consider if fetchSnapshots should only be called once when tab content is first loaded.
+      if (globalDebugModeActive) console.log(`[EditorDialog] Content Loading Effect: Content for ${activeTabPath} already loaded. Fetching snapshots.`);
       fetchSnapshots(activeTabPath);
     }
-  }, [activeTabPath, openedTabs, globalDebugModeActive, toast, fetchSnapshots]);
-
-
-  const handleOpenOrActivateTab = useCallback((filePath: string, fileName: string) => {
-    if (globalDebugModeActive) console.log(`[EditorDialog] handleOpenOrActivateTab: filePath=${filePath}, fileName=${fileName}`);
-    
-    setOpenedTabs(prevTabs => {
-      const existingTabIndex = prevTabs.findIndex(tab => tab.path === filePath);
-      let newTabs;
-      if (existingTabIndex !== -1) {
-        const existingTab = prevTabs[existingTabIndex];
-        newTabs = [...prevTabs.slice(0, existingTabIndex), ...prevTabs.slice(existingTabIndex + 1), existingTab];
-      } else {
-        const newTab: OpenedTabInfo = {
-          path: filePath,
-          name: fileName,
-          content: null, 
-          originalContent: null,
-          language: getLanguageFromFilename(fileName),
-          unsavedChanges: false,
-          isLoading: true, 
-          isWritable: null,
-          error: null,
-        };
-        newTabs = [...prevTabs, newTab];
-      }
-      return newTabs;
-    });
-    setActiveTabPath(filePath);
-  }, [globalDebugModeActive, setActiveTabPath]);
-  
+  }, [activeTabPath, openedTabs, isOpen, globalDebugModeActive, toast, fetchSnapshots]);
   
   const handleCreateSnapshot = useCallback(async () => {
-    if (!activeTabPath || !activeTab || activeTab.content === null) {
+    if (!activeTab || activeTab.content === null) {
         setTimeout(() => toast({ title: "Cannot Create Snapshot", description: "No active file or content not loaded.", variant: "destructive" }), 0);
         return;
     }
-    if (globalDebugModeActive) console.log("[EditorDialog] handleCreateSnapshot called for", activeTabPath);
+    if (globalDebugModeActive) console.log("[EditorDialog] handleCreateSnapshot called for", activeTab.path);
     setIsCreatingSnapshot(true);
     setSnapshotError(null);
     try {
       const response = await fetch(`/api/panel-daemon/snapshots`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath: activeTabPath, content: activeTab.content, language: activeTab.language }),
+        body: JSON.stringify({ filePath: activeTab.path, content: activeTab.content, language: activeTab.language }),
       });
       const result = await response.json();
       if (!response.ok) { throw new Error(result.error || result.details || 'Failed to create snapshot.'); }
@@ -421,14 +442,15 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       const errorMsg = e.message || "An unexpected error occurred while creating snapshot.";
       console.error("[EditorDialog] Error creating snapshot:", e);
       setSnapshotError(errorMsg);
-       setTimeout(() => toast({ title: "Snapshot Creation Error", description: errorMsg, variant: "destructive" }),0);
+      setTimeout(() => toast({ title: "Snapshot Creation Error", description: errorMsg, variant: "destructive" }),0);
     } finally {
       setIsCreatingSnapshot(false);
     }
-  }, [activeTabPath, activeTab, toast, globalDebugModeActive]);
+  }, [activeTab, toast, globalDebugModeActive]);
 
   const handleEditorContentChange = useCallback((newContent: string) => {
     if (!activeTabPath) return;
+    if (globalDebugModeActive) console.log(`[EditorDialog] handleEditorContentChange for ${activeTabPath}: new length ${newContent.length}`);
     setOpenedTabs(prevTabs => prevTabs.map(tab => 
       tab.path === activeTabPath 
         ? { 
@@ -438,15 +460,19 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
           } 
         : tab
     ));
-  }, [activeTabPath]);
+  }, [activeTabPath, globalDebugModeActive]);
 
   const handleSaveChanges = useCallback(async () => {
     if (!activeTab || activeTab.isWritable === false || activeTab.content === null) {
-      setTimeout(() => toast({ title: "Cannot Save", description: !activeTab ? "No active file." : "File not writable or content not loaded.", variant: "destructive" }),0);
+      setTimeout(() => toast({ title: "Cannot Save", description: !activeTab ? "No active file." : (activeTab.isWritable === false ? "File not writable." : "Content not loaded."), variant: "destructive" }),0);
       return;
     }
-    if (activeTab.unsavedChanges || globalDebugModeActive) { 
-        await handleCreateSnapshot(); 
+    if (globalDebugModeActive) console.log(`[EditorDialog] handleSaveChanges for ${activeTab.path}. Has unsaved: ${activeTab.unsavedChanges}`);
+
+    // Create a snapshot IF there are unsaved changes or if debug mode allows saving without changes
+    if (activeTab.unsavedChanges || (globalDebugModeActive && !activeTab.unsavedChanges)) { 
+        if (globalDebugModeActive) console.log(`[EditorDialog] Creating snapshot before save for ${activeTab.path}`);
+        await handleCreateSnapshot(); // handleCreateSnapshot is already memoized
     } 
 
     setIsSaving(true);
@@ -468,9 +494,11 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     } catch (e: any) {
       const errorMsg = e.message || "An unexpected error occurred while saving.";
       console.error("[EditorDialog] Error saving file:", e);
-      setOpenedTabs(prevTabs => prevTabs.map(tab => 
-        tab.path === activeTab.path ? { ...tab, error: errorMsg } : tab
-      ));
+      // Don't update the tab's error state here, as the main editorError derived state handles it.
+      // Or, if you want tab-specific save errors:
+      // setOpenedTabs(prevTabs => prevTabs.map(tab => 
+      //   tab.path === activeTab.path ? { ...tab, error: errorMsg } : tab // This would be tab-specific save error.
+      // ));
       setTimeout(() => toast({ title: "Save Error", description: errorMsg, variant: "destructive" }),0);
     } finally {
       setIsSaving(false);
@@ -497,25 +525,28 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
 
   const handleLoadSnapshot = useCallback((snapshotToLoad: Snapshot) => {
     if (!activeTabPath) return;
+    if (globalDebugModeActive) console.log(`[EditorDialog] handleLoadSnapshot: Loading snapshot for ${activeTabPath}`);
     setOpenedTabs(prevTabs => prevTabs.map(tab => 
       tab.path === activeTabPath 
         ? { 
             ...tab, 
             content: snapshotToLoad.content, 
-            language: snapshotToLoad.language,
+            language: snapshotToLoad.language, // Also update language from snapshot
             unsavedChanges: snapshotToLoad.content !== tab.originalContent
           } 
         : tab
     ));
     setTimeout(() => toast({ title: "Snapshot Applied to Editor", description: `Content from ${format(new Date(snapshotToLoad.timestamp), 'PP HH:mm:ss')} applied. Save to persist.` }),0);
-  }, [activeTabPath, toast]);
+  }, [activeTabPath, toast, globalDebugModeActive]);
   
   const handleCloseTab = useCallback((pathToClose: string, event?: React.MouseEvent) => {
     event?.stopPropagation(); 
+    if (globalDebugModeActive) console.log(`[EditorDialog] handleCloseTab: Attempting to close ${pathToClose}`);
 
     const tabToClose = openedTabs.find(tab => tab.path === pathToClose);
     if (tabToClose?.unsavedChanges) {
       if (!window.confirm(`File "${tabToClose.name}" has unsaved changes. Are you sure you want to close it?`)) {
+        if (globalDebugModeActive) console.log(`[EditorDialog] handleCloseTab: Close cancelled for ${pathToClose} due to unsaved changes.`);
         return;
       }
     }
@@ -525,36 +556,45 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     
     if (activeTabPath === pathToClose) { 
       if (remainingTabs.length > 0) {
-        const closingTabIndex = openedTabs.findIndex(tab => tab.path === pathToClose);
-        const newIndexToActivate = Math.max(0, Math.min(closingTabIndex -1, remainingTabs.length -1)); 
+        const closingTabIndexOriginal = openedTabs.findIndex(tab => tab.path === pathToClose);
+        // Activate tab to the left, or the new last tab if closing the leftmost or only tab
+        const newIndexToActivate = Math.max(0, Math.min(closingTabIndexOriginal -1, remainingTabs.length -1)); 
         newActiveTabPath = remainingTabs[newIndexToActivate]?.path || null;
+      } else {
+        newActiveTabPath = null; // No tabs left
       }
     } else { 
-      newActiveTabPath = activeTabPath;
+      newActiveTabPath = activeTabPath; // Active tab wasn't the one closed
     }
     
     setOpenedTabs(remainingTabs);
-    setActiveTabPath(newActiveTabPath);
-    if (remainingTabs.length === 0) {
-      setIsSearchWidgetOpen(false); 
-    }
+    setActiveTabPath(newActiveTabPath); // This will trigger content loading useEffect for the new active tab
 
-  }, [openedTabs, activeTabPath, setActiveTabPath]);
+    if (remainingTabs.length === 0) {
+      setIsSearchWidgetOpen(false); // Close search if no tabs are open
+    }
+     if (globalDebugModeActive) console.log(`[EditorDialog] handleCloseTab: Closed ${pathToClose}. New active tab: ${newActiveTabPath}. Remaining tabs: ${remainingTabs.length}`);
+
+  }, [openedTabs, activeTabPath, setActiveTabPath, globalDebugModeActive]);
 
   const handleToggleLockSnapshot = useCallback(async (snapshotId: string) => {
+    if (globalDebugModeActive) console.log(`[EditorDialog] handleToggleLockSnapshot: Toggling lock for snapshot ${snapshotId}`);
+    // For now, client-side only toggle as backend for this is not implemented
     setServerSnapshots(prev => prev.map(s => s.id === snapshotId ? {...s, isLocked: !s.isLocked} : s));
     setTimeout(() => toast({ title: "Snapshot Lock Toggled (Client)", description: "Server-side persistence for lock not yet implemented." }),0);
-  }, [toast]);
+  }, [toast, globalDebugModeActive]);
 
   const handleDeleteSnapshot = useCallback(async (snapshotIdToDelete: string) => {
+    if (globalDebugModeActive) console.log(`[EditorDialog] handleDeleteSnapshot: Deleting snapshot ${snapshotIdToDelete}`);
+     // For now, client-side only delete as backend for this is not implemented
     setServerSnapshots(prev => prev.filter(s => s.id !== snapshotIdToDelete));
      setTimeout(() => toast({ title: "Snapshot Deleted (Client)", description: "Server-side deletion for snapshots is not yet implemented."}), 0);
-  }, [toast]);
+  }, [toast, globalDebugModeActive]);
 
-  const handleViewSnapshotInPopup = (snapshot: Snapshot) => {
+  const handleViewSnapshotInPopup = useCallback((snapshot: Snapshot) => {
     setSelectedSnapshotForViewer(snapshot);
     setIsSnapshotViewerOpen(true);
-  };
+  }, []);
   
   const performSearch = useCallback((query: string, caseSensitive: boolean) => {
     if (!editorRef.current?.view || !query.trim()) {
@@ -575,12 +615,12 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     }
   }, [toast]); 
 
-  const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSearchInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newQuery = e.target.value;
     setSearchQuery(newQuery);
     if (newQuery.trim()) { performSearch(newQuery, isCaseSensitiveSearch); }
     else { setSearchMatches([]); setCurrentMatchIndex(-1); }
-  };
+  }, [performSearch, isCaseSensitiveSearch]);
 
   const goToMatch = useCallback((index: number) => {
     if (editorRef.current?.view && searchMatches[index]) {
@@ -593,16 +633,17 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   const handleNextSearchMatch = useCallback(() => { if (searchMatches.length === 0) return; const nextIndex = (currentMatchIndex + 1) % searchMatches.length; goToMatch(nextIndex); }, [currentMatchIndex, searchMatches, goToMatch]);
   const handlePreviousSearchMatch = useCallback(() => { if (searchMatches.length === 0) return; const prevIndex = (currentMatchIndex - 1 + searchMatches.length) % searchMatches.length; goToMatch(prevIndex); }, [currentMatchIndex, searchMatches, goToMatch]);
   
-  const toggleCaseSensitiveSearch = () => {
+  const toggleCaseSensitiveSearch = useCallback(() => {
     const newCaseSensitive = !isCaseSensitiveSearch;
     setIsCaseSensitiveSearch(newCaseSensitive);
     if (searchQuery.trim()) { performSearch(searchQuery, newCaseSensitive); }
-  };
-  const handlePresetSearch = (term: string) => { setSearchQuery(term); performSearch(term, isCaseSensitiveSearch); };
+  }, [isCaseSensitiveSearch, searchQuery, performSearch]);
+
+  const handlePresetSearch = useCallback((term: string) => { setSearchQuery(term); performSearch(term, isCaseSensitiveSearch); }, [performSearch, isCaseSensitiveSearch]);
 
   useEffect(() => {
-    if (!isSearchWidgetOpen && searchMatches.length > 0 && globalDebugModeActive) {
-        console.log("[EditorDialog] Search widget cleanup: Closing widget, clearing matches.");
+    if (!isSearchWidgetOpen && searchMatches.length > 0) {
+        if (globalDebugModeActive) console.log("[EditorDialog] Search widget cleanup: Closing widget, clearing matches.");
         setSearchMatches([]);
         setCurrentMatchIndex(-1);
       }
@@ -642,41 +683,43 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     };
   }, [isDragging, handleWindowMouseMove, handleWindowMouseUp]);
 
-  const toggleMaximize = () => {
+  const toggleMaximize = useCallback(() => {
     if (isMaximized) { setPosition(prevPosition); } 
     else {
       if (dialogContentRef.current) { const rect = dialogContentRef.current.getBoundingClientRect(); setPrevPosition({ x: rect.left, y: rect.top });}
       setPosition({x: 0, y: 0});
     }
-    setIsMaximized(!isMaximized);
-  };
+    setIsMaximized(prev => !prev);
+  }, [isMaximized, prevPosition]);
 
-  const dialogStyle: React.CSSProperties = isMaximized
+  const dialogStyle: React.CSSProperties = useMemo(() => (isMaximized
   ? { position: 'fixed', left: '0px', top: '0px', width: '100vw', height: '100vh', maxWidth: '100vw', maxHeight: '100vh', transform: 'none', borderRadius: '0px', margin: '0px' }
-  : { position: 'fixed', left: `${position.x}px`, top: `${position.y}px`, transform: 'none' };
+  : { position: 'fixed', left: `${position.x}px`, top: `${position.y}px`, transform: 'none' }
+  ),[isMaximized, position]);
 
-  const saveButtonDisabled = isSaving || (activeTab && activeTab.isWritable === false) || !hasUnsavedChanges || !activeTabPath;
-  const createSnapshotButtonDisabled = isCreatingSnapshot || isLoadingSnapshots || (!globalDebugModeActive && !hasUnsavedChanges) || !activeTabPath;
+  const saveButtonDisabled = useMemo(() => isSaving || (activeTab && activeTab.isWritable === false) || !hasUnsavedChanges || !activeTabPath, [isSaving, activeTab, hasUnsavedChanges, activeTabPath]);
+  const createSnapshotButtonDisabled = useMemo(() => isCreatingSnapshot || isLoadingSnapshots || (!globalDebugModeActive && !hasUnsavedChanges) || !activeTabPath, [isCreatingSnapshot, isLoadingSnapshots, globalDebugModeActive, hasUnsavedChanges, activeTabPath]);
 
 
-  const handleCloseDialog = () => {
+  const handleCloseDialog = useCallback(() => {
+    if (globalDebugModeActive) console.log("[EditorDialog] handleCloseDialog called.");
     const anyUnsaved = openedTabs.some(tab => tab.unsavedChanges);
     if (anyUnsaved) {
       if (!window.confirm("You have unsaved changes in one or more tabs. Are you sure you want to close? Changes will be lost.")) { return; }
     }
     if (isMaximized) setIsMaximized(false); 
     onOpenChange(false); 
-  };
+  },[openedTabs, isMaximized, onOpenChange, globalDebugModeActive]);
   
-  const handleTreeFolderClick = (folderName: string) => {
+  const handleTreeFolderClick = useCallback((folderName: string) => {
     const newPath = path.join(fileTreePath, folderName);
     setFileTreePath(newPath);
-  };
+  }, [fileTreePath]);
 
-  const handleTreeFileClick = (fileNameInTree: string) => {
+  const handleTreeFileClick = useCallback((fileNameInTree: string) => {
     const filePath = path.join(fileTreePath, fileNameInTree);
     handleOpenOrActivateTab(filePath, fileNameInTree);
-  };
+  }, [fileTreePath, handleOpenOrActivateTab]);
 
   const handleTreeBackClick = useCallback(() => {
     if (fileTreePath === '/') {
@@ -688,16 +731,8 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   }, [fileTreePath, toast]);
 
   const canGoBackInTree = useMemo(() => {
-    if (filePathToEdit) {
-        const initialBaseDir = path.dirname(filePathToEdit);
-        const normalizedInitialBase = path.normalize(initialBaseDir === '.' ? '/' : initialBaseDir);
-        // Allow going back as long as the current fileTreePath is not the initial base directory itself
-        // or is a subdirectory of the initial base directory.
-        return path.normalize(fileTreePath) !== normalizedInitialBase && path.normalize(fileTreePath).startsWith(normalizedInitialBase + (normalizedInitialBase === '/' ? '' : '/'));
-    }
-    // If no specific file was initially targeted, allow going back until actual root '/'
     return fileTreePath !== '/';
-  }, [fileTreePath, filePathToEdit]);
+  }, [fileTreePath]);
 
 
   if (!isOpen) return null;
@@ -725,7 +760,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
           onMouseDown={handleDialogMouseDown}
         >
           <DialogTitle className="text-sm font-medium truncate max-w-[calc(100%-150px)]">
-            File Editor 
+            File Editor {activeTab ? `- ${activeTab.name}` : ''}
           </DialogTitle>
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={toggleMaximize} aria-label={isMaximized ? "Restore" : "Maximize"}>
@@ -850,14 +885,16 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
               {!activeTab && (
                  <div className="absolute inset-0 flex items-center justify-center bg-background text-muted-foreground">Select a file or open a new tab.</div>
               )}
-              {activeTab && isEditorLoading && <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-sm z-20"><Loader2 className="h-10 w-10 animate-spin text-primary" /></div>}
-              {activeTab && !isEditorLoading && editorError && <div className="p-4"><Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><ShadcnAlertTitle>Error Loading File</ShadcnAlertTitle><AlertDescription>{editorError}</AlertDescription></Alert></div>}
+              {isEditorLoading && <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-sm z-20"><Loader2 className="h-10 w-10 animate-spin text-primary" /></div>}
+              {editorError && <div className="p-4"><Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><ShadcnAlertTitle>Error Loading File</ShadcnAlertTitle><AlertDescription>{editorError}</AlertDescription></Alert></div>}
+              
               {activeTab && !isEditorLoading && !editorError && activeTab.isWritable === false && (
                 <div className="p-4 flex-shrink-0"><Alert variant="destructive"><FileWarning className="h-4 w-4" /><ShadcnAlertTitle>Read-only Mode</ShadcnAlertTitle><AlertDescription>This file is not writable. Changes cannot be saved.</AlertDescription></Alert></div>
               )}
               {activeTab && !isEditorLoading && !editorError && (
                 <CodeEditor
                   ref={editorRef}
+                  key={activeTabPath} // Force re-mount on tab change
                   value={editorContent}
                   onChange={handleEditorContentChange}
                   language={editorLanguage}
@@ -899,3 +936,5 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   );
 }
 
+
+    
