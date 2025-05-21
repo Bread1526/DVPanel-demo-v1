@@ -5,7 +5,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import CodeEditor from '@/components/ui/code-editor'; // Default import
+import CodeEditor from '@/components/ui/code-editor';
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -18,7 +18,7 @@ import {
   Lock,
   Unlock,
   Eye,
-  Trash2, // Added Trash2 icon
+  Trash2,
 } from "lucide-react";
 import path from 'path-browserify';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -49,7 +49,8 @@ function getLanguageFromFilename(filename: string): string {
     case 'json': return 'json';
     case 'yaml': case 'yml': return 'yaml';
     case 'md': return 'markdown';
-    // case 'sh': case 'bash': // Shell support removed due to npm install issues for @codemirror/lang-shell
+    // Shell support was removed due to npm install issues for @codemirror/lang-shell
+    // case 'sh': case 'bash':
     //   return 'shell';
     case 'py': return 'python';
     default: return 'plaintext';
@@ -85,10 +86,11 @@ export default function FileEditorPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [isImageFile, setIsImageFile] = useState<boolean>(false);
 
   const [globalDebugModeActive, setGlobalDebugModeActive] = useState<boolean>(false);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
-  const [editorLanguage, setEditorLanguage] = useState<string>('plaintext'); // State for editor's current language
+  const [editorLanguage, setEditorLanguage] = useState<string>('plaintext');
 
   const [isSnapshotViewerOpen, setIsSnapshotViewerOpen] = useState(false);
   const [selectedSnapshotForViewer, setSelectedSnapshotForViewer] = useState<Snapshot | null>(null);
@@ -108,7 +110,6 @@ export default function FileEditorPage() {
   }, [encodedFilePathFromParams]);
 
   const fileName = useMemo(() => path.basename(decodedFilePath || 'Untitled'), [decodedFilePath]);
-  const fileLanguage = useMemo(() => getLanguageFromFilename(fileName), [fileName]); // Derived language from filename
 
   const hasUnsavedChanges = useMemo(() => fileContent !== originalFileContent, [fileContent, originalFileContent]);
 
@@ -123,7 +124,8 @@ export default function FileEditorPage() {
 
     setIsLoading(true);
     setError(null);
-    setEditorLanguage(fileLanguage); // Set editor language based on filename
+    const currentFileLanguage = getLanguageFromFilename(fileName);
+    setEditorLanguage(currentFileLanguage);
 
     try {
       const settingsResult = await loadPanelSettings();
@@ -137,7 +139,28 @@ export default function FileEditorPage() {
       console.warn("Error loading panel settings for debug mode status:", settingsError);
       setGlobalDebugModeActive(false);
     }
-
+    
+    if (isImageExtension(fileName)) {
+      setIsImageFile(true);
+      // Still fetch metadata like writability for images
+      try {
+        const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}&view=true`);
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({ error: `Error fetching image metadata: ${response.statusText}`, details: `Path: ${decodedFilePath}` }));
+          throw new Error(errData.error || errData.details || `Failed to fetch image metadata. Status: ${response.status}`);
+        }
+        const data = await response.json();
+        setIsWritable(data.writable);
+      } catch (e: any) {
+        setError(e.message || "An unexpected error occurred while fetching image metadata.");
+        setIsWritable(false); // Assume not writable on error
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+    
+    setIsImageFile(false);
     try {
       const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}&view=true`);
       if (!response.ok) {
@@ -157,7 +180,7 @@ export default function FileEditorPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [decodedFilePath, fileLanguage, DAEMON_API_BASE_PATH]);
+  }, [decodedFilePath, fileName, DAEMON_API_BASE_PATH]);
 
 
   useEffect(() => {
@@ -188,6 +211,11 @@ export default function FileEditorPage() {
       setTimeout(() => toast({ title: "Cannot Save", description: "This file is not writable.", variant: "destructive" }),0);
       return;
     }
+
+    if (hasUnsavedChanges) {
+      handleCreateSnapshot(); // Create a snapshot before saving
+    }
+
     setIsSaving(true);
     setError(null);
     try {
@@ -204,10 +232,11 @@ export default function FileEditorPage() {
       setOriginalFileContent(fileContent);
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred while saving.");
+      setTimeout(() => toast({ title: "Error Saving File", description: e.message, variant: "destructive" }),0);
     } finally {
       setIsSaving(false);
     }
-  }, [decodedFilePath, fileContent, fileName, isWritable, toast, DAEMON_API_BASE_PATH]);
+  }, [decodedFilePath, fileContent, fileName, isWritable, toast, DAEMON_API_BASE_PATH, hasUnsavedChanges]); // Added handleCreateSnapshot to deps later
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -240,32 +269,26 @@ export default function FileEditorPage() {
       let updatedSnapshots = [...prevSnapshots];
       if (updatedSnapshots.length >= MAX_SNAPSHOTS) {
         let oldestUnlockedIndex = -1;
-        // Iterate from the end (oldest) to find the first unlocked one
         for (let i = updatedSnapshots.length - 1; i >= 0; i--) {
           if (!updatedSnapshots[i].isLocked) {
             oldestUnlockedIndex = i;
-            // No break, we want the *absolute* oldest unlocked if multiple exist
           }
         }
-         // If no unlocked snapshot was found by iterating from the end,
-         // it implies all might be locked or the array is full of locked items.
-         // To be safe, let's find the first unlocked from the beginning if the previous loop failed.
-        if (oldestUnlockedIndex === -1) { // No suitable candidate from end
+        if (oldestUnlockedIndex === -1) { // Try from the start if no unlocked found from end
             for (let i = 0; i < updatedSnapshots.length; i++) {
                 if (!updatedSnapshots[i].isLocked) {
-                    oldestUnlockedIndex = i; // Take the first one from start
+                    oldestUnlockedIndex = i;
                     break;
                 }
             }
         }
-
 
         if (oldestUnlockedIndex !== -1) {
           updatedSnapshots.splice(oldestUnlockedIndex, 1);
         } else {
           setTimeout(() => toast({
             title: "Snapshot Limit Reached",
-            description: `Cannot create new snapshot. All ${MAX_SNAPSHOTS} snapshot slots are locked. Unlock some or increase limit.`,
+            description: `Cannot create new snapshot. All ${MAX_SNAPSHOTS} snapshot slots are locked. Unlock some or delete manually.`,
             variant: "destructive",
             duration: 7000,
           }),0);
@@ -276,29 +299,36 @@ export default function FileEditorPage() {
       const newSnapshot: Snapshot = {
         id: uuidv4(),
         timestamp: new Date().toISOString(),
-        content: fileContent,
-        language: editorLanguage, // Use current editor language for the snapshot
+        content: fileContent, // Current content
+        language: editorLanguage,
         isLocked: false,
       };
       console.log("[FileEditorPage] CLIENT-SIDE SNAPSHOT CREATED:", { id: newSnapshot.id, timestamp: newSnapshot.timestamp, lang: newSnapshot.language, locked: newSnapshot.isLocked });
       setTimeout(() => toast({
         title: "Snapshot Created (Client-side)",
-        description: `Created snapshot at ${format(new Date(newSnapshot.timestamp), 'HH:mm:ss')}. This snapshot is temporary and will be lost on page refresh.`,
+        description: `Created snapshot for ${fileName} at ${format(new Date(newSnapshot.timestamp), 'HH:mm:ss')}.`,
       }),0);
-      return [newSnapshot, ...updatedSnapshots];
+      return [newSnapshot, ...updatedSnapshots]; // Prepend new snapshot
     });
-  }, [fileContent, editorLanguage, toast]);
+  }, [fileContent, editorLanguage, toast, fileName]);
+  
+  // Add handleCreateSnapshot to handleSaveChanges dependency array
+  useEffect(() => {
+    // This effect is just to ensure handleSaveChanges is re-memoized if handleCreateSnapshot changes
+    // The actual logic is within handleSaveChanges itself
+  }, [handleCreateSnapshot]);
+
 
   const handleLoadSnapshot = useCallback((snapshotId: string) => {
     const snapshotToLoad = snapshots.find(s => s.id === snapshotId);
     if (snapshotToLoad) {
       setFileContent(snapshotToLoad.content);
-      setOriginalFileContent(snapshotToLoad.content);
-      setEditorLanguage(snapshotToLoad.language); // Restore editor language from snapshot
+      setOriginalFileContent(snapshotToLoad.content); // Set original to snapshot content
+      setEditorLanguage(snapshotToLoad.language);
       console.log("[FileEditorPage] CLIENT-SIDE SNAPSHOT LOADED:", { id: snapshotToLoad.id, timestamp: snapshotToLoad.timestamp, lang: snapshotToLoad.language });
       setTimeout(() => toast({
         title: "Snapshot Loaded",
-        description: `Loaded snapshot from ${format(new Date(snapshotToLoad.timestamp), 'PP HH:mm:ss')}`,
+        description: `Loaded snapshot for ${fileName} from ${format(new Date(snapshotToLoad.timestamp), 'PP HH:mm:ss')}`,
       }),0);
     } else {
       setTimeout(() => toast({
@@ -307,7 +337,7 @@ export default function FileEditorPage() {
         variant: "destructive",
       }),0);
     }
-  }, [snapshots, toast]);
+  }, [snapshots, toast, fileName]);
 
   const handleToggleLockSnapshot = useCallback((snapshotId: string) => {
     setSnapshots(prevSnapshots => {
@@ -341,6 +371,7 @@ export default function FileEditorPage() {
     setIsSnapshotViewerOpen(true);
   };
 
+
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-[calc(100vh-var(--header-height,6rem)-2rem)]">
@@ -350,7 +381,7 @@ export default function FileEditorPage() {
     );
   }
 
-  if (error && (!fileContent && !isLoading)) {
+  if (error && !isLoading && !isImageFile) { // Only show this full page error if not an image file with error
     return (
       <div className="p-4">
         <PageHeader title="Error Loading File" description={error} />
@@ -383,7 +414,30 @@ export default function FileEditorPage() {
           </Button>
         }
       />
-
+      
+      {isImageFile ? (
+        <div className="flex-grow flex items-center justify-center p-4 bg-muted/30 rounded-lg">
+          {error && ( // Show error if image metadata fetch failed
+            <Alert variant="destructive" className="max-w-md">
+              <FileWarning className="h-4 w-4" />
+              <AlertTitle>Error Loading Image Metadata</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {!error && decodedFilePath && (
+            <Image
+              src={`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}`}
+              alt={`Image preview for ${fileName}`}
+              width={800} 
+              height={600}
+              style={{ objectFit: 'contain', maxWidth: '100%', maxHeight: 'calc(100vh - 200px)' }} // Adjusted maxHeight
+              className="rounded-md shadow-lg"
+              unoptimized // Good for local/daemon served images to prevent issues
+              data-ai-hint="image preview"
+            />
+          )}
+        </div>
+      ) : (
         <>
           <div className="flex-shrink-0 flex items-center justify-between p-2 border-b bg-muted/50">
             <div className="flex items-center gap-1">
@@ -486,14 +540,14 @@ export default function FileEditorPage() {
               </AlertDescription>
             </Alert>
           )}
-          <div className="flex-grow relative p-0 bg-background min-h-0"> {/* Ensure this div takes up remaining space */}
+          <div className="flex-grow relative p-0 bg-background min-h-0"> 
             <CodeEditor
               ref={editorRef}
               value={fileContent}
               onChange={setFileContent}
               language={editorLanguage}
               readOnly={isSaving || !isWritable}
-              className="h-full w-full border-0 rounded-none" // CodeEditor to fill this div
+              className="h-full w-full border-0 rounded-none" 
             />
           </div>
         </>
@@ -508,3 +562,4 @@ export default function FileEditorPage() {
     </div>
   );
 }
+
