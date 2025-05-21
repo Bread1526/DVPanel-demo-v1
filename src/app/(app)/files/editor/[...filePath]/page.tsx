@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { v4 as uuidv4 } from 'uuid';
 import { format, formatDistanceToNowStrict } from 'date-fns';
-import SnapshotViewerDialog from '../components/snapshot-viewer-dialog'; // Corrected import path
+import SnapshotViewerDialog from '../components/snapshot-viewer-dialog';
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
@@ -56,6 +56,13 @@ function getLanguageFromFilename(filename: string): string {
   }
 }
 
+const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico'];
+function isImageExtension(filename: string): boolean {
+  if (!filename) return false;
+  const extension = path.extname(filename).toLowerCase();
+  return imageExtensions.includes(extension);
+}
+
 export interface Snapshot {
   id: string;
   timestamp: string; // ISO string
@@ -65,7 +72,7 @@ export interface Snapshot {
 }
 
 const DAEMON_API_BASE_PATH = '/api/panel-daemon';
-const MAX_SERVER_SNAPSHOTS = 10; // As defined in the backend API
+const MAX_SERVER_SNAPSHOTS = 10;
 
 export default function FileEditorPage() {
   const params = useParams();
@@ -79,6 +86,7 @@ export default function FileEditorPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [isImageFile, setIsImageFile] = useState<boolean>(false);
   
   const [globalDebugModeActive, setGlobalDebugModeActive] = useState<boolean>(false);
   
@@ -103,7 +111,8 @@ export default function FileEditorPage() {
     try {
       return decodeURIComponent(joinedPath);
     } catch (e) {
-      console.error("Failed to decode file path:", e);
+      console.error("[FileEditorPage] Failed to decode file path from params:", encodedFilePathFromParams, e);
+      setError("Invalid file path in URL.");
       return '';
     }
   }, [encodedFilePathFromParams]);
@@ -127,9 +136,10 @@ export default function FileEditorPage() {
       console.log(`[FileEditorPage] fetchSnapshots SUCCESS for: ${decodedFilePath}, count: ${data.snapshots?.length || 0}`);
     } catch (e: any) {
       console.error(`[FileEditorPage] fetchSnapshots ERROR for: ${decodedFilePath}`, e);
-      setSnapshotError(e.message || "An unexpected error occurred while fetching snapshots.");
+      const errorMessage = e.message || "An unexpected error occurred while fetching snapshots.";
+      setSnapshotError(errorMessage);
       setServerSnapshots([]);
-      setTimeout(() => toast({ title: "Snapshot Error", description: e.message, variant: "destructive" }), 0);
+      setTimeout(() => toast({ title: "Snapshot Error", description: errorMessage, variant: "destructive" }), 0);
     } finally {
       setIsLoadingSnapshots(false);
     }
@@ -144,6 +154,8 @@ export default function FileEditorPage() {
     console.log(`[FileEditorPage] fetchFileContent called for: ${decodedFilePath}`);
     setIsLoading(true);
     setError(null);
+    setSnapshotError(null); // Clear snapshot errors too
+    setServerSnapshots([]); // Clear previous snapshots
     
     try {
       const settingsResult = await loadPanelSettings();
@@ -159,6 +171,8 @@ export default function FileEditorPage() {
     
     const currentFileLanguage = getLanguageFromFilename(fileName);
     setEditorLanguage(currentFileLanguage);
+    const isImage = isImageExtension(fileName);
+    setIsImageFile(isImage);
     
     try {
       const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}&view=true`);
@@ -167,22 +181,30 @@ export default function FileEditorPage() {
         throw new Error(errData.error || errData.details || `Failed to fetch file content. Status: ${response.status}`);
       }
       const data = await response.json();
-      if (typeof data.content !== 'string' || typeof data.writable !== 'boolean') {
-        throw new Error("Invalid response format from server when fetching file content.");
+
+      if (typeof data.writable !== 'boolean') {
+        throw new Error("Invalid response format from server: missing 'writable' status.");
       }
-      setFileContent(data.content);
-      setOriginalFileContent(data.content);
       setIsWritable(data.writable);
-      console.log(`[FileEditorPage] fetchFileContent SUCCESS for: ${decodedFilePath}, writable: ${data.writable}`);
+
+      if (!isImage) { // Only set content if it's not an image, images are handled by <Image/> src
+          if (typeof data.content !== 'string') {
+            throw new Error("Invalid response format from server: missing 'content' for text file.");
+          }
+          setFileContent(data.content);
+          setOriginalFileContent(data.content);
+      }
+      console.log(`[FileEditorPage] fetchFileContent SUCCESS for: ${decodedFilePath}, writable: ${data.writable}, isImage: ${isImage}`);
       await fetchSnapshots(); 
     } catch (e: any) {
       console.error(`[FileEditorPage] fetchFileContent ERROR for: ${decodedFilePath}`, e);
-      setError(e.message || "An unexpected error occurred while fetching file content.");
-      setIsWritable(false); 
+      const errorMessage = e.message || "An unexpected error occurred while fetching file content.";
+      setError(errorMessage); // This will trigger the useEffect for error toasts
+      setIsWritable(false); // Default to not writable on error
     } finally {
       setIsLoading(false);
     }
-  }, [decodedFilePath, fileName, fetchSnapshots]);
+  }, [decodedFilePath, fileName, fetchSnapshots, toast]); // Added toast to dependency array
 
   useEffect(() => {
     if (decodedFilePath) {
@@ -191,11 +213,13 @@ export default function FileEditorPage() {
       setError("Invalid file path parameter detected after decoding attempts.");
       setIsLoading(false);
     } else {
-      setError("No file path provided in URL.");
-      setIsLoading(false);
+      // This case might be hit on initial render before params are fully resolved
+      // setError("No file path provided in URL."); 
+      // setIsLoading(false); // Let it try again if params become available
     }
-  }, [decodedFilePath, encodedFilePathFromParams, fetchFileContent]);
-  
+  }, [decodedFilePath, encodedFilePathFromParams]); // Removed fetchFileContent from deps to avoid loop
+
+  // Effect to show toast when 'error' state changes
   useEffect(() => {
     if (error) {
       setTimeout(() => toast({ title: "File Editor Error", description: error, variant: "destructive" }), 0);
@@ -205,6 +229,10 @@ export default function FileEditorPage() {
   const handleCreateSnapshot = useCallback(async () => {
     if (!decodedFilePath) {
       setTimeout(() => toast({ title: "Error", description: "No active file to create snapshot for.", variant: "destructive" }), 0);
+      return;
+    }
+    if (isImageFile) {
+      setTimeout(() => toast({ title: "Info", description: "Snapshots are not supported for image files.", variant: "default" }), 0);
       return;
     }
     console.log(`[FileEditorPage] handleCreateSnapshot called for: ${decodedFilePath}, Lang: ${editorLanguage}`);
@@ -218,19 +246,20 @@ export default function FileEditorPage() {
       });
       const result = await response.json();
       if (!response.ok) {
-        throw new Error(result.error || result.details || 'Failed to create snapshot.');
+        throw new Error(result.error || result.details || 'Failed to create snapshot from API.');
       }
       setTimeout(() => toast({ title: 'Snapshot Created', description: result.message || `Snapshot for ${fileName} created.` }), 0);
       setServerSnapshots(Array.isArray(result.snapshots) ? result.snapshots : []); 
       console.log(`[FileEditorPage] handleCreateSnapshot SUCCESS. New snapshot count: ${result.snapshots?.length || 0}`);
     } catch (e: any) {
       console.error(`[FileEditorPage] handleCreateSnapshot ERROR for: ${decodedFilePath}`, e);
-      setTimeout(() => toast({ title: "Error Creating Snapshot", description: e.message, variant: "destructive" }), 0);
-      setSnapshotError(e.message);
+      const apiError = e.message || "An unexpected error occurred while creating the snapshot.";
+      setTimeout(() => toast({ title: "Error Creating Snapshot", description: apiError, variant: "destructive" }), 0);
+      setSnapshotError(apiError);
     } finally {
       setIsLoadingSnapshots(false);
     }
-  }, [decodedFilePath, fileContent, editorLanguage, fileName, toast]);
+  }, [decodedFilePath, fileContent, editorLanguage, fileName, toast, isImageFile]);
 
   const handleSaveChanges = useCallback(async () => {
     if (!decodedFilePath) {
@@ -241,14 +270,20 @@ export default function FileEditorPage() {
       setTimeout(() => toast({ title: "Cannot Save", description: "This file is not writable.", variant: "destructive" }), 0);
       return;
     }
+    if (isImageFile) {
+      setTimeout(() => toast({ title: "Cannot Save", description: "Direct saving of images from this editor is not supported.", variant: "destructive" }), 0);
+      return;
+    }
     console.log(`[FileEditorPage] handleSaveChanges called for: ${decodedFilePath}`);
 
     if (hasUnsavedChanges) {
+      // Call handleCreateSnapshot and await it if needed, or let it run in parallel
+      // For now, let's make it create a snapshot before saving if there are changes
       await handleCreateSnapshot(); 
     }
 
     setIsSaving(true);
-    setError(null); // Clear previous page-level errors
+    // setError(null); // Clear previous page-level errors
     try {
       const response = await fetch(`${DAEMON_API_BASE_PATH}/file`, {
         method: 'POST',
@@ -264,22 +299,21 @@ export default function FileEditorPage() {
       console.log(`[FileEditorPage] handleSaveChanges SUCCESS for: ${decodedFilePath}`);
     } catch (e: any) {
       console.error(`[FileEditorPage] handleSaveChanges ERROR for: ${decodedFilePath}`, e);
-      setError(e.message || "An unexpected error occurred while saving."); // Set page-level error
-      // Toast is handled by the useEffect watching 'error' state
+      setError(e.message || "An unexpected error occurred while saving."); // Set page-level error, will trigger toast via useEffect
     } finally {
       setIsSaving(false);
     }
-  }, [decodedFilePath, fileContent, fileName, isWritable, toast, hasUnsavedChanges, handleCreateSnapshot]);
+  }, [decodedFilePath, fileContent, fileName, isWritable, toast, hasUnsavedChanges, handleCreateSnapshot, isImageFile]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key === 's') {
         event.preventDefault();
-        const canSave = !isSaving && isWritable && (hasUnsavedChanges || globalDebugModeActive);
+        const canSave = !isSaving && isWritable && (hasUnsavedChanges || globalDebugModeActive) && !isImageFile;
         if (canSave) {
           handleSaveChanges();
         } else {
-            if (globalDebugModeActive) console.log("[FileEditorPage] Ctrl+S: Save skipped.", {isSaving, isWritable, hasUnsavedChanges, globalDebugModeActive});
+            if (globalDebugModeActive) console.log("[FileEditorPage] Ctrl+S: Save skipped.", {isSaving, isWritable, hasUnsavedChanges, globalDebugModeActive, isImageFile});
         }
       }
     };
@@ -287,18 +321,19 @@ export default function FileEditorPage() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isSaving, isWritable, hasUnsavedChanges, handleSaveChanges, globalDebugModeActive]);
+  }, [isSaving, isWritable, hasUnsavedChanges, handleSaveChanges, globalDebugModeActive, isImageFile]);
 
   const handleFind = useCallback(() => {
+    if (isImageFile) return;
     if (editorRef.current && editorRef.current.view) {
-       editorRef.current.view.dispatch({ effects: openSearchPanel.of() });
+       setTimeout(() => editorRef.current!.view!.dispatch({ effects: openSearchPanel.of() }), 0);
     } else {
        setTimeout(() => toast({
         title: "Find Action",
         description: "Editor not ready or no active editor instance. Use Ctrl+F (Cmd+F).",
       }),0);
     }
-  }, [toast]);
+  }, [toast, isImageFile]);
   
   const handleLoadSnapshot = useCallback((snapshotToLoad: Snapshot) => {
     if (snapshotToLoad) {
@@ -319,8 +354,10 @@ export default function FileEditorPage() {
   }, [toast, fileName]);
 
   const handleToggleLockSnapshot = useCallback((snapshotId: string) => {
-    // Placeholder: Server-side implementation needed for actual locking
-    setServerSnapshots(prev => prev.map(s => s.id === snapshotId ? {...s, isLocked: !s.isLocked} : s));
+    // Placeholder for server-side locking. For now, just updates client state.
+    setServerSnapshots(prev => 
+        prev.map(s => s.id === snapshotId ? {...s, isLocked: !s.isLocked} : s)
+    );
     const snapshot = serverSnapshots.find(s => s.id === snapshotId);
     setTimeout(() => toast({ 
         title: snapshot?.isLocked ? "Snapshot Unlocked (Client)" : "Snapshot Locked (Client)", 
@@ -329,7 +366,7 @@ export default function FileEditorPage() {
   }, [toast, serverSnapshots]);
 
   const handleDeleteSnapshot = useCallback((snapshotIdToDelete: string) => {
-     // Placeholder: Server-side implementation needed for actual deletion
+     // Placeholder for server-side deletion. For now, just updates client state.
     setServerSnapshots(prev => prev.filter(s => s.id !== snapshotIdToDelete));
     setTimeout(() => toast({ title: "Snapshot Deleted (Client)", description: "Server-side deletion will be implemented later."}), 0);
   }, [toast]);
@@ -348,7 +385,7 @@ export default function FileEditorPage() {
     );
   }
 
-  if (error && !isLoading && !fileContent) { // Show general error if content couldn't be loaded at all
+  if (error && !fileContent && !isImageFile) { // Show general error if content couldn't be loaded at all for non-images
     return (
       <div className="p-4">
         <PageHeader title="Error Loading File" description={error} />
@@ -370,8 +407,8 @@ export default function FileEditorPage() {
     );
   }
 
-  const saveButtonDisabled = isSaving || !isWritable || (!hasUnsavedChanges && !globalDebugModeActive);
-  const createSnapshotButtonDisabled = isLoadingSnapshots || (!globalDebugModeActive && !hasUnsavedChanges);
+  const saveButtonDisabled = isSaving || !isWritable || (!hasUnsavedChanges && !globalDebugModeActive) || isImageFile;
+  const createSnapshotButtonDisabled = isLoadingSnapshots || isImageFile || (!globalDebugModeActive && !hasUnsavedChanges);
 
 
   return (
@@ -399,28 +436,31 @@ export default function FileEditorPage() {
               {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
               Save
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleFind}
-              className="shadow-sm hover:scale-105"
-            >
-              <SearchIcon className="mr-2 h-4 w-4" /> Find
-            </Button>
+            {!isImageFile && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleFind}
+                className="shadow-sm hover:scale-105"
+              >
+                <SearchIcon className="mr-2 h-4 w-4" /> Find
+              </Button>
+            )}
+            {!isImageFile && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
                   size="sm"
                   className="shadow-sm hover:scale-105"
-                  disabled={isLoadingSnapshots}
+                  disabled={isLoadingSnapshots || isImageFile}
                 >
                   {isLoadingSnapshots ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Camera className="mr-2 h-4 w-4" />} Snapshots
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-96 max-w-[90vw]">
                 <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
-                  Server-side Snapshots (MAX_SERVER_SNAPSHOTS: {MAX_SERVER_SNAPSHOTS})
+                  Server-side Snapshots (Max: {MAX_SERVER_SNAPSHOTS})
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -445,10 +485,10 @@ export default function FileEditorPage() {
                             <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSnapshotInPopup(snapshot)} title="View Snapshot">
                               <Eye className="h-3 w-3" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleLockSnapshot(snapshot.id)} title={snapshot.isLocked ? "Unlock Snapshot (Server)" : "Lock Snapshot (Server)"}>
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleLockSnapshot(snapshot.id)} title={snapshot.isLocked ? "Unlock Snapshot (Client)" : "Lock Snapshot (Client)"}>
                               {snapshot.isLocked ? <Lock className="h-3 w-3 text-destructive" /> : <Unlock className="h-3 w-3 text-muted-foreground" />}
                             </Button>
-                             <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground hover:bg-destructive/10" onClick={() => handleDeleteSnapshot(snapshot.id)} title="Delete Snapshot (Server)">
+                             <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground hover:bg-destructive/10" onClick={() => handleDeleteSnapshot(snapshot.id)} title="Delete Snapshot (Client)">
                               <Trash2 className="h-3 w-3" />
                             </Button>
                           </div>
@@ -463,20 +503,25 @@ export default function FileEditorPage() {
 
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel className="text-xs text-muted-foreground px-2 whitespace-normal">
-                  (Server-side snapshots will expire after {MAX_SERVER_SNAPSHOTS} new ones are above that snapshot and it has been 3 weeks unless marked as locked)
+                  (Server-side snapshots expire based on count and age, unless locked)
                 </DropdownMenuLabel>
               </DropdownMenuContent>
             </DropdownMenu>
+            )}
           </div>
           <div className="text-xs text-muted-foreground flex items-center gap-2 mr-2">
             <span>{fileName}</span>
-            <span className="mx-1">|</span>
-            <span>Lang: {editorLanguage}</span>
-            <span className="mx-1">|</span>
-            <span>Chars: {fileContent.length}</span>
-            <span className="mx-1">|</span>
-            <span>Lines: {fileContent.split('\n').length}</span>
-            {hasUnsavedChanges && <span className="ml-1 font-semibold text-amber-500">* Unsaved</span>}
+            {!isImageFile && (
+              <>
+                <span className="mx-1">|</span>
+                <span>Lang: {editorLanguage}</span>
+                <span className="mx-1">|</span>
+                <span>Chars: {fileContent.length}</span>
+                <span className="mx-1">|</span>
+                <span>Lines: {fileContent.split('\n').length}</span>
+                {hasUnsavedChanges && <span className="ml-1 font-semibold text-amber-500">* Unsaved</span>}
+              </>
+            )}
             {!isWritable && <span className="ml-2 font-semibold text-destructive">(Read-only)</span>}
           </div>
         </div>
@@ -490,22 +535,44 @@ export default function FileEditorPage() {
             </AlertDescription>
           </Alert>
         )}
-        {error && fileContent && ( // Show specific save error if file content is loaded but save failed
+        {error && (fileContent || isImageFile) && ( // Show specific save/load error if file content was expected
             <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
               <FileWarning className="h-4 w-4" />
-              <AlertTitle>Save Error</AlertTitle>
+              <AlertTitle>File Operation Error</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
         )}
         <div className="flex-grow relative p-0 bg-background min-h-0"> 
-          <CodeEditor
-            ref={editorRef}
-            value={fileContent}
-            onChange={setFileContent}
-            language={editorLanguage}
-            readOnly={isSaving || !isWritable}
-            className="h-full w-full border-0 rounded-none" 
-          />
+          {isImageFile ? (
+            <div className="w-full h-full flex items-center justify-center p-4">
+              {isLoading ? (
+                <Loader2 className="h-12 w-12 animate-spin text-primary" />
+              ) : error ? (
+                <div className="text-destructive text-center">
+                  <AlertTriangle className="h-10 w-10 mx-auto mb-2" />
+                  <p>Error loading image: {error}</p>
+                </div>
+              ) : (
+                <Image
+                  src={`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}`}
+                  alt={`Preview of ${fileName}`}
+                  fill // Changed from width/height to fill
+                  style={{ objectFit: 'contain' }} // Ensures image fits while maintaining aspect ratio
+                  unoptimized // Use if your API serves raw images without Next.js optimization headers
+                  data-ai-hint="file preview"
+                />
+              )}
+            </div>
+          ) : (
+            <CodeEditor
+              ref={editorRef}
+              value={fileContent}
+              onChange={setFileContent}
+              language={editorLanguage}
+              readOnly={isSaving || !isWritable}
+              className="h-full w-full border-0 rounded-none" 
+            />
+          )}
         </div>
       </>
       {isSnapshotViewerOpen && selectedSnapshotForViewer && (
@@ -518,3 +585,4 @@ export default function FileEditorPage() {
     </div>
   );
 }
+
