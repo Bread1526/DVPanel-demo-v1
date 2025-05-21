@@ -60,3 +60,4 @@ export default function SnapshotViewerDialog({
     </Dialog>
   );
 }
+
