@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { v4 as uuidv4 } from 'uuid';
 import { format, formatDistanceToNowStrict } from 'date-fns';
-import SnapshotViewerDialog from './components/snapshot-viewer-dialog';
+import SnapshotViewerDialog from '../components/snapshot-viewer-dialog'; // Corrected import
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
@@ -84,9 +84,6 @@ export default function FileEditorPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [isImageFile, setIsImageFile] = useState<boolean>(false);
-  const [imageSrc, setImageSrc] = useState<string | null>(null);
-  const [imageError, setImageError] = useState<string | null>(null);
   
   const [globalDebugModeActive, setGlobalDebugModeActive] = useState<boolean>(false);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
@@ -124,9 +121,7 @@ export default function FileEditorPage() {
 
     setIsLoading(true);
     setError(null);
-    setImageError(null);
-    const currentIsImage = isImageExtension(fileName);
-    setIsImageFile(currentIsImage);
+    
     setEditorLanguage(getLanguageFromFilename(fileName));
 
     try {
@@ -140,28 +135,6 @@ export default function FileEditorPage() {
     } catch (settingsError) {
       console.warn("Error loading panel settings for debug mode status:", settingsError);
       setGlobalDebugModeActive(false);
-    }
-
-    if (currentIsImage) {
-      setImageSrc(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}`);
-       try {
-            const metaResponse = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}&view=true`);
-            if (!metaResponse.ok) {
-                const errData = await metaResponse.json().catch(() => ({ error: `Failed to fetch metadata for image. Status: ${metaResponse.status}` }));
-                console.warn(`Failed to fetch metadata for image ${fileName}: ${errData.error}`);
-                setImageError(errData.error || `Failed to fetch metadata for image ${fileName}.`);
-                setIsWritable(false); 
-            } else {
-                const metaData = await metaResponse.json();
-                setIsWritable(metaData.writable);
-            }
-        } catch (e: any) {
-            console.warn(`Error fetching metadata for image ${fileName}:`, e);
-            setImageError(e.message || "An unexpected error occurred while fetching image metadata.");
-            setIsWritable(false);
-        }
-      setIsLoading(false);
-      return;
     }
 
     try {
@@ -179,7 +152,7 @@ export default function FileEditorPage() {
       setIsWritable(data.writable);
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred while fetching file content.");
-      setIsWritable(false);
+      setIsWritable(false); // Assume not writable if content fetch fails
     } finally {
       setIsLoading(false);
     }
@@ -188,20 +161,21 @@ export default function FileEditorPage() {
   useEffect(() => {
     if (decodedFilePath) {
       fetchFileContent();
-    } else if (encodedFilePathFromParams) {
+    } else if (encodedFilePathFromParams) { // Check if params were ever provided
       setIsLoading(false);
       setError("Invalid file path parameter.");
-    } else {
+    } else { // No params at all
       setIsLoading(false);
       setError("No file path provided in URL.");
     }
   }, [decodedFilePath, encodedFilePathFromParams, fetchFileContent]);
-
+  
   useEffect(() => {
     if (error) {
-      toast({ title: "File Editor Error", description: error, variant: "destructive" });
+      setTimeout(() => toast({ title: "File Editor Error", description: error, variant: "destructive" }), 0);
     }
   }, [error, toast]);
+
 
   const handleSaveChanges = useCallback(async () => {
     if (!decodedFilePath) {
@@ -225,9 +199,10 @@ export default function FileEditorPage() {
         throw new Error(result.error || result.details || 'Failed to save file.');
       }
       setTimeout(() => toast({ title: 'Success', description: result.message || `File ${fileName} saved.` }), 0);
-      setOriginalFileContent(fileContent);
+      setOriginalFileContent(fileContent); // Update original content after successful save
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred while saving.");
+      // The error toast will be handled by the useEffect watching the `error` state.
     } finally {
       setIsSaving(false);
     }
@@ -250,7 +225,7 @@ export default function FileEditorPage() {
 
   const handleFind = useCallback(() => {
     if (editorRef.current && editorRef.current.view) {
-      openSearchPanel(editorRef.current.view);
+       editorRef.current.view.dispatch({ effects: openSearchPanel.of() });
     } else {
       setTimeout(() => toast({
         title: "Find Action",
@@ -263,18 +238,27 @@ export default function FileEditorPage() {
     setSnapshots(prevSnapshots => {
       let updatedSnapshots = [...prevSnapshots];
       if (updatedSnapshots.length >= MAX_SNAPSHOTS) {
-        const oldestUnlockedIndex = updatedSnapshots.slice().reverse().findIndex(s => !s.isLocked);
+        // Try to find the oldest unlocked snapshot to remove
+        // Iterate in reverse to find the oldest from the start of the array
+        let oldestUnlockedIndex = -1;
+        for (let i = updatedSnapshots.length - 1; i >= 0; i--) {
+          if (!updatedSnapshots[i].isLocked) {
+            oldestUnlockedIndex = i;
+            break; 
+          }
+        }
+
         if (oldestUnlockedIndex !== -1) {
-          const actualIndexToRemove = updatedSnapshots.length - 1 - oldestUnlockedIndex;
-          updatedSnapshots.splice(actualIndexToRemove, 1);
+          updatedSnapshots.splice(oldestUnlockedIndex, 1);
         } else {
+          // All snapshots are locked, cannot create new one
           setTimeout(() => toast({
             title: "Snapshot Limit Reached",
-            description: `Cannot create new snapshot. All ${MAX_SNAPSHOTS} snapshot slots are locked.`,
+            description: `Cannot create new snapshot. All ${MAX_SNAPSHOTS} snapshot slots are locked. Unlock some or increase limit.`,
             variant: "destructive",
             duration: 7000,
           }),0);
-          return prevSnapshots;
+          return prevSnapshots; // Return original array, no changes
         }
       }
 
@@ -288,9 +272,10 @@ export default function FileEditorPage() {
       console.log("[FileEditorPage] CLIENT-SIDE SNAPSHOT CREATED:", { id: newSnapshot.id, timestamp: newSnapshot.timestamp, lang: newSnapshot.language, locked: newSnapshot.isLocked });
       setTimeout(() => toast({
         title: "Snapshot Created (Client-side)",
-        description: `Created snapshot at ${format(new Date(newSnapshot.timestamp), 'HH:mm:ss')}. This snapshot is temporary.`,
+        description: `Created snapshot at ${format(new Date(newSnapshot.timestamp), 'HH:mm:ss')}. This snapshot is temporary and will be lost on page refresh.`,
       }),0);
-      return [newSnapshot, ...updatedSnapshots];
+      // Add new snapshot to the beginning of the array (most recent first)
+      return [newSnapshot, ...updatedSnapshots]; 
     });
   }, [fileContent, editorLanguage, toast]);
 
@@ -344,7 +329,7 @@ export default function FileEditorPage() {
     );
   }
   
-  if (error && !isImageFile && !isLoading) {
+  if (error && !isLoading) { // Check !isLoading here as well
     return (
       <div className="p-4">
         <PageHeader title="Error Loading File" description={error} />
@@ -355,8 +340,8 @@ export default function FileEditorPage() {
     );
   }
 
-  if (!decodedFilePath && !isLoading) {
-    return (
+  if (!decodedFilePath && !isLoading) { // Ensure no loading before showing this
+     return (
       <div className="p-4">
         <PageHeader title="Invalid File Path" description="The file path specified in the URL is invalid or missing." />
         <Button onClick={() => router.push('/files')} variant="outline">
@@ -365,6 +350,7 @@ export default function FileEditorPage() {
       </div>
     );
   }
+
 
   return (
     <div className="flex flex-col h-full max-h-[calc(100vh-var(--header-height,6rem)-2rem)]">
@@ -378,28 +364,6 @@ export default function FileEditorPage() {
         }
       />
       
-      {isImageFile ? (
-        <div className="flex-grow flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
-          {imageError ? (
-            <Alert variant="destructive">
-              <FileWarning className="h-4 w-4" />
-              <AlertTitle>Error Loading Image</AlertTitle>
-              <AlertDescription>{imageError}</AlertDescription>
-            </Alert>
-          ) : imageSrc ? (
-            <img 
-              src={imageSrc} 
-              alt={fileName} 
-              className="max-w-full max-h-full object-contain rounded-md shadow-lg" 
-              onError={() => {
-                setImageError('Failed to load image resource.');
-              }}
-            />
-          ) : (
-             <Loader2 className="h-8 w-8 animate-spin text-primary" /> 
-          )}
-        </div>
-      ) : (
         <>
           <div className="flex-shrink-0 flex items-center justify-between p-2 border-b bg-muted/50">
             <div className="flex items-center gap-1">
