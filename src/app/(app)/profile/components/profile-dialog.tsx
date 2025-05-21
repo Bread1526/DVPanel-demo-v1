@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardDescription } from "@/components/ui/card"; // Added CardDescription
 import { Loader2, Save, AlertCircle, X, UserCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { AuthenticatedUser } from '@/lib/session';
@@ -40,7 +40,8 @@ const initialSettingsState: UpdateUserSettingsState = { message: "", status: "id
 // Helper to safely derive initial settings
 const getInitialUserSettings = (currentUser: AuthenticatedUser | null): UserSettingsData => {
   if (currentUser?.userSettings) {
-    return {
+    // Ensure all defaults are present, especially for nested objects like popup
+    const mergedSettings = {
       ...defaultUserSettings,
       ...currentUser.userSettings,
       popup: {
@@ -48,9 +49,14 @@ const getInitialUserSettings = (currentUser: AuthenticatedUser | null): UserSett
         ...(currentUser.userSettings.popup || {}),
       },
     };
+    // Validate against schema to ensure conformity, though it might be too strict here
+    // and could revert valid partial user settings if not careful.
+    // For now, direct merge is okay as userSettings should come validated from API.
+    return mergedSettings;
   }
-  return defaultUserSettings;
+  return { ...defaultUserSettings }; // Return a copy of defaults
 };
+
 
 export default function ProfileDialog({ currentUser, onSettingsUpdate }: ProfileDialogProps) {
   const [open, setOpen] = useState(false);
@@ -79,62 +85,70 @@ export default function ProfileDialog({ currentUser, onSettingsUpdate }: Profile
       // Initialize user-specific settings from current user
       setUserSettings(getInitialUserSettings(currentUser));
       
-      // Reset form states
+      // Reset form states manually if they are not 'idle' to clear previous messages/errors
       if (passwordFormState.status !== 'idle') {
-        passwordFormAction(new FormData()); // Effectively resets to initialPasswordState if action allows resetting
+        // Effectively reset to initialPasswordState if useActionState doesn't auto-clear on new action
+        // This is tricky as useActionState's reset behavior isn't direct.
+        // For now, we rely on user not seeing old state if inputs are cleared.
       }
-      if (settingsFormState.status !== 'idle' && settingsFormState.data !== undefined) {
-         // No direct reset for settingsFormAction like password, manual reset of visual cues if needed
+      if (settingsFormState.status !== 'idle') {
+        // Similar for settingsFormState
       }
 
     }
-  }, [open, currentUser, passwordFormState.status, settingsFormState.status, settingsFormState.data, passwordFormAction]);
+  }, [open, currentUser, passwordFormState.status, settingsFormState.status ]);
 
 
   useEffect(() => {
     // This effect syncs userSettings state if currentUser prop changes while dialog is open
     // or when it initially opens.
-    if (currentUser) {
+    if (currentUser && open) { // Also check if dialog is open to avoid updates when not visible
       setUserSettings(getInitialUserSettings(currentUser));
     }
-  }, [currentUser]);
+  }, [currentUser, open]);
 
 
   useEffect(() => {
+    // Use optional chaining for safety, though settings are derived from defaults.
+    const toastDuration = (userSettings?.popup?.notificationDuration ?? defaultUserSettings.popup.notificationDuration) * 1000;
+    
     if (passwordFormState.status === "success") {
-      toast({ title: "Success", description: passwordFormState.message });
+      toast({ title: "Success", description: passwordFormState.message, duration: toastDuration });
       setCurrentPassword("");
       setNewPassword("");
       setConfirmNewPassword("");
     } else if (passwordFormState.status === "error" && passwordFormState.message && !passwordFormState.errors?._form) {
-      toast({ title: "Password Change Error", description: passwordFormState.message, variant: "destructive" });
+      // Display field-specific errors directly, so only toast if it's a non-field _form error
+      toast({ title: "Password Change Error", description: passwordFormState.message, variant: "destructive", duration: toastDuration });
     }
-  }, [passwordFormState, toast]);
+  }, [passwordFormState, toast, userSettings?.popup?.notificationDuration]);
 
   useEffect(() => {
     const toastDuration = (userSettings?.popup?.notificationDuration ?? defaultUserSettings.popup.notificationDuration) * 1000;
     
     if (settingsFormState.status === "success" && settingsFormState.message) {
       if (settingsFormState.data) {
-        setUserSettings(prev => ({ // Merge with previous to keep other non-form settings if any
-            ...prev, 
-            ...settingsFormState.data,
-            popup: {
-                ...prev.popup,
+        setUserSettings(prev => ({ 
+            ...defaultUserSettings, // Ensure all defaults are present
+            ...prev, // Spread previous state to keep non-form settings if any
+            ...settingsFormState.data, // Apply new data from form
+            popup: { // Deep merge popup settings
+                ...defaultUserSettings.popup,
+                ...(prev.popup || {}),
                 ...(settingsFormState.data?.popup || {})
             } 
         })); 
       }
       toast({ title: "Preferences Updated", description: settingsFormState.message, duration: toastDuration });
-      onSettingsUpdate?.(); // Notify AppShell to refetch user data which includes these settings
+      onSettingsUpdate?.(); 
     } else if (settingsFormState.status === "error" && settingsFormState.message) {
       let description = settingsFormState.message;
-       if (settingsFormState.errors?.general?.length) {
-          description = settingsFormState.errors.general.join('; ');
-      } else if (settingsFormState.errors?.popup) {
-        description = "Error in popup settings. " + settingsFormState.message;
-      } else if (settingsFormState.errors?.debugMode) {
+       if (settingsFormState.errors?._form?.length) { // Check specifically for _form errors
+          description = settingsFormState.errors._form.join('; ');
+      } else if (settingsFormState.errors?.debugMode) { // Example of checking specific field errors
          description = (settingsFormState.errors.debugMode as string[]).join('; ');
+      } else if (settingsFormState.errors?.popup) {
+        description = "Error in popup settings fields. " + settingsFormState.message;
       }
       toast({ title: "Error Saving Preferences", description: description, variant: "destructive", duration: toastDuration });
     }
@@ -155,14 +169,22 @@ export default function ProfileDialog({ currentUser, onSettingsUpdate }: Profile
   
   const handleSettingsSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    // Validate current userSettings state before submitting
     const validatedSettings = userSettingsSchema.safeParse(userSettings);
     if (!validatedSettings.success) {
-        console.error("[ProfileDialog] Client-side validation failed for user settings:", validatedSettings.error.flatten().fieldErrors);
-        toast({ title: "Validation Error", description: "Please check your settings inputs.", variant: "destructive"});
+        const fieldErrors = validatedSettings.error.flatten().fieldErrors;
+        console.error("[ProfileDialog] Client-side validation failed for user settings:", fieldErrors);
+        // Attempt to show a more specific error
+        let errorMessages = "Please check your settings inputs.";
+        const firstErrorKey = Object.keys(fieldErrors)[0] as keyof typeof fieldErrors;
+        if (firstErrorKey && fieldErrors[firstErrorKey]?.length) {
+            errorMessages = `${firstErrorKey}: ${fieldErrors[firstErrorKey]?.[0]}`;
+        }
+        toast({ title: "Validation Error", description: errorMessages, variant: "destructive"});
         return;
     }
     startSettingsTransition(() => {
-      settingsFormAction(validatedSettings.data);
+      settingsFormAction(validatedSettings.data); // Submit the validated data
     });
   };
 
@@ -173,7 +195,7 @@ export default function ProfileDialog({ currentUser, onSettingsUpdate }: Profile
     setUserSettings(prev => ({
       ...prev,
       popup: {
-        ...(prev.popup ?? defaultUserSettings.popup), // Ensure popup object exists
+        ...(prev.popup ?? defaultUserSettings.popup), 
         [key]: value,
       }
     }));
@@ -181,8 +203,6 @@ export default function ProfileDialog({ currentUser, onSettingsUpdate }: Profile
   
   const isAnyActionPending = isPasswordActionPending || isSettingsActionPending || isPasswordTransitionPending || isSettingsTransitionPending;
   
-  // Create a safe version of userSettings for rendering, falling back to defaults if properties are missing
-  // This is crucial to prevent runtime errors if userSettings or userSettings.popup is momentarily null/undefined
   const safeUserSettings: UserSettingsData = {
     ...defaultUserSettings,
     ...userSettings,
@@ -191,7 +211,6 @@ export default function ProfileDialog({ currentUser, onSettingsUpdate }: Profile
       ...(userSettings?.popup || {}),
     },
   };
-
 
   if (!currentUser) return null;
 
@@ -208,7 +227,7 @@ export default function ProfileDialog({ currentUser, onSettingsUpdate }: Profile
           <DialogDescription>Manage your account password and personal preferences.</DialogDescription>
         </DialogHeader>
         
-        <ScrollArea className="max-h-[70vh] pr-3">
+        <ScrollArea className="max-h-[calc(80vh-180px)] pr-3"> {/* Adjusted max-h */}
           <div className="py-4 space-y-6">
             <Card>
               <CardHeader>
@@ -265,7 +284,7 @@ export default function ProfileDialog({ currentUser, onSettingsUpdate }: Profile
                   <CardDescription>These settings are specific to your account.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6 pt-4">
-                  {settingsFormState.errors?._form && (
+                  {settingsFormState.errors?._form && ( // Display general form errors for settings
                     <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><ShadcnAlertTitle>Error</ShadcnAlertTitle><AlertDescription>{settingsFormState.errors._form.join(', ')}</AlertDescription></Alert>
                   )}
 
@@ -337,7 +356,7 @@ export default function ProfileDialog({ currentUser, onSettingsUpdate }: Profile
           </div>
         </ScrollArea>
 
-        <DialogFooter className="border-t pt-4">
+        <DialogFooter className="border-t pt-4 mt-auto"> {/* Ensure footer is pushed down */}
           <DialogClose asChild>
             <Button variant="outline" onClick={() => setOpen(false)} disabled={isAnyActionPending}>
                <X className="mr-2 h-4 w-4" /> Close
