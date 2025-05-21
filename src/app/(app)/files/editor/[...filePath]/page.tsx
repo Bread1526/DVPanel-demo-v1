@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { v4 as uuidv4 } from 'uuid';
 import { format, formatDistanceToNowStrict } from 'date-fns';
-import SnapshotViewerDialog from '../components/snapshot-viewer-dialog';
+import SnapshotViewerDialog from '../components/snapshot-viewer-dialog'; // Corrected import path
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
@@ -49,9 +49,7 @@ function getLanguageFromFilename(filename: string): string {
     case 'json': return 'json';
     case 'yaml': case 'yml': return 'yaml';
     case 'md': return 'markdown';
-    // Shell support was removed due to npm install issues for @codemirror/lang-shell
-    // case 'sh': case 'bash':
-    //   return 'shell';
+    // case 'sh': case 'bash': return 'shell'; // Shell support removed
     case 'py': return 'python';
     default: return 'plaintext';
   }
@@ -197,10 +195,62 @@ export default function FileEditorPage() {
 
   useEffect(() => {
     if (error) {
-        setTimeout(() => toast({ title: "File Editor Error", description: error, variant: "destructive" }), 0);
+      setTimeout(() => toast({ title: "File Editor Error", description: error, variant: "destructive" }), 0);
     }
   }, [error, toast]);
 
+  const handleCreateSnapshot = useCallback(() => {
+    setSnapshots(prevSnapshots => {
+      let updatedSnapshots = [...prevSnapshots];
+      if (updatedSnapshots.length >= MAX_SNAPSHOTS) {
+        let oldestUnlockedIndex = -1;
+        // Try to find oldest unlocked from the end (most recent first)
+        for (let i = updatedSnapshots.length - 1; i >= 0; i--) {
+          if (!updatedSnapshots[i].isLocked) {
+            oldestUnlockedIndex = i;
+            // No break, we want the *oldest* among the unlocked ones if we iterate from end
+          }
+        }
+        // If all are locked or no unlocked found from end, try from the start
+        if (oldestUnlockedIndex === -1) {
+            for (let i = 0; i < updatedSnapshots.length; i++) {
+                if (!updatedSnapshots[i].isLocked) {
+                    oldestUnlockedIndex = i;
+                    break; 
+                }
+            }
+        }
+
+        if (oldestUnlockedIndex !== -1) {
+          updatedSnapshots.splice(oldestUnlockedIndex, 1);
+        } else {
+          setTimeout(() => toast({
+            title: "Snapshot Limit Reached",
+            description: `Cannot create new snapshot. All ${MAX_SNAPSHOTS} snapshot slots are locked. Unlock some or delete manually.`,
+            variant: "destructive",
+            duration: 7000,
+          }),0);
+          return prevSnapshots; // Return original snapshots if limit reached and all are locked
+        }
+      }
+
+      const newSnapshot: Snapshot = {
+        id: uuidv4(),
+        timestamp: new Date().toISOString(),
+        content: fileContent,
+        language: editorLanguage,
+        isLocked: false,
+      };
+      if (globalDebugModeActive) {
+          console.log("[FileEditorPage] CLIENT-SIDE SNAPSHOT CREATED:", { id: newSnapshot.id, timestamp: newSnapshot.timestamp, lang: newSnapshot.language, locked: newSnapshot.isLocked });
+      }
+      setTimeout(() => toast({
+        title: "Snapshot Created (Client-side)",
+        description: `Created snapshot for ${fileName} at ${format(new Date(newSnapshot.timestamp), 'HH:mm:ss')}. Lang: ${newSnapshot.language}`,
+      }),0);
+      return [newSnapshot, ...updatedSnapshots]; // Prepend new snapshot
+    });
+  }, [fileContent, editorLanguage, toast, fileName, globalDebugModeActive]);
 
   const handleSaveChanges = useCallback(async () => {
     if (!decodedFilePath) {
@@ -212,8 +262,8 @@ export default function FileEditorPage() {
       return;
     }
 
-    if (hasUnsavedChanges) {
-      handleCreateSnapshot(); // Create a snapshot before saving
+    if (hasUnsavedChanges) { // Only create snapshot if actual changes exist
+      handleCreateSnapshot(); 
     }
 
     setIsSaving(true);
@@ -229,20 +279,21 @@ export default function FileEditorPage() {
         throw new Error(result.error || result.details || 'Failed to save file.');
       }
       setTimeout(() => toast({ title: 'Success', description: result.message || `File ${fileName} saved.` }),0);
-      setOriginalFileContent(fileContent);
+      setOriginalFileContent(fileContent); // Update original content after successful save
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred while saving.");
       setTimeout(() => toast({ title: "Error Saving File", description: e.message, variant: "destructive" }),0);
     } finally {
       setIsSaving(false);
     }
-  }, [decodedFilePath, fileContent, fileName, isWritable, toast, DAEMON_API_BASE_PATH, hasUnsavedChanges]); // Added handleCreateSnapshot to deps later
+  }, [decodedFilePath, fileContent, fileName, isWritable, toast, DAEMON_API_BASE_PATH, hasUnsavedChanges, handleCreateSnapshot]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key === 's') {
         event.preventDefault();
-        if (!isSaving && isWritable && hasUnsavedChanges) {
+        const canSave = !isSaving && isWritable && (hasUnsavedChanges || globalDebugModeActive);
+        if (canSave) {
           handleSaveChanges();
         }
       }
@@ -251,7 +302,7 @@ export default function FileEditorPage() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isSaving, isWritable, hasUnsavedChanges, handleSaveChanges]);
+  }, [isSaving, isWritable, hasUnsavedChanges, handleSaveChanges, globalDebugModeActive]);
 
   const handleFind = useCallback(() => {
     if (editorRef.current && editorRef.current.view) {
@@ -263,59 +314,9 @@ export default function FileEditorPage() {
       }),0);
     }
   }, [toast]);
-
-  const handleCreateSnapshot = useCallback(() => {
-    setSnapshots(prevSnapshots => {
-      let updatedSnapshots = [...prevSnapshots];
-      if (updatedSnapshots.length >= MAX_SNAPSHOTS) {
-        let oldestUnlockedIndex = -1;
-        for (let i = updatedSnapshots.length - 1; i >= 0; i--) {
-          if (!updatedSnapshots[i].isLocked) {
-            oldestUnlockedIndex = i;
-          }
-        }
-        if (oldestUnlockedIndex === -1) { // Try from the start if no unlocked found from end
-            for (let i = 0; i < updatedSnapshots.length; i++) {
-                if (!updatedSnapshots[i].isLocked) {
-                    oldestUnlockedIndex = i;
-                    break;
-                }
-            }
-        }
-
-        if (oldestUnlockedIndex !== -1) {
-          updatedSnapshots.splice(oldestUnlockedIndex, 1);
-        } else {
-          setTimeout(() => toast({
-            title: "Snapshot Limit Reached",
-            description: `Cannot create new snapshot. All ${MAX_SNAPSHOTS} snapshot slots are locked. Unlock some or delete manually.`,
-            variant: "destructive",
-            duration: 7000,
-          }),0);
-          return prevSnapshots;
-        }
-      }
-
-      const newSnapshot: Snapshot = {
-        id: uuidv4(),
-        timestamp: new Date().toISOString(),
-        content: fileContent, // Current content
-        language: editorLanguage,
-        isLocked: false,
-      };
-      console.log("[FileEditorPage] CLIENT-SIDE SNAPSHOT CREATED:", { id: newSnapshot.id, timestamp: newSnapshot.timestamp, lang: newSnapshot.language, locked: newSnapshot.isLocked });
-      setTimeout(() => toast({
-        title: "Snapshot Created (Client-side)",
-        description: `Created snapshot for ${fileName} at ${format(new Date(newSnapshot.timestamp), 'HH:mm:ss')}.`,
-      }),0);
-      return [newSnapshot, ...updatedSnapshots]; // Prepend new snapshot
-    });
-  }, [fileContent, editorLanguage, toast, fileName]);
   
-  // Add handleCreateSnapshot to handleSaveChanges dependency array
   useEffect(() => {
     // This effect is just to ensure handleSaveChanges is re-memoized if handleCreateSnapshot changes
-    // The actual logic is within handleSaveChanges itself
   }, [handleCreateSnapshot]);
 
 
@@ -323,9 +324,11 @@ export default function FileEditorPage() {
     const snapshotToLoad = snapshots.find(s => s.id === snapshotId);
     if (snapshotToLoad) {
       setFileContent(snapshotToLoad.content);
-      setOriginalFileContent(snapshotToLoad.content); // Set original to snapshot content
+      setOriginalFileContent(snapshotToLoad.content); 
       setEditorLanguage(snapshotToLoad.language);
-      console.log("[FileEditorPage] CLIENT-SIDE SNAPSHOT LOADED:", { id: snapshotToLoad.id, timestamp: snapshotToLoad.timestamp, lang: snapshotToLoad.language });
+      if (globalDebugModeActive) {
+          console.log("[FileEditorPage] CLIENT-SIDE SNAPSHOT LOADED:", { id: snapshotToLoad.id, timestamp: snapshotToLoad.timestamp, lang: snapshotToLoad.language });
+      }
       setTimeout(() => toast({
         title: "Snapshot Loaded",
         description: `Loaded snapshot for ${fileName} from ${format(new Date(snapshotToLoad.timestamp), 'PP HH:mm:ss')}`,
@@ -337,7 +340,7 @@ export default function FileEditorPage() {
         variant: "destructive",
       }),0);
     }
-  }, [snapshots, toast, fileName]);
+  }, [snapshots, toast, fileName, globalDebugModeActive]);
 
   const handleToggleLockSnapshot = useCallback((snapshotId: string) => {
     setSnapshots(prevSnapshots => {
@@ -381,7 +384,7 @@ export default function FileEditorPage() {
     );
   }
 
-  if (error && !isLoading && !isImageFile) { // Only show this full page error if not an image file with error
+  if (error && !isLoading && !isImageFile) { 
     return (
       <div className="p-4">
         <PageHeader title="Error Loading File" description={error} />
@@ -403,6 +406,8 @@ export default function FileEditorPage() {
     );
   }
 
+  const saveButtonDisabled = isSaving || !isWritable || (!hasUnsavedChanges && !globalDebugModeActive);
+
   return (
     <div className="flex flex-col h-full max-h-[calc(100vh-var(--header-height,6rem)-2rem)]">
       <PageHeader
@@ -417,7 +422,7 @@ export default function FileEditorPage() {
       
       {isImageFile ? (
         <div className="flex-grow flex items-center justify-center p-4 bg-muted/30 rounded-lg">
-          {error && ( // Show error if image metadata fetch failed
+          {error && ( 
             <Alert variant="destructive" className="max-w-md">
               <FileWarning className="h-4 w-4" />
               <AlertTitle>Error Loading Image Metadata</AlertTitle>
@@ -430,9 +435,9 @@ export default function FileEditorPage() {
               alt={`Image preview for ${fileName}`}
               width={800} 
               height={600}
-              style={{ objectFit: 'contain', maxWidth: '100%', maxHeight: 'calc(100vh - 200px)' }} // Adjusted maxHeight
+              style={{ objectFit: 'contain', maxWidth: '100%', maxHeight: 'calc(100vh - 200px)' }} 
               className="rounded-md shadow-lg"
-              unoptimized // Good for local/daemon served images to prevent issues
+              unoptimized 
               data-ai-hint="image preview"
             />
           )}
@@ -445,7 +450,7 @@ export default function FileEditorPage() {
                 variant="ghost"
                 size="sm"
                 onClick={handleSaveChanges}
-                disabled={isSaving || !isWritable || !hasUnsavedChanges}
+                disabled={saveButtonDisabled}
                 className="shadow-sm hover:scale-105"
               >
                 {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
@@ -562,4 +567,3 @@ export default function FileEditorPage() {
     </div>
   );
 }
-
