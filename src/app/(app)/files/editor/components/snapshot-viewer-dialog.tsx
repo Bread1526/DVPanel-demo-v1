@@ -12,7 +12,7 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import CodeEditor from '@/components/ui/code-editor'; // Assuming CodeEditor can be used here
+import CodeEditor from '@/components/ui/code-editor'; 
 import type { Snapshot } from '../[...filePath]/page'; 
 import { format } from 'date-fns';
 
@@ -35,14 +35,14 @@ export default function SnapshotViewerDialog({
         <DialogHeader className="p-4 border-b bg-muted/50 flex-shrink-0">
           <DialogTitle>Snapshot Viewer</DialogTitle>
           <DialogDescription>
-            Viewing snapshot from: {format(new Date(snapshot.timestamp), 'PPpp HH:mm:ss')} - Language: {snapshot.language}
+            Viewing snapshot from: {format(new Date(snapshot.timestamp), 'PPp HH:mm:ss')} - Language: {snapshot.language}
           </DialogDescription>
         </DialogHeader>
         
-        <div className="flex-grow relative min-h-0 bg-background"> {/* Added min-h-0 for flex-grow */}
+        <div className="flex-grow relative min-h-0 bg-background">
           <CodeEditor
             value={snapshot.content}
-            onChange={() => {}} // Read-only, so no-op
+            onChange={() => {}} 
             language={snapshot.language}
             readOnly={true}
             className="h-full w-full border-0 rounded-none"

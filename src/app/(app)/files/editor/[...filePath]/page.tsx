@@ -44,7 +44,7 @@ function getLanguageFromFilename(filename: string): string {
   if (!filename) return 'plaintext';
   const extension = filename.split('.').pop()?.toLowerCase() || '';
   switch (extension) {
-    case 'js': case 'jsx': return 'javascript'; // CodeMirror uses 'javascript' for TS/JSX too via config
+    case 'js': case 'jsx': return 'javascript';
     case 'ts': case 'tsx': return 'typescript';
     case 'html': case 'htm': return 'html';
     case 'css': case 'scss': return 'css';
@@ -72,7 +72,7 @@ export interface Snapshot {
   isLocked?: boolean;
 }
 
-const MAX_SERVER_SNAPSHOTS = 10; // Corresponds to MAX_SNAPSHOTS in API
+const MAX_SERVER_SNAPSHOTS = 10; 
 
 export default function FileEditorPage() {
   const params = useParams();
@@ -141,9 +141,14 @@ export default function FileEditorPage() {
       let data;
       try {
         data = await response.json();
-      } catch (jsonError) {
+      } catch (jsonError: any) {
         if (globalDebugModeActive) console.error("[FileEditorPage] fetchSnapshots - JSON.parse error:", jsonError);
-        throw new Error("Failed to parse snapshots response from server. Response might be empty or not valid JSON.");
+        // Check if the response body might be empty for non-existent snapshot files.
+        if (response.headers.get('content-length') === '0' || jsonError.message.includes("Unexpected end of JSON input")) {
+            data = { snapshots: [] }; // Assume empty snapshots if body is empty or parse fails this way
+        } else {
+            throw new Error("Failed to parse snapshots response from server. Response might not be valid JSON.");
+        }
       }
 
       setServerSnapshots(Array.isArray(data.snapshots) ? data.snapshots : []);
@@ -197,11 +202,10 @@ export default function FileEditorPage() {
       let data;
       try {
         data = await response.json();
-      } catch (jsonError) {
+      } catch (jsonError: any) {
         if (globalDebugModeActive) console.error("[FileEditorPage] fetchFileContent - JSON.parse error:", jsonError);
         throw new Error("Failed to parse file content response from server. Response might be empty or not valid JSON.");
       }
-
 
       if (typeof data.writable !== 'boolean') {
         throw new Error("Invalid response format from server: missing 'writable' status.");
@@ -216,7 +220,9 @@ export default function FileEditorPage() {
           setOriginalFileContent(data.content);
       }
       if (globalDebugModeActive) console.log(`[FileEditorPage] fetchFileContent SUCCESS for: ${decodedFilePath}, writable: ${data.writable}, isImage: ${isImage}`);
-      await fetchSnapshots(); 
+      if(!isImage) { // Only fetch snapshots for non-image files
+        await fetchSnapshots(); 
+      }
     } catch (e: any) {
       console.error(`[FileEditorPage] fetchFileContent ERROR for: ${decodedFilePath}`, e);
       setError(e.message || "An unexpected error occurred while fetching file content.");
@@ -224,7 +230,7 @@ export default function FileEditorPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [decodedFilePath, fileName, fetchSnapshots, toast, globalDebugModeActive]);
+  }, [decodedFilePath, fileName, fetchSnapshots, globalDebugModeActive]);
 
   useEffect(() => {
     if (!decodedFilePath && encodedFilePathFromParams) {
@@ -237,11 +243,11 @@ export default function FileEditorPage() {
   
   const handleCreateSnapshot = useCallback(async () => {
     if (!decodedFilePath) {
-      setTimeout(() => toast({ title: "Error", description: "No active file to create snapshot for.", variant: "destructive" }), 0);
+      setTimeout(() => toast({ title: "Error", description: "No active file to create snapshot for.", variant: "destructive" }),0);
       return;
     }
     if (isImageFile) {
-      setTimeout(() => toast({ title: "Info", description: "Snapshots are not supported for image files.", variant: "default" }), 0);
+      setTimeout(() => toast({ title: "Info", description: "Snapshots are not supported for image files.", variant: "default" }),0);
       return;
     }
     if (globalDebugModeActive) console.log(`[FileEditorPage] handleCreateSnapshot called for: ${decodedFilePath}, Lang: ${editorLanguage}, Content Length: ${fileContent.length}`);
@@ -257,13 +263,13 @@ export default function FileEditorPage() {
       if (!response.ok) {
         throw new Error(result.error || result.details || 'Failed to create snapshot from API.');
       }
-      setTimeout(() => toast({ title: 'Snapshot Created', description: result.message || `Snapshot for ${fileName} created.` }), 0);
+      setTimeout(() => toast({ title: 'Snapshot Created', description: result.message || `Snapshot for ${fileName} created.` }),0);
       setServerSnapshots(Array.isArray(result.snapshots) ? result.snapshots : []); 
       if (globalDebugModeActive) console.log(`[FileEditorPage] handleCreateSnapshot SUCCESS. New snapshot count: ${result.snapshots?.length || 0}`);
     } catch (e: any) {
       console.error(`[FileEditorPage] handleCreateSnapshot ERROR for: ${decodedFilePath}`, e);
       const apiError = e.message || "An unexpected error occurred while creating the snapshot.";
-      setTimeout(() => toast({ title: "Error Creating Snapshot", description: apiError, variant: "destructive" }), 0);
+       setTimeout(() => toast({ title: "Error Creating Snapshot", description: apiError, variant: "destructive" }),0);
       setSnapshotError(apiError);
     } finally {
       setIsCreatingSnapshot(false);
@@ -272,15 +278,15 @@ export default function FileEditorPage() {
 
   const handleSaveChanges = useCallback(async () => {
     if (!decodedFilePath) {
-      setTimeout(() => toast({ title: "Error", description: "No active file to save.", variant: "destructive" }), 0);
+      setTimeout(() => toast({ title: "Error", description: "No active file to save.", variant: "destructive" }),0);
       return;
     }
     if (!isWritable) {
-      setTimeout(() => toast({ title: "Cannot Save", description: "This file is not writable.", variant: "destructive" }), 0);
+      setTimeout(() => toast({ title: "Cannot Save", description: "This file is not writable.", variant: "destructive" }),0);
       return;
     }
     if (isImageFile) {
-      setTimeout(() => toast({ title: "Cannot Save", description: "Direct saving of images from this editor is not supported.", variant: "destructive" }), 0);
+      setTimeout(() => toast({ title: "Cannot Save", description: "Direct saving of images from this editor is not supported.", variant: "destructive" }),0);
       return;
     }
     if (globalDebugModeActive) console.log(`[FileEditorPage] handleSaveChanges called for: ${decodedFilePath}`);
@@ -301,7 +307,7 @@ export default function FileEditorPage() {
       if (!response.ok) {
         throw new Error(result.error || result.details || 'Failed to save file.');
       }
-      setTimeout(() => toast({ title: 'Success', description: result.message || `File ${fileName} saved.` }), 0);
+      setTimeout(() => toast({ title: 'Success', description: result.message || `File ${fileName} saved.` }),0);
       setOriginalFileContent(fileContent); 
       if (globalDebugModeActive) console.log(`[FileEditorPage] handleSaveChanges SUCCESS for: ${decodedFilePath}`);
     } catch (e: any) {
@@ -310,7 +316,8 @@ export default function FileEditorPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [decodedFilePath, fileContent, fileName, isWritable, toast, hasUnsavedChanges, handleCreateSnapshot, isImageFile, globalDebugModeActive, originalFileContent /* Added for ESLint satisfaction of hasUnsavedChanges */]);
+  }, [decodedFilePath, fileContent, fileName, isWritable, toast, hasUnsavedChanges, handleCreateSnapshot, isImageFile, globalDebugModeActive]);
+
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -360,8 +367,8 @@ export default function FileEditorPage() {
     }
   }, [toast, fileName]);
 
-  const handleToggleLockSnapshot = useCallback((snapshotId: string) => {
-    // TODO: Implement API call to toggle lock on server
+  const handleToggleLockSnapshot = useCallback(async (snapshotId: string) => {
+    // Placeholder: Will integrate with backend API for locking later
     setServerSnapshots(prev => 
         prev.map(s => s.id === snapshotId ? {...s, isLocked: !s.isLocked} : s)
     );
@@ -372,8 +379,8 @@ export default function FileEditorPage() {
     }), 0);
   }, [toast, serverSnapshots]);
 
-  const handleDeleteSnapshot = useCallback((snapshotIdToDelete: string) => {
-    // TODO: Implement API call to delete on server
+  const handleDeleteSnapshot = useCallback(async (snapshotIdToDelete: string) => {
+     // Placeholder: Will integrate with backend API for deletion later
     setServerSnapshots(prev => prev.filter(s => s.id !== snapshotIdToDelete));
     setTimeout(() => toast({ title: "Snapshot Deleted (Client Only)", description: "Server-side deletion will be implemented later."}), 0);
   }, [toast]);
@@ -493,10 +500,10 @@ export default function FileEditorPage() {
                             <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSnapshotInPopup(snapshot)} title="View Snapshot">
                               <Eye className="h-3 w-3" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleLockSnapshot(snapshot.id)} title={snapshot.isLocked ? "Unlock Snapshot (Client)" : "Lock Snapshot (Client)"}>
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleLockSnapshot(snapshot.id)} title={snapshot.isLocked ? "Unlock Snapshot" : "Lock Snapshot"}>
                               {snapshot.isLocked ? <Lock className="h-3 w-3 text-destructive" /> : <Unlock className="h-3 w-3 text-muted-foreground" />}
                             </Button>
-                             <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground hover:bg-destructive/10" onClick={() => handleDeleteSnapshot(snapshot.id)} title="Delete Snapshot (Client)">
+                             <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground hover:bg-destructive/10" onClick={() => handleDeleteSnapshot(snapshot.id)} title="Delete Snapshot">
                               <Trash2 className="h-3 w-3" />
                             </Button>
                           </div>
@@ -550,6 +557,13 @@ export default function FileEditorPage() {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
         )}
+        {snapshotError && !isImageFile && (
+           <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
+                <Camera className="h-4 w-4"/>
+                <AlertTitle>Snapshot Operation Error</AlertTitle>
+                <AlertDescription>{snapshotError}</AlertDescription>
+            </Alert>
+        )}
         <div className="flex-grow relative p-0 bg-background min-h-0"> 
           {isImageFile ? (
             <div className="w-full h-full flex items-center justify-center p-4">
@@ -568,6 +582,10 @@ export default function FileEditorPage() {
                   style={{ objectFit: 'contain' }} 
                   unoptimized 
                   data-ai-hint="file preview"
+                  onError={(e) => {
+                    console.error("Image load error in editor:", e);
+                    setError("Failed to load image resource for preview.");
+                  }}
                 />
               )}
             </div>
