@@ -5,19 +5,20 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import CodeEditor from '@/components/ui/code-editor';
+import CodeEditor from '@/components/ui/code-editor'; // Default import
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { useToast } from "@/hooks/use-toast";
-import { 
-  Loader2, 
-  Save, 
-  ArrowLeft, 
-  Camera, 
-  Search as SearchIcon, 
-  FileWarning, 
-  Lock, 
-  Unlock, 
-  Eye 
+import {
+  Loader2,
+  Save,
+  ArrowLeft,
+  Camera,
+  Search as SearchIcon,
+  FileWarning,
+  Lock,
+  Unlock,
+  Eye,
+  Trash2, // Added Trash2 icon
 } from "lucide-react";
 import path from 'path-browserify';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -34,7 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { v4 as uuidv4 } from 'uuid';
 import { format, formatDistanceToNowStrict } from 'date-fns';
-import SnapshotViewerDialog from '../components/snapshot-viewer-dialog'; // Corrected import
+import SnapshotViewerDialog from '../components/snapshot-viewer-dialog';
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
@@ -84,10 +85,10 @@ export default function FileEditorPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   const [globalDebugModeActive, setGlobalDebugModeActive] = useState<boolean>(false);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
-  const [editorLanguage, setEditorLanguage] = useState<string>('plaintext');
+  const [editorLanguage, setEditorLanguage] = useState<string>('plaintext'); // State for editor's current language
 
   const [isSnapshotViewerOpen, setIsSnapshotViewerOpen] = useState(false);
   const [selectedSnapshotForViewer, setSelectedSnapshotForViewer] = useState<Snapshot | null>(null);
@@ -107,6 +108,7 @@ export default function FileEditorPage() {
   }, [encodedFilePathFromParams]);
 
   const fileName = useMemo(() => path.basename(decodedFilePath || 'Untitled'), [decodedFilePath]);
+  const fileLanguage = useMemo(() => getLanguageFromFilename(fileName), [fileName]); // Derived language from filename
 
   const hasUnsavedChanges = useMemo(() => fileContent !== originalFileContent, [fileContent, originalFileContent]);
 
@@ -121,8 +123,7 @@ export default function FileEditorPage() {
 
     setIsLoading(true);
     setError(null);
-    
-    setEditorLanguage(getLanguageFromFilename(fileName));
+    setEditorLanguage(fileLanguage); // Set editor language based on filename
 
     try {
       const settingsResult = await loadPanelSettings();
@@ -152,42 +153,43 @@ export default function FileEditorPage() {
       setIsWritable(data.writable);
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred while fetching file content.");
-      setIsWritable(false); // Assume not writable if content fetch fails
+      setIsWritable(false);
     } finally {
       setIsLoading(false);
     }
-  }, [decodedFilePath, fileName, DAEMON_API_BASE_PATH]);
+  }, [decodedFilePath, fileLanguage, DAEMON_API_BASE_PATH]);
+
 
   useEffect(() => {
     if (decodedFilePath) {
       fetchFileContent();
-    } else if (encodedFilePathFromParams) { // Check if params were ever provided
-      setIsLoading(false);
+    } else if (encodedFilePathFromParams) {
       setError("Invalid file path parameter.");
-    } else { // No params at all
       setIsLoading(false);
+    } else {
       setError("No file path provided in URL.");
+      setIsLoading(false);
     }
   }, [decodedFilePath, encodedFilePathFromParams, fetchFileContent]);
-  
+
   useEffect(() => {
     if (error) {
-      setTimeout(() => toast({ title: "File Editor Error", description: error, variant: "destructive" }), 0);
+        setTimeout(() => toast({ title: "File Editor Error", description: error, variant: "destructive" }), 0);
     }
   }, [error, toast]);
 
 
   const handleSaveChanges = useCallback(async () => {
     if (!decodedFilePath) {
-      setTimeout(() => toast({ title: "Error", description: "No active file to save.", variant: "destructive" }), 0);
+      setTimeout(() => toast({ title: "Error", description: "No active file to save.", variant: "destructive" }),0);
       return;
     }
     if (!isWritable) {
-      setTimeout(() => toast({ title: "Cannot Save", description: "This file is not writable.", variant: "destructive" }), 0);
+      setTimeout(() => toast({ title: "Cannot Save", description: "This file is not writable.", variant: "destructive" }),0);
       return;
     }
     setIsSaving(true);
-    setError(null); 
+    setError(null);
     try {
       const response = await fetch(`${DAEMON_API_BASE_PATH}/file`, {
         method: 'POST',
@@ -198,11 +200,10 @@ export default function FileEditorPage() {
       if (!response.ok) {
         throw new Error(result.error || result.details || 'Failed to save file.');
       }
-      setTimeout(() => toast({ title: 'Success', description: result.message || `File ${fileName} saved.` }), 0);
-      setOriginalFileContent(fileContent); // Update original content after successful save
+      setTimeout(() => toast({ title: 'Success', description: result.message || `File ${fileName} saved.` }),0);
+      setOriginalFileContent(fileContent);
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred while saving.");
-      // The error toast will be handled by the useEffect watching the `error` state.
     } finally {
       setIsSaving(false);
     }
@@ -227,7 +228,7 @@ export default function FileEditorPage() {
     if (editorRef.current && editorRef.current.view) {
        editorRef.current.view.dispatch({ effects: openSearchPanel.of() });
     } else {
-      setTimeout(() => toast({
+       setTimeout(() => toast({
         title: "Find Action",
         description: "Editor not ready or no active editor instance. Use Ctrl+F (Cmd+F).",
       }),0);
@@ -238,27 +239,37 @@ export default function FileEditorPage() {
     setSnapshots(prevSnapshots => {
       let updatedSnapshots = [...prevSnapshots];
       if (updatedSnapshots.length >= MAX_SNAPSHOTS) {
-        // Try to find the oldest unlocked snapshot to remove
-        // Iterate in reverse to find the oldest from the start of the array
         let oldestUnlockedIndex = -1;
+        // Iterate from the end (oldest) to find the first unlocked one
         for (let i = updatedSnapshots.length - 1; i >= 0; i--) {
           if (!updatedSnapshots[i].isLocked) {
             oldestUnlockedIndex = i;
-            break; 
+            // No break, we want the *absolute* oldest unlocked if multiple exist
           }
         }
+         // If no unlocked snapshot was found by iterating from the end,
+         // it implies all might be locked or the array is full of locked items.
+         // To be safe, let's find the first unlocked from the beginning if the previous loop failed.
+        if (oldestUnlockedIndex === -1) { // No suitable candidate from end
+            for (let i = 0; i < updatedSnapshots.length; i++) {
+                if (!updatedSnapshots[i].isLocked) {
+                    oldestUnlockedIndex = i; // Take the first one from start
+                    break;
+                }
+            }
+        }
+
 
         if (oldestUnlockedIndex !== -1) {
           updatedSnapshots.splice(oldestUnlockedIndex, 1);
         } else {
-          // All snapshots are locked, cannot create new one
           setTimeout(() => toast({
             title: "Snapshot Limit Reached",
             description: `Cannot create new snapshot. All ${MAX_SNAPSHOTS} snapshot slots are locked. Unlock some or increase limit.`,
             variant: "destructive",
             duration: 7000,
           }),0);
-          return prevSnapshots; // Return original array, no changes
+          return prevSnapshots;
         }
       }
 
@@ -266,7 +277,7 @@ export default function FileEditorPage() {
         id: uuidv4(),
         timestamp: new Date().toISOString(),
         content: fileContent,
-        language: editorLanguage,
+        language: editorLanguage, // Use current editor language for the snapshot
         isLocked: false,
       };
       console.log("[FileEditorPage] CLIENT-SIDE SNAPSHOT CREATED:", { id: newSnapshot.id, timestamp: newSnapshot.timestamp, lang: newSnapshot.language, locked: newSnapshot.isLocked });
@@ -274,8 +285,7 @@ export default function FileEditorPage() {
         title: "Snapshot Created (Client-side)",
         description: `Created snapshot at ${format(new Date(newSnapshot.timestamp), 'HH:mm:ss')}. This snapshot is temporary and will be lost on page refresh.`,
       }),0);
-      // Add new snapshot to the beginning of the array (most recent first)
-      return [newSnapshot, ...updatedSnapshots]; 
+      return [newSnapshot, ...updatedSnapshots];
     });
   }, [fileContent, editorLanguage, toast]);
 
@@ -283,8 +293,8 @@ export default function FileEditorPage() {
     const snapshotToLoad = snapshots.find(s => s.id === snapshotId);
     if (snapshotToLoad) {
       setFileContent(snapshotToLoad.content);
-      setOriginalFileContent(snapshotToLoad.content); 
-      setEditorLanguage(snapshotToLoad.language);
+      setOriginalFileContent(snapshotToLoad.content);
+      setEditorLanguage(snapshotToLoad.language); // Restore editor language from snapshot
       console.log("[FileEditorPage] CLIENT-SIDE SNAPSHOT LOADED:", { id: snapshotToLoad.id, timestamp: snapshotToLoad.timestamp, lang: snapshotToLoad.language });
       setTimeout(() => toast({
         title: "Snapshot Loaded",
@@ -315,6 +325,17 @@ export default function FileEditorPage() {
     });
   }, [toast]);
 
+  const handleDeleteSnapshot = useCallback((snapshotIdToDelete: string) => {
+    setSnapshots(prevSnapshots => {
+      const updatedSnapshots = prevSnapshots.filter(s => s.id !== snapshotIdToDelete);
+      setTimeout(() => toast({
+        title: "Snapshot Deleted",
+        description: `Client-side snapshot removed.`,
+      }),0);
+      return updatedSnapshots;
+    });
+  }, [toast]);
+
   const handleViewSnapshotInPopup = (snapshot: Snapshot) => {
     setSelectedSnapshotForViewer(snapshot);
     setIsSnapshotViewerOpen(true);
@@ -328,8 +349,8 @@ export default function FileEditorPage() {
       </div>
     );
   }
-  
-  if (error && !isLoading) { // Check !isLoading here as well
+
+  if (error && (!fileContent && !isLoading)) {
     return (
       <div className="p-4">
         <PageHeader title="Error Loading File" description={error} />
@@ -340,7 +361,7 @@ export default function FileEditorPage() {
     );
   }
 
-  if (!decodedFilePath && !isLoading) { // Ensure no loading before showing this
+  if (!decodedFilePath && !isLoading) {
      return (
       <div className="p-4">
         <PageHeader title="Invalid File Path" description="The file path specified in the URL is invalid or missing." />
@@ -350,7 +371,6 @@ export default function FileEditorPage() {
       </div>
     );
   }
-
 
   return (
     <div className="flex flex-col h-full max-h-[calc(100vh-var(--header-height,6rem)-2rem)]">
@@ -363,23 +383,23 @@ export default function FileEditorPage() {
           </Button>
         }
       />
-      
+
         <>
           <div className="flex-shrink-0 flex items-center justify-between p-2 border-b bg-muted/50">
             <div className="flex items-center gap-1">
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={handleSaveChanges} 
-                disabled={isSaving || !isWritable || !hasUnsavedChanges} 
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleSaveChanges}
+                disabled={isSaving || !isWritable || !hasUnsavedChanges}
                 className="shadow-sm hover:scale-105"
               >
                 {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                 Save
               </Button>
-              <Button 
-                variant="ghost" 
-                size="sm" 
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={handleFind}
                 className="shadow-sm hover:scale-105"
               >
@@ -387,26 +407,26 @@ export default function FileEditorPage() {
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     className="shadow-sm hover:scale-105"
                   >
                     <Camera className="mr-2 h-4 w-4" /> Snapshots
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-80">
+                <DropdownMenuContent align="start" className="w-96">
                   <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
-                    Client-side Snapshots (lost on refresh)
+                    Client-side Snapshots (temporary)
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem 
-                    onSelect={handleCreateSnapshot} 
+                  <DropdownMenuItem
+                    onSelect={handleCreateSnapshot}
                     disabled={!(globalDebugModeActive || hasUnsavedChanges)}
                   >
                     Create Snapshot (Content & Lang)
                   </DropdownMenuItem>
-                  
+
                   {snapshots.length > 0 && (
                     <>
                       <DropdownMenuSeparator />
@@ -414,15 +434,18 @@ export default function FileEditorPage() {
                         <DropdownMenuLabel className="text-xs px-2">Recent Snapshots ({snapshots.length} / {MAX_SNAPSHOTS})</DropdownMenuLabel>
                         {snapshots.map(snapshot => (
                           <DropdownMenuItem key={snapshot.id} className="flex justify-between items-center" onSelect={(e) => e.preventDefault()}>
-                            <span onClick={() => handleLoadSnapshot(snapshot.id)} className="cursor-pointer flex-grow hover:text-primary text-xs">
+                            <span onClick={() => handleLoadSnapshot(snapshot.id)} className="cursor-pointer flex-grow hover:text-primary text-xs truncate pr-2">
                               {format(new Date(snapshot.timestamp), 'HH:mm:ss')} ({formatDistanceToNowStrict(new Date(snapshot.timestamp))} ago) - Lang: {snapshot.language}
                             </span>
-                            <div className="flex items-center ml-2 gap-1">
-                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSnapshotInPopup(snapshot)}>
+                            <div className="flex items-center ml-1 gap-0.5 flex-shrink-0">
+                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSnapshotInPopup(snapshot)} title="View Snapshot">
                                 <Eye className="h-3 w-3" />
                               </Button>
-                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleLockSnapshot(snapshot.id)}>
+                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleLockSnapshot(snapshot.id)} title={snapshot.isLocked ? "Unlock Snapshot" : "Lock Snapshot"}>
                                 {snapshot.isLocked ? <Lock className="h-3 w-3 text-destructive" /> : <Unlock className="h-3 w-3 text-muted-foreground" />}
+                              </Button>
+                               <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground hover:bg-destructive/10" onClick={() => handleDeleteSnapshot(snapshot.id)} title="Delete Snapshot">
+                                <Trash2 className="h-3 w-3" />
                               </Button>
                             </div>
                           </DropdownMenuItem>
@@ -453,7 +476,7 @@ export default function FileEditorPage() {
               {!isWritable && <span className="ml-2 font-semibold text-destructive">(Read-only)</span>}
             </div>
           </div>
-          
+
           {!isWritable && (
             <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
               <FileWarning className="h-4 w-4" />
@@ -463,14 +486,14 @@ export default function FileEditorPage() {
               </AlertDescription>
             </Alert>
           )}
-          <div className="flex-grow relative p-0 bg-background min-h-0">
+          <div className="flex-grow relative p-0 bg-background min-h-0"> {/* Ensure this div takes up remaining space */}
             <CodeEditor
               ref={editorRef}
               value={fileContent}
               onChange={setFileContent}
               language={editorLanguage}
               readOnly={isSaving || !isWritable}
-              className="h-full w-full border-0 rounded-none"
+              className="h-full w-full border-0 rounded-none" // CodeEditor to fill this div
             />
           </div>
         </>
@@ -485,4 +508,3 @@ export default function FileEditorPage() {
     </div>
   );
 }
-
