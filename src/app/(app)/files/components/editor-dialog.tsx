@@ -11,7 +11,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from "@/components/ui/button";
-import CodeEditor from '@/components/ui/code-editor'; // Assuming this is your CodeMirror wrapper
+import CodeEditor from '@/components/ui/code-editor'; 
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -187,7 +187,12 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       const response = await fetch(`/api/panel-daemon/file?path=${encodeURIComponent(filePathToEdit)}&view=true`);
       if (!response.ok) {
         const errText = await response.text();
-        const data = errText ? JSON.parse(errText) : { error: `HTTP error ${response.status}` };
+        let data;
+        try {
+          data = errText ? JSON.parse(errText) : { error: `HTTP error ${response.status}` };
+        } catch (parseError) {
+          data = { error: `Failed to parse error response: ${errText.substring(0,100)}... Status: ${response.status}`};
+        }
         throw new Error(data.error || data.details || data.message || `Failed to fetch file. Status: ${response.status}`);
       }
       const data = await response.json();
@@ -225,13 +230,13 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   
   useEffect(() => {
     if (error) {
-      setTimeout(() => toast({ title: "File Operation Error", description: error, variant: "destructive" }), 0);
+       setTimeout(() => toast({ title: "File Operation Error", description: error, variant: "destructive" }), 0);
     }
   }, [error, toast]);
 
   useEffect(() => {
     if (snapshotError) {
-      setTimeout(() => toast({ title: "Snapshot Operation Error", description: snapshotError, variant: "destructive" }), 0);
+       setTimeout(() => toast({ title: "Snapshot Operation Error", description: snapshotError, variant: "destructive" }), 0);
     }
   }, [snapshotError, toast]);
 
@@ -239,6 +244,9 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     if (!filePathToEdit) return;
     setIsCreatingSnapshot(true);
     setSnapshotError(null);
+
+    let newSnapshotsList: Snapshot[] = [];
+
     try {
       const response = await fetch(`/api/panel-daemon/snapshots`, {
         method: 'POST',
@@ -246,12 +254,17 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         body: JSON.stringify({ filePath: filePathToEdit, content: fileContent, language: editorLanguage }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || result.details || 'Failed to create snapshot.');
+      if (!response.ok) {
+        throw new Error(result.error || result.details || 'Failed to create snapshot.');
+      }
       
-      setTimeout(() => toast({ title: 'Snapshot Created', description: result.message || `Snapshot for ${fileName} created.` }),0);
-      setServerSnapshots(Array.isArray(result.snapshots) ? result.snapshots : []);
+      setTimeout(() => toast({ title: 'Snapshot Created', description: result.message || `Snapshot for ${fileName} created.` }), 0);
+      newSnapshotsList = Array.isArray(result.snapshots) ? result.snapshots : [];
+      setServerSnapshots(newSnapshotsList);
     } catch (e: any) {
-      setSnapshotError(e.message || "An unexpected error occurred while creating snapshot.");
+      const errorMsg = e.message || "An unexpected error occurred while creating snapshot.";
+      setSnapshotError(errorMsg);
+      setTimeout(() => toast({ title: "Snapshot Creation Error", description: errorMsg, variant: "destructive" }), 0);
     } finally {
       setIsCreatingSnapshot(false);
     }
@@ -337,7 +350,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     }
     const view = editorRef.current.view;
     const cursor = new SearchCursor(view.state.doc, query, 0, view.state.doc.length, caseSensitive ? undefined : (a,b) => a.toLowerCase() === b.toLowerCase());
-    const matchesFound: Array<{ from: number; to: number }>> = [];
+    const matchesFound: Array<{ from: number; to: number }> = [];
     while (!cursor.next().done) { matchesFound.push({ from: cursor.value.from, to: cursor.value.to }); }
     setSearchMatches(matchesFound);
     if (matchesFound.length > 0) {
@@ -535,7 +548,6 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
           {isSearchWidgetOpen && (
             <div className="absolute top-2 right-2 z-10 bg-card p-2 rounded-lg shadow-lg border w-60 space-y-1.5">
               <div className="flex items-center justify-between mb-1">
-                 {/* Removed "Find in File" title */}
                 <Button variant="ghost" size="icon" className="h-6 w-6 ml-auto" onClick={() => setIsSearchWidgetOpen(false)}><X className="h-3 w-3" /></Button>
               </div>
               <Input id="find-query-widget" value={searchQuery} onChange={handleSearchInputChange} placeholder="Search..." className="h-7 text-xs px-2 py-1" autoFocus onKeyDown={(e) => { if (e.key === 'Enter' && searchQuery.trim()) performSearch(searchQuery, isCaseSensitiveSearch); }}/>
@@ -567,5 +579,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     </Dialog>
   );
 }
+
+    
 
     
