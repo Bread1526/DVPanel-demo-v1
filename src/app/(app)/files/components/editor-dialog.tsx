@@ -70,7 +70,7 @@ interface EditorDialogProps {
   filePathToEdit: string | null;
 }
 
-const MAX_SERVER_SNAPSHOTS = 10; // Client-side limit for now
+const MAX_SERVER_SNAPSHOTS = 10; 
 const PRESET_SEARCH_TERMS = ["TODO", "FIXME", "NOTE"];
 
 function getLanguageFromFilename(filename: string | null): string {
@@ -139,7 +139,6 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     setSearchQuery("");
     setCurrentMatchIndex(-1);
     setSearchMatches([]);
-    // Do not reset position or maximized state here
   }, []);
 
   const fetchSnapshots = useCallback(async (currentFilePath: string) => {
@@ -150,8 +149,12 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       const response = await fetch(`/api/panel-daemon/snapshots?filePath=${encodeURIComponent(currentFilePath)}`);
       if (!response.ok) {
         let errData;
-        try { const text = await response.text(); errData = text ? JSON.parse(text) : { error: `Failed to fetch snapshots. Status: ${response.status}` }; }
-        catch { errData = { error: `Failed to fetch snapshots. Status: ${response.status}` }; }
+        try { 
+          const text = await response.text(); 
+          errData = text ? JSON.parse(text) : { error: `Failed to fetch snapshots. Status: ${response.status}` }; 
+        } catch { 
+          errData = { error: `Failed to fetch snapshots. Status: ${response.status}` }; 
+        }
         throw new Error(errData.error || `Failed to fetch snapshots. Status: ${response.status}`);
       }
       const data = await response.json();
@@ -261,7 +264,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     }
 
     if (hasUnsavedChanges) {
-      await handleCreateSnapshot(); // Create snapshot before saving if changes exist
+      await handleCreateSnapshot(); 
     }
 
     setIsSaving(true);
@@ -312,13 +315,11 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   }, [toast, fileName]);
   
   const handleToggleLockSnapshot = useCallback(async (snapshotId: string) => {
-    // Placeholder: In a real app, this would make an API call.
     setServerSnapshots(prev => prev.map(s => s.id === snapshotId ? {...s, isLocked: !s.isLocked} : s));
     setTimeout(() => toast({ title: "Snapshot Lock Toggled (Client)", description: "Server-side persistence is not yet implemented." }),0);
-  }, []);
+  }, [toast]);
   
   const handleDeleteSnapshot = useCallback(async (snapshotIdToDelete: string) => {
-    // Placeholder: In a real app, this would make an API call.
     setServerSnapshots(prev => prev.filter(s => s.id !== snapshotIdToDelete));
     setTimeout(() => toast({ title: "Snapshot Deleted (Client)", description: "Server-side deletion is not yet implemented."}), 0);
   }, [toast]);
@@ -336,12 +337,12 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     }
     const view = editorRef.current.view;
     const cursor = new SearchCursor(view.state.doc, query, 0, view.state.doc.length, caseSensitive ? undefined : (a,b) => a.toLowerCase() === b.toLowerCase());
-    const matches: Array<{ from: number; to: number }>> = [];
-    while (!cursor.next().done) { matches.push({ from: cursor.value.from, to: cursor.value.to }); }
-    setSearchMatches(matches);
-    if (matches.length > 0) {
+    const matchesFound: Array<{ from: number; to: number }>> = [];
+    while (!cursor.next().done) { matchesFound.push({ from: cursor.value.from, to: cursor.value.to }); }
+    setSearchMatches(matchesFound);
+    if (matchesFound.length > 0) {
       setCurrentMatchIndex(0);
-      view.dispatch({ selection: EditorSelection.single(matches[0].from, matches[0].to), effects: EditorView.scrollIntoView(matches[0].from, { y: "center" }) });
+      view.dispatch({ selection: EditorSelection.single(matchesFound[0].from, matchesFound[0].to), effects: EditorView.scrollIntoView(matchesFound[0].from, { y: "center" }) });
     } else {
       setCurrentMatchIndex(-1);
       setTimeout(() => toast({ title: "Not Found", description: `"${query}" was not found.`, duration: 2000 }),0);
@@ -363,6 +364,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   }, [searchMatches]);
   const handleNextSearchMatch = useCallback(() => { if (searchMatches.length === 0) return; const nextIndex = (currentMatchIndex + 1) % searchMatches.length; goToMatch(nextIndex); }, [currentMatchIndex, searchMatches, goToMatch]);
   const handlePreviousSearchMatch = useCallback(() => { if (searchMatches.length === 0) return; const prevIndex = (currentMatchIndex - 1 + searchMatches.length) % searchMatches.length; goToMatch(prevIndex); }, [currentMatchIndex, searchMatches, goToMatch]);
+  
   const toggleCaseSensitiveSearch = () => { 
     const newCaseSensitive = !isCaseSensitiveSearch;
     setIsCaseSensitiveSearch(newCaseSensitive); 
@@ -441,7 +443,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         return;
       }
     }
-    if (isMaximized) setIsMaximized(false); // Reset maximized state on close
+    if (isMaximized) setIsMaximized(false);
     onOpenChange(false);
     resetEditorState();
   };
@@ -532,10 +534,24 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
 
           {isSearchWidgetOpen && (
             <div className="absolute top-2 right-2 z-10 bg-card p-2 rounded-lg shadow-lg border w-60 space-y-1.5">
-              <div className="flex items-center justify-between mb-1"><Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsSearchWidgetOpen(false)}><X className="h-3 w-3" /></Button></div>
+              <div className="flex items-center justify-between mb-1">
+                 {/* Removed "Find in File" title */}
+                <Button variant="ghost" size="icon" className="h-6 w-6 ml-auto" onClick={() => setIsSearchWidgetOpen(false)}><X className="h-3 w-3" /></Button>
+              </div>
               <Input id="find-query-widget" value={searchQuery} onChange={handleSearchInputChange} placeholder="Search..." className="h-7 text-xs px-2 py-1" autoFocus onKeyDown={(e) => { if (e.key === 'Enter' && searchQuery.trim()) performSearch(searchQuery, isCaseSensitiveSearch); }}/>
-              <div className="flex items-center justify-between gap-1 flex-wrap"><div className="flex items-center gap-0.5"><TooltipProvider><Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={handlePreviousSearchMatch} disabled={searchMatches.length === 0}><ChevronUp className="h-3 w-3" /></Button></TooltipTrigger><TooltipContent><p>Previous</p></TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={handleNextSearchMatch} disabled={searchMatches.length === 0}><ChevronDown className="h-3 w-3" /></Button></TooltipTrigger><TooltipContent><p>Next</p></TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button type="button" variant={isCaseSensitiveSearch ? "secondary" : "ghost"} size="icon" className="h-6 w-6" onClick={toggleCaseSensitiveSearch}><CaseSensitive className="h-3 w-3" /></Button></TooltipTrigger><TooltipContent><p>Case Sensitive ({isCaseSensitiveSearch ? "On" : "Off"})</p></TooltipContent></Tooltip></TooltipProvider></div><span className="text-xs text-muted-foreground px-1 truncate">{searchMatches.length > 0 ? `${currentMatchIndex + 1} of ${searchMatches.length}` : searchQuery.trim() ? "No matches" : ""}</span></div>
-              <div className="flex flex-wrap gap-1 pt-1">{PRESET_SEARCH_TERMS.map(term => (<Button key={term} variant="outline" size="xs" className="text-xs px-1.5 py-0.5 h-auto" onClick={() => handlePresetSearch(term)}>{term}</Button>))}</div>
+              <div className="flex items-center justify-between gap-1 flex-wrap">
+                <div className="flex items-center gap-0.5">
+                    <TooltipProvider><Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={handlePreviousSearchMatch} disabled={searchMatches.length === 0}><ChevronUp className="h-3 w-3" /></Button></TooltipTrigger><TooltipContent><p>Previous</p></TooltipContent></Tooltip></TooltipProvider>
+                    <TooltipProvider><Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={handleNextSearchMatch} disabled={searchMatches.length === 0}><ChevronDown className="h-3 w-3" /></Button></TooltipTrigger><TooltipContent><p>Next</p></TooltipContent></Tooltip></TooltipProvider>
+                    <TooltipProvider><Tooltip><TooltipTrigger asChild><Button type="button" variant={isCaseSensitiveSearch ? "secondary" : "ghost"} size="icon" className="h-6 w-6" onClick={toggleCaseSensitiveSearch}><CaseSensitive className="h-3 w-3" /></Button></TooltipTrigger><TooltipContent><p>Case Sensitive ({isCaseSensitiveSearch ? "On" : "Off"})</p></TooltipContent></Tooltip></TooltipProvider>
+                </div>
+                <span className="text-xs text-muted-foreground px-1 truncate">{searchMatches.length > 0 ? `${currentMatchIndex + 1} of ${searchMatches.length}` : searchQuery.trim() ? "No matches" : ""}</span>
+              </div>
+              <div className="flex flex-wrap gap-1 pt-1">
+                {PRESET_SEARCH_TERMS.map(term => (
+                  <Button key={term} variant="outline" size="xs" className="text-xs px-1.5 py-0.5 h-auto" onClick={() => handlePresetSearch(term)}>{term}</Button>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -552,3 +568,4 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   );
 }
 
+    
