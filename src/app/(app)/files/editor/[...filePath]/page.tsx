@@ -5,7 +5,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import CodeEditor from '@/components/ui/code-editor'; // Corrected to default import
+import CodeEditor from '@/components/ui/code-editor';
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -35,6 +35,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuGroup,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"; // Import Tooltip components
 import { v4 as uuidv4 } from 'uuid';
 import { format, formatDistanceToNowStrict } from 'date-fns';
 import SnapshotViewerDialog from '../components/snapshot-viewer-dialog';
@@ -72,7 +73,7 @@ export interface Snapshot {
   isLocked?: boolean;
 }
 
-const MAX_SERVER_SNAPSHOTS = 10; // Matches backend limit
+const MAX_SERVER_SNAPSHOTS = 10;
 
 export default function FileEditorPage() {
   const params = useParams();
@@ -121,9 +122,8 @@ export default function FileEditorPage() {
   const fileName = useMemo(() => path.basename(decodedFilePath || 'Untitled'), [decodedFilePath]);
   const hasUnsavedChanges = useMemo(() => fileContent !== originalFileContent, [fileContent, originalFileContent]);
 
-  // Effect for showing toasts based on error state
   useEffect(() => {
-    if (error && !isImageFile) { // Only show general file errors for non-images here; image errors handled inline
+    if (error && !isImageFile) {
       setTimeout(() => toast({ title: "File Editor Error", description: error, variant: "destructive" }), 0);
     }
   }, [error, toast, isImageFile]);
@@ -147,8 +147,9 @@ export default function FileEditorPage() {
         try {
           errData = await response.json();
         } catch (e) {
-          errData = { error: `Error fetching snapshots: ${response.statusText}`, details: await response.text() };
+          errData = { error: `Server returned non-JSON error: ${response.statusText}`, details: await response.text() };
         }
+        console.error('[FileEditorPage] fetchSnapshots - API error response:', errData);
         throw new Error(errData.error || errData.details || `Failed to fetch snapshots. Status: ${response.status}`);
       }
       const data = await response.json();
@@ -226,6 +227,10 @@ export default function FileEditorPage() {
           }
           setFileContent(data.content);
           setOriginalFileContent(data.content);
+      } else {
+          // For images, we don't load content into editor, but writable status is still relevant
+          setFileContent(''); // Clear content for image files
+          setOriginalFileContent('');
       }
       if (currentGlobalDebug) console.log(`[FileEditorPage] fetchFileContent SUCCESS for: ${decodedFilePath}, writable: ${data.writable}, isImage: ${isImage}`);
       
@@ -275,13 +280,13 @@ export default function FileEditorPage() {
       });
       
       let result;
-      const responseText = await response.text(); // Read response text first
       try {
-        result = JSON.parse(responseText);
+        result = await response.json();
         if (globalDebugModeActive) console.log('[FileEditorPage] handleCreateSnapshot: API Response JSON:', result);
       } catch (e) {
-        if (globalDebugModeActive) console.error('[FileEditorPage] handleCreateSnapshot: Failed to parse API response as JSON. Raw text:', responseText);
-        throw new Error(`Server returned non-JSON response: ${response.status} ${response.statusText}`);
+        const responseText = await response.text();
+        if (globalDebugModeActive) console.error('[FileEditorPage] handleCreateSnapshot: Failed to parse API response as JSON. Status:', response.status, 'Raw text:', responseText);
+        throw new Error(`Server returned non-JSON response: ${response.status} ${response.statusText}. Details: ${responseText}`);
       }
 
       if (!response.ok) {
@@ -301,7 +306,7 @@ export default function FileEditorPage() {
       console.error(`[FileEditorPage] handleCreateSnapshot ERROR for: ${decodedFilePath}`, e);
       const apiErrorMsg = e.message || "An unexpected error occurred while creating the snapshot.";
       setSnapshotError(apiErrorMsg);
-      setTimeout(() => toast({ title: "Error Creating Snapshot", description: apiErrorMsg, variant: "destructive" }),0);
+      // Error toast already handled by the useEffect for snapshotError
     } finally {
       setIsCreatingSnapshot(false);
     }
@@ -324,12 +329,12 @@ export default function FileEditorPage() {
 
     if (hasUnsavedChanges) {
       if (globalDebugModeActive) console.log(`[FileEditorPage] handleSaveChanges: Creating snapshot due to unsaved changes.`);
-      await handleCreateSnapshot(); 
+      // Don't await this, let it run in background if it's just for backup
+      handleCreateSnapshot(); 
     } else if (globalDebugModeActive) {
-      if (globalDebugModeActive) console.log(`[FileEditorPage] handleSaveChanges: No unsaved changes, but creating snapshot due to debug mode.`);
-      await handleCreateSnapshot();
+      if (globalDebugModeActive) console.log(`[FileEditorPage] handleSaveChanges: No unsaved changes, but creating snapshot due to debug mode if enabled (though snapshot is already created).`);
+      // No need to call handleCreateSnapshot again if globalDebugModeActive was the reason to enable Save button
     }
-
 
     setIsSaving(true);
     setError(null); 
@@ -357,9 +362,9 @@ export default function FileEditorPage() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const canSave = !isSaving && isWritable && (hasUnsavedChanges || globalDebugModeActive) && !isImageFile;
       if ((event.ctrlKey || event.metaKey) && event.key === 's') {
         event.preventDefault();
-        const canSave = !isSaving && isWritable && (hasUnsavedChanges || globalDebugModeActive) && !isImageFile;
         if (canSave) {
           handleSaveChanges();
         } else {
@@ -383,7 +388,6 @@ export default function FileEditorPage() {
       return;
     }
     if (globalDebugModeActive) console.log("[FileEditorPage] handleFind: Opening search panel.");
-    // Ensure the dispatch happens after any pending state updates from CodeMirror itself
     setTimeout(() => editorRef.current!.view!.dispatch({ effects: openSearchPanel.of() }), 0);
   }, [toast, isImageFile, globalDebugModeActive]);
   
@@ -408,23 +412,31 @@ export default function FileEditorPage() {
   }, [toast, fileName, globalDebugModeActive]);
 
   const handleToggleLockSnapshot = useCallback(async (snapshotId: string) => {
+    // TODO: This should call a backend API endpoint
     if (globalDebugModeActive) console.log(`[FileEditorPage] handleToggleLockSnapshot CALLED for snapshot ID: ${snapshotId}`);
-    // TODO: Implement backend call for locking/unlocking
-    setServerSnapshots(prev => 
-        prev.map(s => s.id === snapshotId ? {...s, isLocked: !s.isLocked} : s)
-    );
-    const snapshot = serverSnapshots.find(s => s.id === snapshotId);
+    const snapshotIndex = serverSnapshots.findIndex(s => s.id === snapshotId);
+    if (snapshotIndex === -1) {
+      setSnapshotError("Snapshot not found to toggle lock.");
+      return;
+    }
+    
+    const updatedSnapshot = { ...serverSnapshots[snapshotIndex], isLocked: !serverSnapshots[snapshotIndex].isLocked };
+    // For now, client-side update only
+    const updatedSnapshots = [...serverSnapshots];
+    updatedSnapshots[snapshotIndex] = updatedSnapshot;
+    setServerSnapshots(updatedSnapshots);
+
     setTimeout(() => toast({ 
-        title: snapshot?.isLocked ? "Snapshot Unlocked (Client Only)" : "Snapshot Locked (Client Only)", 
-        description: "Server-side persistence for lock state is pending."
+        title: updatedSnapshot.isLocked ? "Snapshot Locked (Client)" : "Snapshot Unlocked (Client)", 
+        description: "Server-side lock persistence is pending API implementation."
     }), 0);
-  }, [toast, serverSnapshots, globalDebugModeActive]);
+  }, [serverSnapshots, globalDebugModeActive, toast]);
 
   const handleDeleteSnapshot = useCallback(async (snapshotIdToDelete: string) => {
+    // TODO: This should call a backend API endpoint
     if (globalDebugModeActive) console.log(`[FileEditorPage] handleDeleteSnapshot CALLED for snapshot ID: ${snapshotIdToDelete}`);
-     // TODO: Implement backend call for deleting
     setServerSnapshots(prev => prev.filter(s => s.id !== snapshotIdToDelete));
-    setTimeout(() => toast({ title: "Snapshot Deleted (Client Only)", description: "Server-side deletion is pending."}), 0);
+    setTimeout(() => toast({ title: "Snapshot Deleted (Client)", description: "Server-side deletion is pending API implementation."}), 0);
   }, [toast, globalDebugModeActive]);
 
   const handleViewSnapshotInPopup = (snapshot: Snapshot) => {
@@ -466,9 +478,8 @@ export default function FileEditorPage() {
     );
   }
 
-  const saveButtonDisabled = isSaving || !isWritable || (!hasUnsavedChanges && !globalDebugModeActive) || isImageFile;
+  const saveButtonDisabled = isSaving || !isWritable || (!hasUnsavedChanges && !globalDebugModeActive);
   const createSnapshotButtonDisabled = isCreatingSnapshot || isLoadingSnapshots || isImageFile || (!globalDebugModeActive && !hasUnsavedChanges);
-
 
   return (
     <div className="flex flex-col h-full max-h-[calc(100vh-var(--header-height,6rem)-2rem)]">
@@ -483,110 +494,132 @@ export default function FileEditorPage() {
       />
       
       <>
-        <div className="flex-shrink-0 flex items-center justify-between p-2 border-b bg-muted/50">
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleSaveChanges}
-              disabled={saveButtonDisabled}
-              className="shadow-sm hover:scale-105"
-            >
-              {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-              Save
-            </Button>
-            {!isImageFile && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleFind}
-                className="shadow-sm hover:scale-105"
-              >
-                <SearchIcon className="mr-2 h-4 w-4" /> Find
-              </Button>
-            )}
-            {!isImageFile && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="shadow-sm hover:scale-105"
-                  disabled={isLoadingSnapshots || isImageFile}
-                >
-                  {isLoadingSnapshots || isCreatingSnapshot ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Camera className="mr-2 h-4 w-4" />} Snapshots
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-96 max-w-[90vw]">
-                <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
-                  Server-side Snapshots (Max: {MAX_SERVER_SNAPSHOTS})
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onSelect={handleCreateSnapshot}
-                  disabled={createSnapshotButtonDisabled}
-                >
-                  {isCreatingSnapshot ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
-                  Create Snapshot (Content & Lang)
-                </DropdownMenuItem>
+        <TooltipProvider>
+          <div className="flex-shrink-0 flex items-center justify-between p-2 border-b bg-muted/50">
+            <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleSaveChanges}
+                    disabled={saveButtonDisabled || isImageFile}
+                    className="shadow-sm hover:scale-105"
+                  >
+                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Save Changes (Ctrl+S)</p>
+                </TooltipContent>
+              </Tooltip>
+              {!isImageFile && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={handleFind}
+                      className="shadow-sm hover:scale-105"
+                    >
+                      <SearchIcon className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Find (Ctrl+F)</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mr-2">
+              <span>{fileName}</span>
+              {!isImageFile && (
+                <>
+                  <span className="mx-1">|</span>
+                  <span>Lang: {editorLanguage}</span>
+                  <span className="mx-1">|</span>
+                  <span>Chars: {fileContent.length}</span>
+                  <span className="mx-1">|</span>
+                  <span>Lines: {fileContent.split('\n').length}</span>
+                  {hasUnsavedChanges && <span className="ml-1 font-semibold text-amber-500">* Unsaved</span>}
+                </>
+              )}
+              {!isWritable && <span className="ml-2 font-semibold text-destructive">(Read-only)</span>}
+              {!isImageFile && (
+                <Tooltip>
+                  <DropdownMenu>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="shadow-sm hover:scale-105 w-7 h-7" // Made smaller
+                          disabled={isLoadingSnapshots || isImageFile}
+                        >
+                          {isLoadingSnapshots || isCreatingSnapshot ? <Loader2 className="h-3 w-3 animate-spin"/> : <Camera className="h-3 w-3" />}
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Snapshots</p>
+                    </TooltipContent>
+                    <DropdownMenuContent align="end" className="w-96 max-w-[90vw]">
+                      <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
+                        Server-side Snapshots (Max: {MAX_SERVER_SNAPSHOTS})
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={handleCreateSnapshot}
+                        disabled={createSnapshotButtonDisabled}
+                      >
+                        {isCreatingSnapshot ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
+                        Create Snapshot (Content & Lang)
+                      </DropdownMenuItem>
 
-                {serverSnapshots.length > 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuGroup>
-                      <DropdownMenuLabel className="text-xs px-2">Recent Snapshots ({serverSnapshots.length})</DropdownMenuLabel>
-                      {snapshotError && <DropdownMenuLabel className="text-xs px-2 text-destructive">{snapshotError}</DropdownMenuLabel>}
-                      {serverSnapshots.map(snapshot => (
-                        <DropdownMenuItem key={snapshot.id} className="flex justify-between items-center" onSelect={(e) => e.preventDefault()}>
-                          <span onClick={() => handleLoadSnapshot(snapshot)} className="cursor-pointer flex-grow hover:text-primary text-xs truncate pr-2">
-                            {format(new Date(snapshot.timestamp), 'HH:mm:ss')} ({formatDistanceToNowStrict(new Date(snapshot.timestamp))} ago) - Lang: {snapshot.language}
-                          </span>
-                          <div className="flex items-center ml-1 gap-0.5 flex-shrink-0">
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSnapshotInPopup(snapshot)} title="View Snapshot">
-                              <Eye className="h-3 w-3" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleLockSnapshot(snapshot.id)} title={snapshot.isLocked ? "Unlock Snapshot" : "Lock Snapshot"}>
-                              {snapshot.isLocked ? <Lock className="h-3 w-3 text-destructive" /> : <Unlock className="h-3 w-3 text-muted-foreground" />}
-                            </Button>
-                             <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground hover:bg-destructive/10" onClick={() => handleDeleteSnapshot(snapshot.id)} title="Delete Snapshot">
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuGroup>
-                  </>
-                )}
-                {serverSnapshots.length === 0 && !isLoadingSnapshots && !isCreatingSnapshot && !snapshotError && (
-                   <DropdownMenuLabel className="text-xs text-muted-foreground px-2 italic py-1">No snapshots yet.</DropdownMenuLabel>
-                )}
+                      {serverSnapshots.length > 0 && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuGroup>
+                            <DropdownMenuLabel className="text-xs px-2">Recent Snapshots ({serverSnapshots.length})</DropdownMenuLabel>
+                            {snapshotError && <DropdownMenuLabel className="text-xs px-2 text-destructive">{snapshotError}</DropdownMenuLabel>}
+                            {serverSnapshots.map(snapshot => (
+                              <DropdownMenuItem key={snapshot.id} className="flex justify-between items-center" onSelect={(e) => e.preventDefault()}>
+                                <span onClick={() => handleLoadSnapshot(snapshot)} className="cursor-pointer flex-grow hover:text-primary text-xs truncate pr-2">
+                                  {format(new Date(snapshot.timestamp), 'HH:mm:ss')} ({formatDistanceToNowStrict(new Date(snapshot.timestamp))} ago) - Lang: {snapshot.language}
+                                </span>
+                                <div className="flex items-center ml-1 gap-0.5 flex-shrink-0">
+                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSnapshotInPopup(snapshot)} title="View Snapshot">
+                                    <Eye className="h-3 w-3" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleLockSnapshot(snapshot.id)} title={snapshot.isLocked ? "Unlock Snapshot" : "Lock Snapshot"}>
+                                    {snapshot.isLocked ? <Lock className="h-3 w-3 text-destructive" /> : <Unlock className="h-3 w-3 text-muted-foreground" />}
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground hover:bg-destructive/10" onClick={() => handleDeleteSnapshot(snapshot.id)} title="Delete Snapshot">
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuGroup>
+                        </>
+                      )}
+                      {serverSnapshots.length === 0 && !isLoadingSnapshots && !isCreatingSnapshot && !snapshotError && (
+                        <DropdownMenuLabel className="text-xs text-muted-foreground px-2 italic py-1">No snapshots yet.</DropdownMenuLabel>
+                      )}
 
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel className="text-xs text-muted-foreground px-2 whitespace-normal">
-                  Snapshots are stored on the server. Locked snapshots are less likely to be auto-pruned.
-                </DropdownMenuLabel>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            )}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-muted-foreground px-2 whitespace-normal">
+                        Snapshots are stored on the server. Locked snapshots are less likely to be auto-pruned.
+                      </DropdownMenuLabel>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </Tooltip>
+              )}
+            </div>
           </div>
-          <div className="text-xs text-muted-foreground flex items-center gap-2 mr-2">
-            <span>{fileName}</span>
-            {!isImageFile && (
-              <>
-                <span className="mx-1">|</span>
-                <span>Lang: {editorLanguage}</span>
-                <span className="mx-1">|</span>
-                <span>Chars: {fileContent.length}</span>
-                <span className="mx-1">|</span>
-                <span>Lines: {fileContent.split('\n').length}</span>
-                {hasUnsavedChanges && <span className="ml-1 font-semibold text-amber-500">* Unsaved</span>}
-              </>
-            )}
-            {!isWritable && <span className="ml-2 font-semibold text-destructive">(Read-only)</span>}
-          </div>
-        </div>
+        </TooltipProvider>
 
-        {!isWritable && (
+        {!isWritable && !isImageFile && (
           <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
             <FileWarning className="h-4 w-4" />
             <AlertTitle>Read-only Mode</AlertTitle>
@@ -656,4 +689,3 @@ export default function FileEditorPage() {
     </div>
   );
 }
-
