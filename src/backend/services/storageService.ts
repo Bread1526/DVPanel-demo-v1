@@ -1,5 +1,5 @@
 // src/backend/services/storageService.ts
-'use server';
+// 'use server'; // This directive should NOT be here as this file exports non-async utilities/constants if it had them.
 
 /**
  * @fileOverview Service for storing and retrieving data from local JSON files.
@@ -14,15 +14,14 @@ import { getInstallationCode, getDataPath } from '@/backend/lib/config';
 const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12; // bytes
 const AUTH_TAG_LENGTH = 16; // bytes
-const KEY_LENGTH = 32; // bytes for AES-256
+// const KEY_LENGTH = 32; // bytes for AES-256 (derived key will be 32 bytes from sha256)
 
 /**
- * Derives a consistent 32-byte key from the installation code.
+ * Derives a consistent 32-byte key from the installation code using SHA-256.
  * @returns {Buffer} The derived 32-byte key.
  */
 function getDerivedKey(): Buffer {
   const installationCode = getInstallationCode();
-  // Ensure installationCode is a string before passing to update
   return crypto.createHash('sha256').update(String(installationCode)).digest();
 }
 
@@ -33,16 +32,17 @@ function getDerivedKey(): Buffer {
  */
 async function ensureDataDirectoryExists(): Promise<void> {
   const dataPath = getDataPath();
-  // console.log(`[StorageService - ensureDataDirectoryExists] Checking/creating data path: ${dataPath}`); 
+  // Unconditional log to always see the path being checked/created
+  console.log(`[StorageService - ensureDataDirectoryExists] Checking/creating data path: ${dataPath}`);
   if (!fs.existsSync(dataPath)) {
-    console.log(`[StorageService - ensureDataDirectoryExists] Data directory does not exist, attempting to create: ${dataPath}`);
+    console.warn(`[StorageService - ensureDataDirectoryExists] Data directory does not exist, attempting to create: ${dataPath}`);
     try {
       fs.mkdirSync(dataPath, { recursive: true });
       console.log(`[StorageService - ensureDataDirectoryExists] Data directory successfully created: ${dataPath}`);
     } catch (error: any) {
       const detailedMessage = `Storage Service FATAL ERROR: Failed to create data directory at '${dataPath}'. Please check permissions. System Error: ${error.message || String(error)}`;
       console.error(`[StorageService - ensureDataDirectoryExists] ${detailedMessage}`, error);
-      throw new Error(detailedMessage); // Re-throw to stop the calling action
+      throw new Error(detailedMessage);
     }
   } else {
     // console.log(`[StorageService - ensureDataDirectoryExists] Data directory already exists: ${dataPath}`);
@@ -56,15 +56,14 @@ async function ensureDataDirectoryExists(): Promise<void> {
  * @throws {Error} If saving or encryption fails.
  */
 export async function saveEncryptedData(filename: string, data: object): Promise<void> {
-  // This call will throw and halt execution if directory cannot be ensured
-  await ensureDataDirectoryExists(); 
-  
+  await ensureDataDirectoryExists(); // This call can throw and halt execution if directory cannot be ensured
+
   const derivedKey = getDerivedKey();
   const dataPath = getDataPath();
   const filePath = path.join(dataPath, filename);
 
   const dataSnippetForLog = JSON.stringify(data)?.substring(0, 200) + (JSON.stringify(data)?.length > 200 ? "..." : "");
-  // This log is now unconditional to ensure we always see what's being attempted
+  // Unconditional log to always see what's being attempted
   console.log(`[StorageService - saveEncryptedData] Attempting to write to: '${filePath}'. Data snippet: ${dataSnippetForLog}`);
 
   try {
@@ -76,6 +75,7 @@ export async function saveEncryptedData(filename: string, data: object): Promise
     encryptedDataBuffer = Buffer.concat([encryptedDataBuffer, cipher.final()]);
     const authTag = cipher.getAuthTag();
 
+    // Store IV, authTag, and ciphertext together, e.g., separated by a colon
     const fileContent = `${iv.toString('hex')}:${authTag.toString('hex')}:${encryptedDataBuffer.toString('hex')}`;
 
     fs.writeFileSync(filePath, fileContent, 'utf8');
@@ -93,8 +93,9 @@ export async function saveEncryptedData(filename: string, data: object): Promise
  * @returns {Promise<object | null>} The loaded and decrypted data, or null if the file doesn't exist or decryption fails.
  */
 export async function loadEncryptedData(filename: string): Promise<object | null> {
+  // No need to call ensureDataDirectoryExists() here, as if it doesn't exist, existsSync below will handle it.
   const derivedKey = getDerivedKey();
-  const dataPath = getDataPath(); 
+  const dataPath = getDataPath();
   const filePath = path.join(dataPath, filename);
 
   // console.log(`[StorageService - loadEncryptedData] Attempting to load from: ${filePath}`);
@@ -147,5 +148,3 @@ export async function loadEncryptedData(filename: string): Promise<object | null
     return null; // Return null on decryption, parse, or unexpected load failure
   }
 }
-
-    
