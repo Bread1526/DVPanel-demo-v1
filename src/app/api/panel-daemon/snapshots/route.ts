@@ -7,6 +7,7 @@ import { loadEncryptedData, saveEncryptedData } from "@/backend/services/storage
 import { v4 as uuidv4 } from 'uuid';
 import type { Snapshot } from '@/app/(app)/files/editor/[...filePath]/page';
 import { loadPanelSettings } from '@/app/(app)/settings/actions';
+import { getDataPath } from '@/backend/lib/config'; // To construct full path for mkdir
 
 const BASE_DIR = process.env.FILE_MANAGER_BASE_DIR || '/';
 const MAX_SERVER_SNAPSHOTS = 10;
@@ -43,52 +44,37 @@ function resolveSafeOriginalFilePath(relativePath: string): string {
   return absolutePath;
 }
 
-// Helper function to get the path for the snapshots JSON file.
-// originalFilePathRelativeFromBase should be the path *as sent by the client*, relative to BASE_DIR or absolute if BASE_DIR is /.
-function getSnapshotStorageInfo(originalFilePathRelativeFromBase: string): { snapshotDir: string, snapshotFilename: string, fullSnapshotPathForFs: string, relativeSnapshotPathForStorage: string } {
-  const baseDirNormalized = path.normalize(BASE_DIR);
-  
-  // Determine the absolute path of the original file this snapshot belongs to
-  let absoluteOriginalPath = path.normalize(path.join(baseDirNormalized, originalFilePathRelativeFromBase));
-  if (BASE_DIR === '/' && originalFilePathRelativeFromBase.startsWith('/')) {
-    absoluteOriginalPath = path.normalize(originalFilePathRelativeFromBase);
-  }
+// Helper to get snapshot storage path info
+// originalFilePathRelativeFromBase should be the path *as sent by the client*, 
+// relative to BASE_DIR (e.g., "myfolder/myfile.txt") or absolute if BASE_DIR is / (e.g., "/var/www/myfile.txt")
+function getSnapshotStorageInfo(originalFilePathRelativeFromBase: string): {
+  relativeSnapshotPathForStorage: string; // Path relative to dataPath for storageService
+} {
+  const originalFilename = path.basename(originalFilePathRelativeFromBase);
+  const originalDirRelativeFromBase = path.dirname(originalFilePathRelativeFromBase);
 
-  const originalDir = path.dirname(absoluteOriginalPath);
-  const originalFilename = path.basename(absoluteOriginalPath);
-  
   const sanitizedOriginalFilename = originalFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
   const snapshotFilename = `${sanitizedOriginalFilename}-snapshots.json`;
-  
-  // Full path for direct fs access (e.g., for checking directory existence)
-  const fullSnapshotPathForFs = path.join(originalDir, snapshotFilename);
 
-  // Path relative to dataPath used by storageService (which appends dataPath internally)
-  let relativeSnapshotPathForStorage: string;
-  if (BASE_DIR === '/') {
-    // If BASE_DIR is root, originalFilePathRelativeFromBase is likely an absolute path.
-    // We need its dirname relative to root, then append snapshot filename.
-    const dirOfOriginalRelativeToRoot = path.dirname(originalFilePathRelativeFromBase.startsWith('/') ? originalFilePathRelativeFromBase.substring(1) : originalFilePathRelativeFromBase);
-    relativeSnapshotPathForStorage = path.join(dirOfOriginalRelativeToRoot === '.' ? '' : dirOfOriginalRelativeToRoot, snapshotFilename).replace(/\\/g, '/');
-  } else {
-    // If BASE_DIR is specific, originalFilePathRelativeFromBase is relative to it.
-    // We need to make it relative to dataPath's root if dataPath is different from BASE_DIR,
-    // or simply use the structure if dataPath *is* BASE_DIR or a sub-path.
-    // For simplicity now, assuming storageService handles dataPath correctly and we provide path relative to "file system structure within dataPath"
-    const dirOfRelativeOriginal = path.dirname(originalFilePathRelativeFromBase);
-    relativeSnapshotPathForStorage = path.join(dirOfRelativeOriginal === '.' ? '' : dirOfRelativeOriginal, snapshotFilename).replace(/\\/g, '/');
-  }
-   if (relativeSnapshotPathForStorage.startsWith('/')) {
+  // Path used as key for storageService (relative to its root, which is dataPath)
+  // This path includes the directory structure of the original file relative to BASE_DIR
+  let relativeSnapshotPathForStorage = path.join(
+    originalDirRelativeFromBase === '.' ? '' : originalDirRelativeFromBase, // Avoid leading './' if file is in root of BASE_DIR
+    snapshotFilename
+  ).replace(/\\/g, '/'); // Normalize to forward slashes
+
+  // If originalFilePathRelativeFromBase started with '/', it means it was an absolute path (when BASE_DIR is /)
+  // In this case, originalDirRelativeFromBase might be '/' or '/some/path'.
+  // We need to ensure the relative path for storage doesn't start with a leading slash if it's meant to be joined with dataPath.
+  if (relativeSnapshotPathForStorage.startsWith('/')) {
     relativeSnapshotPathForStorage = relativeSnapshotPathForStorage.substring(1);
   }
   
   return { 
-    snapshotDir: originalDir, // Absolute path to directory containing the original file
-    snapshotFilename, 
-    fullSnapshotPathForFs, // Absolute path to the snapshot JSON file
-    relativeSnapshotPathForStorage // Path used as key for storageService (relative to its root)
+    relativeSnapshotPathForStorage
   };
 }
+
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -102,9 +88,12 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // First, ensure the original file itself is valid and accessible for context
     const safeOriginalFilePath = resolveSafeOriginalFilePath(originalFilePathRelative); 
     if (!fs.existsSync(safeOriginalFilePath) || fs.statSync(safeOriginalFilePath).isDirectory()) {
-        if (debugMode) console.warn(`[API /snapshots GET] Original file not found or is a directory: ${safeOriginalFilePath}`);
+        if (debugMode) console.warn(`[API /snapshots GET] Original file for which snapshots are requested not found or is a directory: ${safeOriginalFilePath}`);
+        // Return empty if original file context is problematic, or could be an error.
+        // For listing, returning empty is often acceptable if source is gone.
         return NextResponse.json({ snapshots: [] }, { status: 200 }); 
     }
 
@@ -125,7 +114,6 @@ export async function GET(request: NextRequest) {
     if (error.message?.startsWith('Access denied')) {
       return NextResponse.json({ error: error.message, details: `Path: ${originalFilePathRelative}` }, { status: 403 });
     }
-    // Ensure a JSON response for other errors too
     return NextResponse.json({ error: 'Failed to list snapshots.', details: error.message }, { status: 500 });
   }
 }
@@ -138,7 +126,7 @@ export async function POST(request: NextRequest) {
   try {
     try {
       body = await request.json();
-      if (debugMode) console.log("[API /snapshots POST] Received body:", body);
+      if (debugMode) console.log("[API /snapshots POST] Received body for snapshot creation:", JSON.stringify(body).substring(0, 200) + "...");
     } catch (e: any) {
       if (debugMode) console.warn("[API /snapshots POST] Invalid JSON in request body:", e.message);
       return NextResponse.json({ error: "Invalid JSON in request body.", details: e.message }, { status: 400 });
@@ -151,37 +139,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Original file path (filePath) is required.' }, { status: 400 });
     }
     if (typeof content !== 'string') {
-      if (debugMode) console.warn("[API /snapshots POST] 'content' is required in body.");
+      if (debugMode) console.warn("[API /snapshots POST] 'content' for snapshot is required in body.");
       return NextResponse.json({ error: 'Snapshot content is required.' }, { status: 400 });
     }
     if (typeof language !== 'string') {
-      if (debugMode) console.warn("[API /snapshots POST] 'language' is required in body.");
+      if (debugMode) console.warn("[API /snapshots POST] 'language' for snapshot is required in body.");
       return NextResponse.json({ error: 'Snapshot language is required.' }, { status: 400 });
     }
     
+    // Ensure original file exists and is not a directory before creating snapshot metadata for it
     const safeOriginalFilePath = resolveSafeOriginalFilePath(originalFilePathRelative);
     if (!fs.existsSync(safeOriginalFilePath) || fs.statSync(safeOriginalFilePath).isDirectory()) {
         if (debugMode) console.warn(`[API /snapshots POST] Original file for snapshot not found or is a directory: ${safeOriginalFilePath}`);
-        return NextResponse.json({ error: 'Original file not found or is a directory, cannot create snapshot.' }, { status: 404 });
+        return NextResponse.json({ error: 'Original file not found or is a directory, cannot create snapshot.' , details: `Path: ${originalFilePathRelative}`}, { status: 404 });
     }
 
-    const { relativeSnapshotPathForStorage, snapshotDir, fullSnapshotPathForFs } = getSnapshotStorageInfo(originalFilePathRelative);
-    if (debugMode) console.log(`[API /snapshots POST] Creating snapshot for: ${originalFilePathRelative}. Storing with key: ${relativeSnapshotPathForStorage}. Snapshot file will be in dir: ${snapshotDir}`);
+    const { relativeSnapshotPathForStorage } = getSnapshotStorageInfo(originalFilePathRelative);
+    if (debugMode) console.log(`[API /snapshots POST] Creating snapshot for: ${originalFilePathRelative}. Storing with key: ${relativeSnapshotPathForStorage}.`);
     
+    // Ensure the directory for the snapshot file exists within the dataPath
+    const dataPath = getDataPath();
+    const fullSnapshotFilePath = path.join(dataPath, relativeSnapshotPathForStorage);
+    const fullDirForSnapshotFile = path.dirname(fullSnapshotFilePath);
+
     try {
-        // Ensure the directory for the snapshot file exists (storageService's dataPath + relative path)
-        // Note: storageService's ensureDataDirectoryExists only ensures its root dataPath.
-        // We need to ensure the subdirectories for snapshots (mirroring original file structure) also exist.
-        const fullDirForSnapshotFile = path.dirname(fullSnapshotPathForFs);
         if (!fs.existsSync(fullDirForSnapshotFile)) {
             fs.mkdirSync(fullDirForSnapshotFile, { recursive: true });
             if (debugMode) console.log(`[API /snapshots POST] Created snapshot file directory: ${fullDirForSnapshotFile}`);
         }
+        // Check write access to the directory where the snapshot file will be created
         fs.accessSync(fullDirForSnapshotFile, fs.constants.W_OK);
     } catch(e: any) {
-        const accessErrorMsg = `Permission issue or error creating snapshot directory for ${relativeSnapshotPathForStorage}. Ensure server has write access to ${snapshotDir}.`;
-        console.error(`[API /snapshots POST] ${accessErrorMsg} Error: ${e.message}, Stack: ${e.stack}`);
-        return NextResponse.json({ error: accessErrorMsg, details: e.message }, { status: 500 });
+        const dirErrorMsg = `Failed to prepare snapshot directory at ${fullDirForSnapshotFile}. Ensure server has write permissions.`;
+        console.error(`[API /snapshots POST] ${dirErrorMsg} System Error: ${e.message}`, e.stack);
+        return NextResponse.json({ error: dirErrorMsg, details: e.message }, { status: 500 });
     }
 
     let existingSnapshots: Snapshot[] = [];
@@ -209,7 +200,6 @@ export async function POST(request: NextRequest) {
     const lockedSnapshots = existingSnapshots.filter(s => s.isLocked);
     let unlockedSnapshots = existingSnapshots.filter(s => !s.isLocked);
     
-    // Sort unlocked snapshots by timestamp (oldest first) for pruning
     unlockedSnapshots.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
     const totalAllowedSnapshots = MAX_SERVER_SNAPSHOTS;
@@ -222,14 +212,12 @@ export async function POST(request: NextRequest) {
     }
     
     let finalSnapshots = [...lockedSnapshots, ...unlockedSnapshots];
-    // Sort final list by timestamp (newest first) for consistency before saving
     finalSnapshots.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); 
     
     if (lockedSnapshots.length >= totalAllowedSnapshots && !finalSnapshots.some(s => s.id === newSnapshot.id)) {
         const lockedErrorMsg = `Cannot create new snapshot for ${path.basename(originalFilePathRelative)}. All ${totalAllowedSnapshots} snapshot slots are effectively filled by locked snapshots. Unlock some or delete them.`;
         if (debugMode) console.warn(`[API /snapshots POST] ${lockedErrorMsg}`);
-        // Return the state *before* attempting to add the new snapshot, effectively rejecting the creation
-        const snapshotsBeforeAttempt = existingSnapshots.filter(s => s.id !== newSnapshot.id);
+        const snapshotsBeforeAttempt = existingSnapshots.filter(s => s.id !== newSnapshot.id); // Exclude the one we tried to add
         return NextResponse.json({ 
             error: lockedErrorMsg,
             snapshots: snapshotsBeforeAttempt.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()) 
@@ -237,11 +225,11 @@ export async function POST(request: NextRequest) {
     }
     
     const dataToSave: SnapshotFile = { snapshots: finalSnapshots };
-    if (debugMode) console.log(`[API /snapshots POST] About to save ${finalSnapshots.length} snapshots to ${relativeSnapshotPathForStorage}. Data:`, JSON.stringify(dataToSave).substring(0, 200) + "...");
+    if (debugMode) console.log(`[API /snapshots POST] About to save ${finalSnapshots.length} snapshots to ${relativeSnapshotPathForStorage}.`);
     
     await saveEncryptedData(relativeSnapshotPathForStorage, dataToSave);
 
-    if (debugMode) console.log(`[API /snapshots POST] Snapshot created and saved for ${originalFilePathRelative}. Total snapshots: ${finalSnapshots.length}`);
+    if (debugMode) console.log(`[API /snapshots POST] Snapshot created and saved for ${originalFilePathRelative}. Total snapshots now: ${finalSnapshots.length}`);
     return NextResponse.json({ success: true, message: 'Snapshot created successfully.', snapshots: finalSnapshots });
 
   } catch (error: any) {
@@ -259,4 +247,5 @@ export async function POST(request: NextRequest) {
 // TODO: Implement routes/logic for:
 // - PUT /api/panel-daemon/snapshots/{snapshotId}/lock (or POST with action: 'toggleLock')
 // - DELETE /api/panel-daemon/snapshots/{snapshotId} (or POST with action: 'delete')
-
+// These would likely involve loading the snapshot file, modifying the specific snapshot, and saving back.
+```
