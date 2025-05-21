@@ -21,6 +21,7 @@ import {
   Trash2,
 } from "lucide-react";
 import path from 'path-browserify';
+import Image from 'next/image';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { openSearchPanel } from '@codemirror/search';
 import { loadPanelSettings } from '@/app/(app)/settings/actions';
@@ -35,7 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { v4 as uuidv4 } from 'uuid';
 import { format, formatDistanceToNowStrict } from 'date-fns';
-import SnapshotViewerDialog from '../components/snapshot-viewer-dialog'; // Corrected import path
+import SnapshotViewerDialog from '../components/snapshot-viewer-dialog';
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
@@ -49,7 +50,6 @@ function getLanguageFromFilename(filename: string): string {
     case 'json': return 'json';
     case 'yaml': case 'yml': return 'yaml';
     case 'md': return 'markdown';
-    // case 'sh': case 'bash': return 'shell'; // Shell support removed
     case 'py': return 'python';
     default: return 'plaintext';
   }
@@ -71,6 +71,7 @@ interface Snapshot {
 }
 
 const MAX_SNAPSHOTS = 10;
+const DAEMON_API_BASE_PATH = '/api/panel-daemon';
 
 export default function FileEditorPage() {
   const params = useParams();
@@ -85,7 +86,7 @@ export default function FileEditorPage() {
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isImageFile, setIsImageFile] = useState<boolean>(false);
-
+  
   const [globalDebugModeActive, setGlobalDebugModeActive] = useState<boolean>(false);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [editorLanguage, setEditorLanguage] = useState<string>('plaintext');
@@ -96,7 +97,10 @@ export default function FileEditorPage() {
   const encodedFilePathFromParams = params.filePath;
 
   const decodedFilePath = useMemo(() => {
-    const pathArray = Array.isArray(encodedFilePathFromParams) ? encodedFilePathFromParams : [encodedFilePathFromParams].filter(Boolean);
+    let pathArray = Array.isArray(encodedFilePathFromParams) ? encodedFilePathFromParams : [encodedFilePathFromParams].filter(Boolean);
+    if (pathArray.length === 0 && typeof encodedFilePathFromParams === 'string' && encodedFilePathFromParams) {
+      pathArray = [encodedFilePathFromParams];
+    }
     const joinedPath = pathArray.join('/');
     if (!joinedPath) return '';
     try {
@@ -108,10 +112,7 @@ export default function FileEditorPage() {
   }, [encodedFilePathFromParams]);
 
   const fileName = useMemo(() => path.basename(decodedFilePath || 'Untitled'), [decodedFilePath]);
-
   const hasUnsavedChanges = useMemo(() => fileContent !== originalFileContent, [fileContent, originalFileContent]);
-
-  const DAEMON_API_BASE_PATH = '/api/panel-daemon';
 
   const fetchFileContent = useCallback(async () => {
     if (!decodedFilePath) {
@@ -122,9 +123,7 @@ export default function FileEditorPage() {
 
     setIsLoading(true);
     setError(null);
-    const currentFileLanguage = getLanguageFromFilename(fileName);
-    setEditorLanguage(currentFileLanguage);
-
+    
     try {
       const settingsResult = await loadPanelSettings();
       if (settingsResult.status === 'success' && settingsResult.data) {
@@ -138,11 +137,14 @@ export default function FileEditorPage() {
       setGlobalDebugModeActive(false);
     }
     
-    if (isImageExtension(fileName)) {
-      setIsImageFile(true);
-      // Still fetch metadata like writability for images
+    const currentFileIsImage = isImageExtension(fileName);
+    setIsImageFile(currentFileIsImage);
+    const currentFileLanguage = getLanguageFromFilename(fileName);
+    setEditorLanguage(currentFileLanguage);
+
+    if (currentFileIsImage) {
       try {
-        const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}&view=true`);
+        const response = await fetch(`${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(decodedFilePath)}&view=true`); // for metadata like writability
         if (!response.ok) {
           const errData = await response.json().catch(() => ({ error: `Error fetching image metadata: ${response.statusText}`, details: `Path: ${decodedFilePath}` }));
           throw new Error(errData.error || errData.details || `Failed to fetch image metadata. Status: ${response.status}`);
@@ -151,7 +153,7 @@ export default function FileEditorPage() {
         setIsWritable(data.writable);
       } catch (e: any) {
         setError(e.message || "An unexpected error occurred while fetching image metadata.");
-        setIsWritable(false); // Assume not writable on error
+        setIsWritable(false);
       } finally {
         setIsLoading(false);
       }
@@ -174,20 +176,21 @@ export default function FileEditorPage() {
       setIsWritable(data.writable);
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred while fetching file content.");
-      setIsWritable(false);
+      setIsWritable(false); 
     } finally {
       setIsLoading(false);
     }
-  }, [decodedFilePath, fileName, DAEMON_API_BASE_PATH]);
-
+  }, [decodedFilePath, fileName]);
 
   useEffect(() => {
     if (decodedFilePath) {
       fetchFileContent();
     } else if (encodedFilePathFromParams) {
-      setError("Invalid file path parameter.");
+      // This case might occur if decoding fails but params were present
+      setError("Invalid file path parameter detected after decoding attempts.");
       setIsLoading(false);
     } else {
+       // This case handles when no filePath param is in the URL at all
       setError("No file path provided in URL.");
       setIsLoading(false);
     }
@@ -198,21 +201,18 @@ export default function FileEditorPage() {
       setTimeout(() => toast({ title: "File Editor Error", description: error, variant: "destructive" }), 0);
     }
   }, [error, toast]);
-
+  
   const handleCreateSnapshot = useCallback(() => {
     setSnapshots(prevSnapshots => {
       let updatedSnapshots = [...prevSnapshots];
       if (updatedSnapshots.length >= MAX_SNAPSHOTS) {
         let oldestUnlockedIndex = -1;
-        // Try to find oldest unlocked from the end (most recent first)
         for (let i = updatedSnapshots.length - 1; i >= 0; i--) {
           if (!updatedSnapshots[i].isLocked) {
             oldestUnlockedIndex = i;
-            // No break, we want the *oldest* among the unlocked ones if we iterate from end
           }
         }
-        // If all are locked or no unlocked found from end, try from the start
-        if (oldestUnlockedIndex === -1) {
+        if (oldestUnlockedIndex === -1) { // All are locked, try from the start
             for (let i = 0; i < updatedSnapshots.length; i++) {
                 if (!updatedSnapshots[i].isLocked) {
                     oldestUnlockedIndex = i;
@@ -230,7 +230,7 @@ export default function FileEditorPage() {
             variant: "destructive",
             duration: 7000,
           }),0);
-          return prevSnapshots; // Return original snapshots if limit reached and all are locked
+          return prevSnapshots;
         }
       }
 
@@ -248,22 +248,24 @@ export default function FileEditorPage() {
         title: "Snapshot Created (Client-side)",
         description: `Created snapshot for ${fileName} at ${format(new Date(newSnapshot.timestamp), 'HH:mm:ss')}. Lang: ${newSnapshot.language}`,
       }),0);
-      return [newSnapshot, ...updatedSnapshots]; // Prepend new snapshot
+      return [newSnapshot, ...updatedSnapshots]; 
     });
-  }, [fileContent, editorLanguage, toast, fileName, globalDebugModeActive]);
+  }, [fileContent, editorLanguage, toast, fileName, globalDebugModeActive, snapshots]); // Added snapshots to dependency array
+
 
   const handleSaveChanges = useCallback(async () => {
     if (!decodedFilePath) {
-      setTimeout(() => toast({ title: "Error", description: "No active file to save.", variant: "destructive" }),0);
+      setTimeout(() => toast({ title: "Error", description: "No active file to save.", variant: "destructive" }), 0);
       return;
     }
     if (!isWritable) {
-      setTimeout(() => toast({ title: "Cannot Save", description: "This file is not writable.", variant: "destructive" }),0);
+      setTimeout(() => toast({ title: "Cannot Save", description: "This file is not writable.", variant: "destructive" }), 0);
       return;
     }
 
-    if (hasUnsavedChanges) { // Only create snapshot if actual changes exist
-      handleCreateSnapshot(); 
+    // Create a snapshot if there are unsaved changes before saving
+    if (hasUnsavedChanges) {
+      handleCreateSnapshot();
     }
 
     setIsSaving(true);
@@ -278,8 +280,8 @@ export default function FileEditorPage() {
       if (!response.ok) {
         throw new Error(result.error || result.details || 'Failed to save file.');
       }
-      setTimeout(() => toast({ title: 'Success', description: result.message || `File ${fileName} saved.` }),0);
-      setOriginalFileContent(fileContent); // Update original content after successful save
+      setTimeout(() => toast({ title: 'Success', description: result.message || `File ${fileName} saved.` }), 0);
+      setOriginalFileContent(fileContent); 
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred while saving.");
       setTimeout(() => toast({ title: "Error Saving File", description: e.message, variant: "destructive" }),0);
@@ -315,11 +317,6 @@ export default function FileEditorPage() {
     }
   }, [toast]);
   
-  useEffect(() => {
-    // This effect is just to ensure handleSaveChanges is re-memoized if handleCreateSnapshot changes
-  }, [handleCreateSnapshot]);
-
-
   const handleLoadSnapshot = useCallback((snapshotId: string) => {
     const snapshotToLoad = snapshots.find(s => s.id === snapshotId);
     if (snapshotToLoad) {
@@ -373,7 +370,6 @@ export default function FileEditorPage() {
     setSelectedSnapshotForViewer(snapshot);
     setIsSnapshotViewerOpen(true);
   };
-
 
   if (isLoading) {
     return (
@@ -437,7 +433,7 @@ export default function FileEditorPage() {
               height={600}
               style={{ objectFit: 'contain', maxWidth: '100%', maxHeight: 'calc(100vh - 200px)' }} 
               className="rounded-md shadow-lg"
-              unoptimized 
+              unoptimized
               data-ai-hint="image preview"
             />
           )}
