@@ -4,26 +4,28 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"; // Added CardDescription
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription as DialogDesc, DialogFooter, DialogClose } from "@/components/ui/dialog"; // Renamed DialogDescription
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   MoreHorizontal, Folder, File as FileIconDefault, Upload, Download, Edit3, Trash2, KeyRound, Search, ArrowLeft, Loader2, AlertTriangle,
   FileCode2, FileJson, FileText, ImageIcon, Archive, Shell, FileTerminal, AudioWaveform, VideoIcon, Database, List, Shield, Github, Settings2, ServerCog,
-  FolderPlus, FilePlus, X, FileWarning
+  FolderPlus, FilePlus, X, FileWarning, ChevronRight
 } from "lucide-react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { useToast } from "@/hooks/use-toast";
-import path from 'path-browserify';
-import { formatDistanceToNow, format as formatDate } from 'date-fns';
+import path from 'path-browserify'; // Using path-browserify for client-side path manipulation
+import { format, formatDistanceToNow } from 'date-fns';
+import { CodeEditor } from '@/components/ui/code-editor'; // Assuming this is the correct path
 import PermissionsDialog from './components/permissions-dialog';
-import ImageViewerDialog from './components/image-viewer-dialog'; // New import
+import ImageViewerDialog from './components/image-viewer-dialog';
 import { useRouter } from 'next/navigation';
-// CodeEditor is no longer imported here as editor is on a separate page
+
+const DAEMON_API_BASE_PATH = '/api/panel-daemon';
 
 interface FileItem {
   name: string;
@@ -34,7 +36,16 @@ interface FileItem {
   octalPermissions?: string | null; // e.g., "0755"
 }
 
-const DAEMON_API_BASE_PATH = '/api/panel-daemon';
+interface OpenedFile {
+  path: string;
+  name: string;
+  content: string;
+  originalContent: string;
+  language: string;
+  unsavedChanges: boolean;
+  needsFetching: boolean;
+}
+
 
 function formatBytes(bytes?: number | null, decimals = 2) {
   if (bytes === null || bytes === undefined || !+bytes || bytes === 0) return '0 Bytes';
@@ -43,6 +54,23 @@ function formatBytes(bytes?: number | null, decimals = 2) {
   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+}
+
+function getLanguageFromFilename(filename: string): string {
+  if (!filename) return 'plaintext';
+  const extension = filename.split('.').pop()?.toLowerCase() || '';
+  switch (extension) {
+    case 'js': case 'jsx': return 'javascript';
+    case 'ts': case 'tsx': return 'typescript';
+    case 'html': case 'htm': return 'html';
+    case 'css': case 'scss': return 'css';
+    case 'json': return 'json';
+    case 'yaml': case 'yml': return 'yaml';
+    case 'md': return 'markdown';
+    case 'sh': case 'bash': return 'shell';
+    case 'py': return 'python';
+    default: return 'plaintext';
+  }
 }
 
 const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico'];
@@ -54,7 +82,7 @@ function isImageExtension(filename: string): boolean {
 
 function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactNode {
   if (fileType === 'folder') return <Folder className="h-5 w-5 text-primary" />;
-  if (fileType === 'link') return <FileIconDefault className="h-5 w-5 text-purple-400" />; // Example for symlinks
+  if (fileType === 'link') return <FileIconDefault className="h-5 w-5 text-purple-400" />;
   if (fileType === 'unknown') return <FileIconDefault className="h-5 w-5 text-muted-foreground" />;
 
   const extension = path.extname(filename).toLowerCase();
@@ -83,6 +111,7 @@ function getFileIcon(filename: string, fileType: FileItem['type']): React.ReactN
 
 export default function FilesPage() {
   const [currentPath, setCurrentPath] = useState<string>('/');
+  const [pathInput, setPathInput] = useState<string>('/');
   const [files, setFiles] = useState<FileItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -100,12 +129,12 @@ export default function FilesPage() {
   const [newItemName, setNewItemName] = useState('');
   const [isCreatingItem, setIsCreatingItem] = useState(false);
   
-  // State for Image Viewer Dialog
   const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
   const [currentImageViewerSrc, setCurrentImageViewerSrc] = useState<string | null>(null);
   const [currentImageViewerAlt, setCurrentImageViewerAlt] = useState<string | null>(null);
   const [imageFilesInCurrentDir, setImageFilesInCurrentDir] = useState<FileItem[]>([]);
   const [currentImageIndex, setCurrentImageIndex] = useState<number>(0);
+
 
   const fetchFiles = useCallback(async (pathToFetch: string) => {
     setIsLoading(true);
@@ -121,15 +150,14 @@ export default function FilesPage() {
       const data = await response.json();
       const fetchedFiles = (data && Array.isArray(data.files)) ? data.files : [];
       setFiles(fetchedFiles);
-      setCurrentPath(data.path || pathToFetch);
-      // Update list of image files for the viewer when directory content changes
+      setCurrentPath(data.path || pathToFetch); // Update currentPath based on server response
       setImageFilesInCurrentDir(fetchedFiles.filter((f: FileItem) => f.type === 'file' && isImageExtension(f.name)));
     } catch (e: any) {
       const errorMessage = e.message || "An unknown error occurred while fetching files.";
       setError(errorMessage);
-      setFiles([]);
+      setFiles([]); // Clear files on error
       setImageFilesInCurrentDir([]);
-      toast({ title: "File Manager Error", description: `Could not fetch files: ${errorMessage}.`, variant: "destructive" });
+      toast({ title: "File Manager Error", description: `Could not fetch files for path "${pathToFetch}": ${errorMessage}.`, variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
@@ -138,6 +166,29 @@ export default function FilesPage() {
   useEffect(() => {
     fetchFiles(currentPath);
   }, [currentPath, fetchFiles]);
+
+  useEffect(() => {
+    setPathInput(currentPath); // Sync input when currentPath changes from any source
+  }, [currentPath]);
+
+  const handlePathSubmit = () => {
+    const trimmedPath = pathInput.trim();
+    if (trimmedPath === '') {
+      setCurrentPath('/');
+    } else {
+      let normalized = path.normalize(trimmedPath);
+      // Ensure path starts with /
+      if (normalized !== '/' && !normalized.startsWith('/')) {
+          normalized = '/' + normalized;
+      }
+      // Ensure no trailing slash for consistency, unless it's the root
+      if (normalized !== '/' && normalized.endsWith('/')) {
+          normalized = normalized.slice(0, -1);
+      }
+      setCurrentPath(normalized || '/'); // Fallback to root if normalization results in empty
+    }
+  };
+
 
   const handleFileDoubleClick = useCallback((fileItem: FileItem) => {
     const fullPath = path.join(currentPath, fileItem.name).replace(/\\/g, '/');
@@ -272,8 +323,27 @@ export default function FilesPage() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <CardTitle>File Explorer</CardTitle>
-              <CardDescription className="mt-1">
-                Current path: <span className="font-mono">{currentPath}</span>
+              <div className="mt-2 flex items-center gap-2">
+                <Label htmlFor="path-input-fm" className="text-sm text-muted-foreground whitespace-nowrap">Path:</Label>
+                <Input
+                  id="path-input-fm"
+                  className="font-mono h-9 flex-grow text-sm"
+                  value={pathInput}
+                  onChange={(e) => setPathInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handlePathSubmit();
+                    }
+                  }}
+                  placeholder="Enter path and press Enter..."
+                />
+                 <Button onClick={handlePathSubmit} size="sm" variant="outline" className="h-9 shadow-sm">
+                  <ChevronRight className="h-4 w-4" /> Go
+                </Button>
+              </div>
+              <CardDescription className="mt-2 text-xs">
+                Use the input above to navigate or click folders below. Breadcrumbs show your current location.
               </CardDescription>
             </div>
             <div className="relative w-full sm:w-auto">
@@ -371,7 +441,7 @@ export default function FilesPage() {
                              <DropdownMenuItem onSelect={() => handleFileDoubleClick(file)}>
                                 <Edit3 className="mr-2 h-4 w-4" /> {file.type === 'file' ? (isImageExtension(file.name) ? 'View Image' : 'View/Edit') : 'Open Folder'}
                             </DropdownMenuItem>
-                            {file.type === 'file' && !isImageExtension(file.name) && ( // Only show download for non-image files in dropdown for now
+                            {file.type === 'file' && !isImageExtension(file.name) && (
                               <DropdownMenuItem
                                 onSelect={(e) => { e.preventDefault(); window.location.href = `${DAEMON_API_BASE_PATH}/file?path=${encodeURIComponent(fullPathToItem)}`; }}
                               >
@@ -425,9 +495,9 @@ export default function FilesPage() {
         <DialogContent className="sm:max-w-md rounded-2xl backdrop-blur-sm">
           <DialogHeader>
             <DialogTitle>Create New {createItemType === 'file' ? 'File' : 'Folder'}</DialogTitle>
-            <DialogDescription>
+            <DialogDesc>
               Enter the name for the new {createItemType} in <span className="font-mono">{currentPath}</span>.
-            </DialogDescription>
+            </DialogDesc>
           </DialogHeader>
           <div className="py-4">
             <Label htmlFor="newItemName" className="sr-only">Name</Label>
@@ -456,3 +526,6 @@ export default function FilesPage() {
     </div>
   );
 }
+
+
+    
