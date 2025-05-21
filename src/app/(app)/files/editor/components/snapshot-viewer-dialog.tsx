@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import CodeEditor from '@/components/ui/code-editor'; // Assuming CodeEditor can be used here
-import type { Snapshot } from '../[...filePath]/page'; // Adjust path as needed
+import type { Snapshot } from '../[...filePath]/page'; 
 import { format } from 'date-fns';
 
 interface SnapshotViewerDialogProps {
@@ -39,7 +39,7 @@ export default function SnapshotViewerDialog({
           </DialogDescription>
         </DialogHeader>
         
-        <div className="flex-grow relative min-h-0 bg-background">
+        <div className="flex-grow relative min-h-0 bg-background"> {/* Added min-h-0 for flex-grow */}
           <CodeEditor
             value={snapshot.content}
             onChange={() => {}} // Read-only, so no-op
