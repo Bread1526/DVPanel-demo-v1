@@ -37,20 +37,20 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { v4 as uuidv4 } from 'uuid';
 import { format, formatDistanceToNowStrict } from 'date-fns';
-import SnapshotViewerDialog from '../components/snapshot-viewer-dialog'; // Corrected relative path
+import SnapshotViewerDialog from '../components/snapshot-viewer-dialog';
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
   if (!filename) return 'plaintext';
   const extension = filename.split('.').pop()?.toLowerCase() || '';
   switch (extension) {
-    case 'js': case 'jsx': return 'javascript'; // CodeMirror uses 'javascript' for both
-    case 'ts': case 'tsx': return 'typescript'; // CodeMirror's JS lang package handles TS/TSX if configured
+    case 'js': case 'jsx': return 'javascript';
+    case 'ts': case 'tsx': return 'typescript';
     case 'html': case 'htm': return 'html';
     case 'css': case 'scss': return 'css';
     case 'json': return 'json';
-    case 'yaml': case 'yml': return 'yaml'; // Need a YAML extension for CodeMirror or use plaintext
-    case 'md': return 'markdown'; // Need a Markdown extension for CodeMirror or use plaintext
+    case 'yaml': case 'yml': return 'yaml';
+    case 'md': return 'markdown';
     case 'py': return 'python';
     case 'sh': case 'bash': return 'shell';
     default: return 'plaintext';
@@ -123,10 +123,10 @@ export default function FileEditorPage() {
 
   // Effect for showing toasts based on error state
   useEffect(() => {
-    if (error) {
+    if (error && !isImageFile) { // Only show general file errors for non-images here; image errors handled inline
       setTimeout(() => toast({ title: "File Editor Error", description: error, variant: "destructive" }), 0);
     }
-  }, [error, toast]);
+  }, [error, toast, isImageFile]);
   
   useEffect(() => {
     if (snapshotError) {
@@ -137,13 +137,18 @@ export default function FileEditorPage() {
 
   const fetchSnapshots = useCallback(async () => {
     if (!decodedFilePath || isImageFile) return;
-    if (globalDebugModeActive) console.log(`[FileEditorPage] fetchSnapshots called for: ${decodedFilePath}`);
+    if (globalDebugModeActive) console.log(`[FileEditorPage] fetchSnapshots CALLED for: ${decodedFilePath}`);
     setIsLoadingSnapshots(true);
     setSnapshotError(null);
     try {
       const response = await fetch(`/api/panel-daemon/snapshots?filePath=${encodeURIComponent(decodedFilePath)}`);
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({ error: `Error fetching snapshots: ${response.statusText}`}));
+        let errData;
+        try {
+          errData = await response.json();
+        } catch (e) {
+          errData = { error: `Error fetching snapshots: ${response.statusText}`, details: await response.text() };
+        }
         throw new Error(errData.error || errData.details || `Failed to fetch snapshots. Status: ${response.status}`);
       }
       const data = await response.json();
@@ -170,16 +175,18 @@ export default function FileEditorPage() {
       setIsLoading(false);
       return;
     }
-    if (globalDebugModeActive) console.log(`[FileEditorPage] fetchFileContent called for: ${decodedFilePath}`);
+    
     setIsLoading(true);
     setError(null);
     setSnapshotError(null);
     setServerSnapshots([]);
     
+    let currentGlobalDebug = false;
     try {
       const settingsResult = await loadPanelSettings();
       if (settingsResult.status === 'success' && settingsResult.data) {
         setGlobalDebugModeActive(settingsResult.data.debugMode);
+        currentGlobalDebug = settingsResult.data.debugMode;
       } else {
         setGlobalDebugModeActive(false);
       }
@@ -187,6 +194,7 @@ export default function FileEditorPage() {
       console.warn("[FileEditorPage] Error loading global panel settings for debug mode:", settingsError);
       setGlobalDebugModeActive(false);
     }
+    if (currentGlobalDebug) console.log(`[FileEditorPage] fetchFileContent CALLED for: ${decodedFilePath}. Global debug mode: ${currentGlobalDebug}`);
     
     const currentFileLang = getLanguageFromFilename(fileName);
     setEditorLanguage(currentFileLang);
@@ -194,7 +202,7 @@ export default function FileEditorPage() {
     setIsImageFile(isImage);
     
     try {
-      const response = await fetch(`/api/panel-daemon/file?path=${encodeURIComponent(decodedFilePath)}&view=true`); // view=true fetches content and writable status
+      const response = await fetch(`/api/panel-daemon/file?path=${encodeURIComponent(decodedFilePath)}&view=true`);
       if (!response.ok) {
         const errData = await response.json().catch(() => ({ error: `Error fetching file: ${response.statusText}`, details: `Path: ${decodedFilePath}` }));
         throw new Error(errData.error || errData.details || `Failed to fetch file. Status: ${response.status}`);
@@ -203,7 +211,7 @@ export default function FileEditorPage() {
       try {
         data = await response.json();
       } catch (jsonError: any) {
-        if (globalDebugModeActive) console.error("[FileEditorPage] fetchFileContent - JSON.parse error:", jsonError);
+        if (currentGlobalDebug) console.error("[FileEditorPage] fetchFileContent - JSON.parse error:", jsonError);
         throw new Error("Failed to parse file content response from server. Response might be empty or not valid JSON.");
       }
 
@@ -219,7 +227,7 @@ export default function FileEditorPage() {
           setFileContent(data.content);
           setOriginalFileContent(data.content);
       }
-      if (globalDebugModeActive) console.log(`[FileEditorPage] fetchFileContent SUCCESS for: ${decodedFilePath}, writable: ${data.writable}, isImage: ${isImage}`);
+      if (currentGlobalDebug) console.log(`[FileEditorPage] fetchFileContent SUCCESS for: ${decodedFilePath}, writable: ${data.writable}, isImage: ${isImage}`);
       
       if(!isImage) {
         await fetchSnapshots(); 
@@ -232,7 +240,7 @@ export default function FileEditorPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [decodedFilePath, fileName, fetchSnapshots, globalDebugModeActive]);
+  }, [decodedFilePath, fileName, fetchSnapshots]);
 
   useEffect(() => {
     if (!decodedFilePath && encodedFilePathFromParams) {
@@ -252,19 +260,32 @@ export default function FileEditorPage() {
       setTimeout(() => toast({ title: "Info", description: "Snapshots are not supported for image files.", variant: "default" }),0);
       return;
     }
-    if (globalDebugModeActive) console.log(`[FileEditorPage] handleCreateSnapshot called for: ${decodedFilePath}, Lang: ${editorLanguage}, Content Length: ${fileContent.length}`);
+    if (globalDebugModeActive) console.log(`[FileEditorPage] handleCreateSnapshot CALLED for: ${decodedFilePath}, Lang: ${editorLanguage}, Content Length: ${fileContent.length}`);
     setIsCreatingSnapshot(true);
     setSnapshotError(null);
+
+    const snapshotData = { filePath: decodedFilePath, content: fileContent, language: editorLanguage };
+    if (globalDebugModeActive) console.log('[FileEditorPage] handleCreateSnapshot: Sending data to API:', snapshotData);
+
     try {
       const response = await fetch(`/api/panel-daemon/snapshots`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath: decodedFilePath, content: fileContent, language: editorLanguage }),
+        body: JSON.stringify(snapshotData),
       });
       
-      const result = await response.json();
+      let result;
+      const responseText = await response.text(); // Read response text first
+      try {
+        result = JSON.parse(responseText);
+        if (globalDebugModeActive) console.log('[FileEditorPage] handleCreateSnapshot: API Response JSON:', result);
+      } catch (e) {
+        if (globalDebugModeActive) console.error('[FileEditorPage] handleCreateSnapshot: Failed to parse API response as JSON. Raw text:', responseText);
+        throw new Error(`Server returned non-JSON response: ${response.status} ${response.statusText}`);
+      }
 
       if (!response.ok) {
+        if (globalDebugModeActive) console.error('[FileEditorPage] handleCreateSnapshot: API returned error:', response.status, result);
         throw new Error(result.error || result.details || 'Failed to create snapshot from API.');
       }
       setTimeout(() => toast({ title: 'Snapshot Created', description: result.message || `Snapshot for ${fileName} created.` }),0);
@@ -272,14 +293,14 @@ export default function FileEditorPage() {
       if(Array.isArray(result.snapshots)) {
         setServerSnapshots(result.snapshots);
       } else {
-        console.warn("[FileEditorPage] handleCreateSnapshot: Snapshots array missing in successful API response. Fetching fresh list.");
-        await fetchSnapshots(); // Fetch fresh list if API response format is unexpected
+        if (globalDebugModeActive) console.warn("[FileEditorPage] handleCreateSnapshot: Snapshots array missing in successful API response. Fetching fresh list.");
+        await fetchSnapshots();
       }
       if (globalDebugModeActive) console.log(`[FileEditorPage] handleCreateSnapshot SUCCESS. New snapshot count: ${result.snapshots?.length || 'unknown'}`);
     } catch (e: any) {
       console.error(`[FileEditorPage] handleCreateSnapshot ERROR for: ${decodedFilePath}`, e);
       const apiErrorMsg = e.message || "An unexpected error occurred while creating the snapshot.";
-      setSnapshotError(apiErrorMsg); // Update snapshot-specific error state
+      setSnapshotError(apiErrorMsg);
       setTimeout(() => toast({ title: "Error Creating Snapshot", description: apiErrorMsg, variant: "destructive" }),0);
     } finally {
       setIsCreatingSnapshot(false);
@@ -301,12 +322,17 @@ export default function FileEditorPage() {
     }
     if (globalDebugModeActive) console.log(`[FileEditorPage] handleSaveChanges called for: ${decodedFilePath}`);
 
-    if (hasUnsavedChanges) { // Snapshot only if actual changes
+    if (hasUnsavedChanges) {
+      if (globalDebugModeActive) console.log(`[FileEditorPage] handleSaveChanges: Creating snapshot due to unsaved changes.`);
       await handleCreateSnapshot(); 
+    } else if (globalDebugModeActive) {
+      if (globalDebugModeActive) console.log(`[FileEditorPage] handleSaveChanges: No unsaved changes, but creating snapshot due to debug mode.`);
+      await handleCreateSnapshot();
     }
 
+
     setIsSaving(true);
-    setError(null); // Clear general error before saving
+    setError(null); 
     try {
       const response = await fetch(`/api/panel-daemon/file`, {
         method: 'POST',
@@ -348,38 +374,42 @@ export default function FileEditorPage() {
   }, [isSaving, isWritable, hasUnsavedChanges, handleSaveChanges, globalDebugModeActive, isImageFile]);
 
   const handleFind = useCallback(() => {
-    if (isImageFile) return;
-    if (editorRef.current && editorRef.current.view) {
-       setTimeout(() => editorRef.current!.view!.dispatch({ effects: openSearchPanel.of() }), 0);
-    } else {
-       setTimeout(() => toast({
+    if (isImageFile || !editorRef.current?.view) {
+      if (globalDebugModeActive) console.log("[FileEditorPage] handleFind: Editor not ready or image file.");
+      setTimeout(() => toast({
         title: "Find Action",
-        description: "Editor not ready or no active editor instance. Use Ctrl+F (Cmd+F).",
+        description: isImageFile ? "Find is not available for images." : "Editor not ready. Try Ctrl+F (Cmd+F).",
       }),0);
+      return;
     }
-  }, [toast, isImageFile]);
+    if (globalDebugModeActive) console.log("[FileEditorPage] handleFind: Opening search panel.");
+    // Ensure the dispatch happens after any pending state updates from CodeMirror itself
+    setTimeout(() => editorRef.current!.view!.dispatch({ effects: openSearchPanel.of() }), 0);
+  }, [toast, isImageFile, globalDebugModeActive]);
   
   const handleLoadSnapshot = useCallback((snapshotToLoad: Snapshot) => {
+    if (globalDebugModeActive) console.log(`[FileEditorPage] handleLoadSnapshot CALLED for snapshot ID: ${snapshotToLoad.id}`);
     if (snapshotToLoad) {
       setFileContent(snapshotToLoad.content);
-      setOriginalFileContent(snapshotToLoad.content); // Consider if original content should update or if loading snapshot implies "unsaved" against true original
+      setOriginalFileContent(snapshotToLoad.content); 
       setEditorLanguage(snapshotToLoad.language);
       setTimeout(() => toast({
         title: "Snapshot Loaded",
         description: `Loaded snapshot for ${fileName} from ${format(new Date(snapshotToLoad.timestamp), 'PP HH:mm:ss')}`,
       }),0);
     } else {
+       if (globalDebugModeActive) console.warn(`[FileEditorPage] handleLoadSnapshot: Snapshot to load was null/undefined.`);
       setTimeout(() => toast({
         title: "Error",
         description: "Could not find the selected snapshot.",
         variant: "destructive",
       }),0);
     }
-  }, [toast, fileName]);
+  }, [toast, fileName, globalDebugModeActive]);
 
   const handleToggleLockSnapshot = useCallback(async (snapshotId: string) => {
+    if (globalDebugModeActive) console.log(`[FileEditorPage] handleToggleLockSnapshot CALLED for snapshot ID: ${snapshotId}`);
     // TODO: Implement backend call for locking/unlocking
-    // For now, client-side only toggle
     setServerSnapshots(prev => 
         prev.map(s => s.id === snapshotId ? {...s, isLocked: !s.isLocked} : s)
     );
@@ -388,16 +418,17 @@ export default function FileEditorPage() {
         title: snapshot?.isLocked ? "Snapshot Unlocked (Client Only)" : "Snapshot Locked (Client Only)", 
         description: "Server-side persistence for lock state is pending."
     }), 0);
-  }, [toast, serverSnapshots]);
+  }, [toast, serverSnapshots, globalDebugModeActive]);
 
   const handleDeleteSnapshot = useCallback(async (snapshotIdToDelete: string) => {
+    if (globalDebugModeActive) console.log(`[FileEditorPage] handleDeleteSnapshot CALLED for snapshot ID: ${snapshotIdToDelete}`);
      // TODO: Implement backend call for deleting
-    // For now, client-side only delete
     setServerSnapshots(prev => prev.filter(s => s.id !== snapshotIdToDelete));
     setTimeout(() => toast({ title: "Snapshot Deleted (Client Only)", description: "Server-side deletion is pending."}), 0);
-  }, [toast]);
+  }, [toast, globalDebugModeActive]);
 
   const handleViewSnapshotInPopup = (snapshot: Snapshot) => {
+    if (globalDebugModeActive) console.log(`[FileEditorPage] handleViewSnapshotInPopup CALLED for snapshot ID: ${snapshot.id}`);
     setSelectedSnapshotForViewer(snapshot);
     setIsSnapshotViewerOpen(true);
   };
@@ -411,11 +442,9 @@ export default function FileEditorPage() {
     );
   }
 
-  // Combined error display for file loading and snapshot errors at the top
   const topLevelError = error || (snapshotError && !isImageFile ? snapshotError : null);
 
   if (topLevelError && (!fileContent && !isImageFile) && decodedFilePath) { 
-    // Show full page error if content couldn't load AND there's a decoded path
     return (
       <div className="p-4">
         <PageHeader title="Error Loading File" description={topLevelError} />
@@ -566,7 +595,6 @@ export default function FileEditorPage() {
             </AlertDescription>
           </Alert>
         )}
-        {/* Display general file error if content is loaded or it's an image */}
         {error && (fileContent || isImageFile) && ( 
             <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
               <FileWarning className="h-4 w-4" />
@@ -574,7 +602,6 @@ export default function FileEditorPage() {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
         )}
-        {/* Display snapshot error if not an image file (snapshot functions disabled for images) */}
         {snapshotError && !isImageFile && (
            <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
                 <Camera className="h-4 w-4"/>
@@ -585,16 +612,16 @@ export default function FileEditorPage() {
         <div className="flex-grow relative p-0 bg-background min-h-0"> 
           {isImageFile ? (
             <div className="w-full h-full flex items-center justify-center p-4">
-              {isLoading ? ( // isLoading here refers to the initial file metadata load
+              {isLoading ? ( 
                 <Loader2 className="h-12 w-12 animate-spin text-primary" />
-              ) : error ? ( // This error is if the metadata (like writability) failed or image path is bad
+              ) : error ? ( 
                 <div className="text-destructive text-center">
                   <AlertTriangle className="h-10 w-10 mx-auto mb-2" />
                   <p>Error loading image: {error}</p>
                 </div>
               ) : (
                 <Image
-                  src={`/api/panel-daemon/file?path=${encodeURIComponent(decodedFilePath)}`} // Direct fetch for image data
+                  src={`/api/panel-daemon/file?path=${encodeURIComponent(decodedFilePath)}`} 
                   alt={`Preview of ${fileName}`}
                   fill
                   style={{ objectFit: 'contain' }} 
@@ -602,7 +629,7 @@ export default function FileEditorPage() {
                   data-ai-hint="file preview"
                   onError={(e) => {
                     console.error("Image load error in editor:", e);
-                    setError("Failed to load image resource for preview."); // Set general error
+                    setError("Failed to load image resource for preview."); 
                   }}
                 />
               )}
