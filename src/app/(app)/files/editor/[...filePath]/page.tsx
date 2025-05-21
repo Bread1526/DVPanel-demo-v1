@@ -38,8 +38,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 
-// Removed: import { openSearchPanel } from '@codemirror/search';
-import { SearchCursor } from '@codemirror/search'; // Keep SearchCursor
+import { SearchCursor } from '@codemirror/search';
 import { EditorView } from '@codemirror/view';
 import { EditorSelection } from '@codemirror/state';
 
@@ -168,12 +167,15 @@ export default function FileEditorPage() {
       const response = await fetch(`/api/panel-daemon/snapshots?filePath=${encodeURIComponent(decodedFilePath)}`);
       if (!response.ok) {
         let errData;
+        let errorText = `Failed to fetch snapshots. Status: ${response.status}`;
         try {
           errData = await response.json();
+          errorText = errData.error || errData.details || errorText;
         } catch (e) {
-          errData = { error: `Server returned non-JSON error: ${response.statusText}`, details: await response.text() };
+          const rawText = await response.text().catch(() => "Could not read error response.");
+          errorText = `${errorText}. Server response: ${rawText}`;
         }
-        throw new Error(errData.error || errData.details || `Failed to fetch snapshots. Status: ${response.status}`);
+        throw new Error(errorText);
       }
       const data = await response.json();
       if (data && Array.isArray(data.snapshots)) {
@@ -259,9 +261,9 @@ export default function FileEditorPage() {
         await fetchSnapshots(); 
       }
 
-    } catch (e: any) {
-      setError(e.message || "An unexpected error occurred while fetching file content.");
-      setIsWritable(false); 
+    } catch (e: any)      {
+        setError(e.message || "An unexpected error occurred while fetching file content.");
+        setIsWritable(false);
     } finally {
       setIsLoading(false);
     }
@@ -294,17 +296,19 @@ export default function FileEditorPage() {
         body: JSON.stringify(snapshotData),
       });
       
-      let result;
+      let resultText = await response.text();
+      if (globalDebugModeActive) console.log("[FileEditorPage] handleCreateSnapshot: API Response Status:", response.status, "Body:", resultText);
+
       if (!response.ok) {
-          try {
-              result = await response.json();
-              throw new Error(result.error || result.details || `API Error: ${response.status}`);
-          } catch (e) {
-              const textError = await response.text();
-              throw new Error(`Failed to create snapshot. Status: ${response.status}. Response: ${textError || "Empty response"}`);
-          }
+        let errorMsg = `API Error: ${response.status}. ${resultText}`;
+        try {
+          const jsonError = JSON.parse(resultText);
+          errorMsg = jsonError.error || jsonError.details || errorMsg;
+        } catch (e) { /* ignore if not JSON */ }
+        throw new Error(errorMsg);
       }
-      result = await response.json(); // If response.ok, parse JSON
+      
+      const result = JSON.parse(resultText);
 
       setTimeout(() => toast({ title: 'Snapshot Created', description: result.message || `Snapshot for ${fileName} created.` }),0);
       
@@ -329,8 +333,8 @@ export default function FileEditorPage() {
       return;
     }
 
-    if (hasUnsavedChanges || globalDebugModeActive) {
-       setTimeout(() => handleCreateSnapshot(), 0);
+    if (hasUnsavedChanges) { // Only create snapshot if there are actual changes
+      await handleCreateSnapshot();
     }
 
     setIsSaving(true);
@@ -348,7 +352,8 @@ export default function FileEditorPage() {
       setTimeout(() => toast({ title: 'Success', description: result.message || `File ${fileName} saved.` }),0);
       setOriginalFileContent(fileContent); 
     } catch (e: any) {
-      setError(e.message || "An unexpected error occurred while saving."); 
+      setError(e.message || "An unexpected error occurred while saving.");
+      setTimeout(() => toast({ title: "Save Error", description: e.message, variant: "destructive"}),0);
     } finally {
       setIsSaving(false);
     }
@@ -374,11 +379,13 @@ export default function FileEditorPage() {
     if (!editorRef.current?.view || !query) {
       setSearchMatches([]);
       setCurrentMatchIndex(-1);
-      if (query && editorRef.current?.view) toast({ title: "Not Found", description: `"${query}" was not found in the file.`, duration: 3000 });
+      if (query && editorRef.current?.view) {
+        setTimeout(() => toast({ title: "Not Found", description: `"${query}" was not found in the file.`, duration: 3000 }),0);
+      }
       return;
     }
     const view = editorRef.current.view;
-    const cursor = new SearchCursor(view.state.doc, query); // Removed case sensitivity for simplicity now
+    const cursor = new SearchCursor(view.state.doc, query);
     const matches: Array<{ from: number; to: number }> = [];
     while (!cursor.next().done) {
       matches.push({ from: cursor.value.from, to: cursor.value.to });
@@ -393,7 +400,7 @@ export default function FileEditorPage() {
       });
     } else {
       setCurrentMatchIndex(-1);
-      toast({ title: "Not Found", description: `"${query}" was not found in the file.`, duration: 3000 });
+      setTimeout(() => toast({ title: "Not Found", description: `"${query}" was not found in the file.`, duration: 3000 }),0);
     }
   }, [toast]);
 
@@ -404,7 +411,7 @@ export default function FileEditorPage() {
   const handleSearchSubmit = (e?: React.FormEvent<HTMLFormElement>) => {
     e?.preventDefault();
     if (!searchQuery.trim()) {
-      toast({ title: "Empty Search", description: "Please enter text to search.", duration: 3000 });
+       setTimeout(() => toast({ title: "Empty Search", description: "Please enter text to search.", duration: 3000 }),0);
       return;
     }
     performSearch(searchQuery);
@@ -460,6 +467,7 @@ export default function FileEditorPage() {
     const snapshotIndex = serverSnapshots.findIndex(s => s.id === snapshotId);
     if (snapshotIndex === -1) {
       setSnapshotError("Snapshot not found to toggle lock.");
+       setTimeout(() => toast({ title: "Snapshot Error", description: "Snapshot not found to toggle lock.", variant: "destructive"}),0);
       return;
     }
     
@@ -472,11 +480,13 @@ export default function FileEditorPage() {
         title: updatedSnapshot.isLocked ? "Snapshot Locked (Client)" : "Snapshot Unlocked (Client)", 
         description: "Server-side lock persistence is pending API implementation."
     }), 0);
+    // TODO: Implement API call to persist lock state on server
   }, [serverSnapshots, toast]);
 
   const handleDeleteSnapshot = useCallback(async (snapshotIdToDelete: string) => {
     setServerSnapshots(prev => prev.filter(s => s.id !== snapshotIdToDelete));
     setTimeout(() => toast({ title: "Snapshot Deleted (Client)", description: "Server-side deletion is pending API implementation."}), 0);
+    // TODO: Implement API call to delete snapshot on server
   }, [toast]);
 
   const handleViewSnapshotInPopup = (snapshot: Snapshot) => {
@@ -485,13 +495,25 @@ export default function FileEditorPage() {
   };
 
   useEffect(() => {
-    // Reset search state when find dialog closes
     if (!isFindDialogOpen) {
-      // setSearchQuery(""); // Optional: clear search query on close
       setSearchMatches([]);
       setCurrentMatchIndex(-1);
     }
   }, [isFindDialogOpen]);
+
+  useEffect(() => {
+    // New effect to show error toasts from `setError` calls
+    if (error && !isLoading && !isImageFile) { // Avoid showing toast if loading or if it's an image loading error (handled separately)
+        setTimeout(() => toast({ title: "File Operation Error", description: error, variant: "destructive" }), 0);
+    }
+  }, [error, isLoading, isImageFile, toast]);
+
+  useEffect(() => {
+    // New effect to show snapshot error toasts from `setSnapshotError` calls
+    if (snapshotError) {
+        setTimeout(() => toast({ title: "Snapshot Operation Error", description: snapshotError, variant: "destructive" }), 0);
+    }
+  }, [snapshotError, toast]);
 
   if (isLoading) {
     return (
@@ -527,7 +549,7 @@ export default function FileEditorPage() {
   }
 
   const saveButtonDisabled = isSaving || !isWritable || (!hasUnsavedChanges && !globalDebugModeActive);
-  const createSnapshotButtonDisabled = isCreatingSnapshot || isLoadingSnapshots || isImageFile || (!hasUnsavedChanges && !globalDebugModeActive) ;
+  const createSnapshotButtonDisabled = isCreatingSnapshot || isLoadingSnapshots || isImageFile || (!hasUnsavedChanges && !globalDebugModeActive);
 
   return (
     <div className="flex flex-col h-full max-h-[calc(100vh-var(--header-height,6rem)-2rem)]">
@@ -541,197 +563,197 @@ export default function FileEditorPage() {
         }
       />
       
-      <>
-        <TooltipProvider>
-          <div className="flex-shrink-0 flex items-center justify-between p-2 border-b bg-muted/50">
-            <div className="flex items-center gap-1">
+      <div className="flex-shrink-0 flex items-center justify-between p-2 border-b bg-muted/50">
+        <div className="flex items-center gap-1">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleSaveChanges}
+                  disabled={saveButtonDisabled || isImageFile}
+                  className="shadow-sm hover:scale-105"
+                >
+                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Save Changes (Ctrl+S)</p>
+              </TooltipContent>
+            </Tooltip>
+            {!isImageFile && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={handleSaveChanges}
-                    disabled={saveButtonDisabled || isImageFile}
+                    onClick={() => {
+                      setSearchQuery(""); 
+                      setSearchMatches([]);
+                      setCurrentMatchIndex(-1);
+                      setIsFindDialogOpen(true);
+                    }}
                     className="shadow-sm hover:scale-105"
                   >
-                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    <SearchIcon className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Save Changes (Ctrl+S)</p>
+                  <p>Find</p>
                 </TooltipContent>
               </Tooltip>
-              {!isImageFile && (
-                <Tooltip>
+            )}
+          </TooltipProvider>
+        </div>
+        <div className="flex items-center gap-1 text-xs text-muted-foreground mr-1">
+          {!isImageFile && (
+            <TooltipProvider>
+              <Tooltip>
+                <DropdownMenu>
                   <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => {
-                        setSearchQuery(""); // Clear previous query
-                        setSearchMatches([]);
-                        setCurrentMatchIndex(-1);
-                        setIsFindDialogOpen(true);
-                      }}
-                      className="shadow-sm hover:scale-105"
-                    >
-                      <SearchIcon className="h-4 w-4" />
-                    </Button>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="shadow-sm hover:scale-105 w-7 h-7"
+                        disabled={isLoadingSnapshots || isImageFile}
+                      >
+                        {isLoadingSnapshots || isCreatingSnapshot ? <Loader2 className="h-3 w-3 animate-spin"/> : <Camera className="h-3 w-3" />}
+                      </Button>
+                    </DropdownMenuTrigger>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Find (Ctrl+F to open default)</p>
+                    <p>Snapshots</p>
                   </TooltipContent>
-                </Tooltip>
-              )}
-            </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mr-2">
-              {!isImageFile && (
-                <Tooltip>
-                  <DropdownMenu>
-                    <TooltipTrigger asChild>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="shadow-sm hover:scale-105 w-7 h-7"
-                          disabled={isLoadingSnapshots || isImageFile}
-                        >
-                          {isLoadingSnapshots || isCreatingSnapshot ? <Loader2 className="h-3 w-3 animate-spin"/> : <Camera className="h-3 w-3" />}
-                        </Button>
-                      </DropdownMenuTrigger>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Snapshots</p>
-                    </TooltipContent>
-                    <DropdownMenuContent align="end" className="w-96 max-w-[90vw]">
-                      <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
-                        Server-side Snapshots (Max: {MAX_SERVER_SNAPSHOTS})
-                      </DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onSelect={handleCreateSnapshot}
-                        disabled={createSnapshotButtonDisabled}
-                      >
-                        {isCreatingSnapshot ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
-                        Create Snapshot (Content & Lang)
-                      </DropdownMenuItem>
+                  <DropdownMenuContent align="end" className="w-96 max-w-[90vw]">
+                    <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
+                      Server-side Snapshots (Max: {MAX_SERVER_SNAPSHOTS})
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={handleCreateSnapshot}
+                      disabled={createSnapshotButtonDisabled}
+                    >
+                      {isCreatingSnapshot ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
+                      Create Snapshot (Content & Lang)
+                    </DropdownMenuItem>
 
-                      {serverSnapshots.length > 0 && (
-                        <>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuGroup>
-                            <DropdownMenuLabel className="text-xs px-2">Recent Snapshots ({serverSnapshots.length})</DropdownMenuLabel>
-                            {snapshotError && <DropdownMenuLabel className="text-xs px-2 text-destructive">{snapshotError}</DropdownMenuLabel>}
-                            {serverSnapshots.map(snapshot => (
-                              <DropdownMenuItem key={snapshot.id} className="flex justify-between items-center" onSelect={(e) => e.preventDefault()}>
-                                <span onClick={() => handleLoadSnapshot(snapshot)} className="cursor-pointer flex-grow hover:text-primary text-xs truncate pr-2">
-                                  {format(new Date(snapshot.timestamp), 'HH:mm:ss')} ({formatDistanceToNowStrict(new Date(snapshot.timestamp))} ago) - Lang: {snapshot.language}
-                                </span>
-                                <div className="flex items-center ml-1 gap-0.5 flex-shrink-0">
-                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSnapshotInPopup(snapshot)} title="View Snapshot">
-                                    <Eye className="h-3 w-3" />
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleLockSnapshot(snapshot.id)} title={snapshot.isLocked ? "Unlock Snapshot" : "Lock Snapshot"}>
-                                    {snapshot.isLocked ? <Lock className="h-3 w-3 text-destructive" /> : <Unlock className="h-3 w-3 text-muted-foreground" />}
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground hover:bg-destructive/10" onClick={() => handleDeleteSnapshot(snapshot.id)} title="Delete Snapshot">
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuGroup>
-                        </>
-                      )}
-                      {serverSnapshots.length === 0 && !isLoadingSnapshots && !isCreatingSnapshot && !snapshotError && (
-                        <DropdownMenuLabel className="text-xs text-muted-foreground px-2 italic py-1">No snapshots yet.</DropdownMenuLabel>
-                      )}
+                    {serverSnapshots.length > 0 && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel className="text-xs px-2">Recent Snapshots ({serverSnapshots.length})</DropdownMenuLabel>
+                          {snapshotError && <DropdownMenuLabel className="text-xs px-2 text-destructive">{snapshotError}</DropdownMenuLabel>}
+                          {serverSnapshots.map(snapshot => (
+                            <DropdownMenuItem key={snapshot.id} className="flex justify-between items-center" onSelect={(e) => e.preventDefault()}>
+                              <span onClick={() => handleLoadSnapshot(snapshot)} className="cursor-pointer flex-grow hover:text-primary text-xs truncate pr-2">
+                                {format(new Date(snapshot.timestamp), 'HH:mm:ss')} ({formatDistanceToNowStrict(new Date(snapshot.timestamp))} ago) - Lang: {snapshot.language}
+                              </span>
+                              <div className="flex items-center ml-1 gap-0.5 flex-shrink-0">
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSnapshotInPopup(snapshot)} title="View Snapshot">
+                                  <Eye className="h-3 w-3" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleLockSnapshot(snapshot.id)} title={snapshot.isLocked ? "Unlock Snapshot" : "Lock Snapshot"}>
+                                  {snapshot.isLocked ? <Lock className="h-3 w-3 text-destructive" /> : <Unlock className="h-3 w-3 text-muted-foreground" />}
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground hover:bg-destructive/10" onClick={() => handleDeleteSnapshot(snapshot.id)} title="Delete Snapshot">
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuGroup>
+                      </>
+                    )}
+                    {serverSnapshots.length === 0 && !isLoadingSnapshots && !isCreatingSnapshot && !snapshotError && (
+                      <DropdownMenuLabel className="text-xs text-muted-foreground px-2 italic py-1">No snapshots yet.</DropdownMenuLabel>
+                    )}
 
-                      <DropdownMenuSeparator />
-                      <DropdownMenuLabel className="text-xs text-muted-foreground px-2 whitespace-normal">
-                        Snapshots are stored on the server. Locked snapshots are less likely to be auto-pruned.
-                      </DropdownMenuLabel>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </Tooltip>
-              )}
-              <span className="truncate max-w-[200px]">{fileName}</span>
-              {!isImageFile && (
-                <>
-                  <span className="mx-1">|</span>
-                  <span>Lang: {editorLanguage}</span>
-                  <span className="mx-1">|</span>
-                  <span>Chars: {fileContent.length}</span>
-                  <span className="mx-1">|</span>
-                  <span>Lines: {fileContent.split('\n').length}</span>
-                  {hasUnsavedChanges && <span className="ml-1 font-semibold text-amber-500">*</span>}
-                </>
-              )}
-              {!isWritable && <span className="ml-2 font-semibold text-destructive">(Read-only)</span>}
-            </div>
-          </div>
-        </TooltipProvider>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-xs text-muted-foreground px-2 whitespace-normal">
+                      Snapshots are stored on the server. Locked snapshots are less likely to be auto-pruned.
+                    </DropdownMenuLabel>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          <span className="truncate max-w-[150px] sm:max-w-[200px]">{fileName}</span>
+          {!isImageFile && (
+            <>
+              <span className="mx-1">|</span>
+              <span>Lang: {editorLanguage}</span>
+              <span className="mx-1">|</span>
+              <span>Chars: {fileContent.length}</span>
+              <span className="mx-1">|</span>
+              <span>Lines: {fileContent.split('\n').length}</span>
+              {hasUnsavedChanges && <span className="ml-1 font-semibold text-amber-500">*</span>}
+            </>
+          )}
+          {!isWritable && <span className="ml-2 font-semibold text-destructive">(Read-only)</span>}
+        </div>
+      </div>
 
-        {!isWritable && !isImageFile && (
+      {!isWritable && !isImageFile && (
+        <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
+          <FileWarning className="h-4 w-4" />
+          <AlertTitle>Read-only Mode</AlertTitle>
+          <AlertDescription>
+            This file is not writable. Changes cannot be saved.
+          </AlertDescription>
+        </Alert>
+      )}
+      {error && (fileContent || isImageFile) && ( 
           <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
             <FileWarning className="h-4 w-4" />
-            <AlertTitle>Read-only Mode</AlertTitle>
-            <AlertDescription>
-              This file is not writable. Changes cannot be saved.
-            </AlertDescription>
+            <AlertTitle>File Operation Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
           </Alert>
+      )}
+      {snapshotError && !isImageFile && (
+         <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
+              <Camera className="h-4 w-4"/>
+              <AlertTitle>Snapshot Operation Error</AlertTitle>
+              <AlertDescription>{snapshotError}</AlertDescription>
+          </Alert>
+      )}
+      <div className="flex-grow relative p-0 bg-background min-h-0"> 
+        {isImageFile ? (
+          <div className="w-full h-full flex items-center justify-center p-4">
+            {isLoading ? ( 
+              <Loader2 className="h-12 w-12 animate-spin text-primary" />
+            ) : error ? ( 
+              <div className="text-destructive text-center">
+                <AlertTriangle className="h-10 w-10 mx-auto mb-2" />
+                <p>Error loading image: {error}</p>
+              </div>
+            ) : (
+              <Image
+                src={`/api/panel-daemon/file?path=${encodeURIComponent(decodedFilePath)}`} 
+                alt={`Preview of ${fileName}`}
+                fill
+                style={{ objectFit: 'contain' }} 
+                unoptimized 
+                data-ai-hint="file preview"
+                onError={(e) => {
+                  console.error("Image load error in editor:", e);
+                  setError("Failed to load image resource for preview."); 
+                }}
+              />
+            )}
+          </div>
+        ) : (
+          <CodeEditor
+            ref={editorRef}
+            value={fileContent}
+            onChange={setFileContent}
+            language={editorLanguage}
+            readOnly={isSaving || !isWritable}
+            className="h-full w-full border-0 rounded-none" 
+          />
         )}
-        {error && (fileContent || isImageFile) && ( 
-            <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
-              <FileWarning className="h-4 w-4" />
-              <AlertTitle>File Operation Error</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-        )}
-        {snapshotError && !isImageFile && (
-           <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
-                <Camera className="h-4 w-4"/>
-                <AlertTitle>Snapshot Operation Error</AlertTitle>
-                <AlertDescription>{snapshotError}</AlertDescription>
-            </Alert>
-        )}
-        <div className="flex-grow relative p-0 bg-background min-h-0"> 
-          {isImageFile ? (
-            <div className="w-full h-full flex items-center justify-center p-4">
-              {isLoading ? ( 
-                <Loader2 className="h-12 w-12 animate-spin text-primary" />
-              ) : error ? ( 
-                <div className="text-destructive text-center">
-                  <AlertTriangle className="h-10 w-10 mx-auto mb-2" />
-                  <p>Error loading image: {error}</p>
-                </div>
-              ) : (
-                <Image
-                  src={`/api/panel-daemon/file?path=${encodeURIComponent(decodedFilePath)}`} 
-                  alt={`Preview of ${fileName}`}
-                  fill
-                  style={{ objectFit: 'contain' }} 
-                  unoptimized 
-                  data-ai-hint="file preview"
-                  onError={(e) => {
-                    console.error("Image load error in editor:", e);
-                    setError("Failed to load image resource for preview."); 
-                  }}
-                />
-              )}
-            </div>
-          ) : (
-            <CodeEditor
-              ref={editorRef}
-              value={fileContent}
-              onChange={setFileContent}
-              language={editorLanguage}
-              readOnly={isSaving || !isWritable}
-              className="h-full w-full border-0 rounded-none" 
-            />
-          )}
-        </div>
-      </>
+      </div>
       {isSnapshotViewerOpen && selectedSnapshotForViewer && (
         <SnapshotViewerDialog
           isOpen={isSnapshotViewerOpen}
@@ -815,4 +837,3 @@ export default function FileEditorPage() {
     </div>
   );
 }
-```
