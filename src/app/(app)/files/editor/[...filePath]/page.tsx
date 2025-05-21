@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { v4 as uuidv4 } from 'uuid';
 import { format, formatDistanceToNowStrict } from 'date-fns';
-import SnapshotViewerDialog from '../components/snapshot-viewer-dialog';
+import SnapshotViewerDialog from './components/snapshot-viewer-dialog';
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
@@ -179,7 +179,6 @@ export default function FileEditorPage() {
       setIsWritable(data.writable);
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred while fetching file content.");
-      // Toast call moved to useEffect listening on 'error' state
       setIsWritable(false);
     } finally {
       setIsLoading(false);
@@ -192,14 +191,12 @@ export default function FileEditorPage() {
     } else if (encodedFilePathFromParams) {
       setIsLoading(false);
       setError("Invalid file path parameter.");
-      // Toast call moved to useEffect listening on 'error' state
     } else {
       setIsLoading(false);
       setError("No file path provided in URL.");
     }
   }, [decodedFilePath, encodedFilePathFromParams, fetchFileContent]);
 
-  // useEffect to show toast when error state changes
   useEffect(() => {
     if (error) {
       toast({ title: "File Editor Error", description: error, variant: "destructive" });
@@ -208,16 +205,15 @@ export default function FileEditorPage() {
 
   const handleSaveChanges = useCallback(async () => {
     if (!decodedFilePath) {
-      toast({ title: "Error", description: "No active file to save.", variant: "destructive" });
+      setTimeout(() => toast({ title: "Error", description: "No active file to save.", variant: "destructive" }), 0);
       return;
     }
     if (!isWritable) {
-      toast({ title: "Cannot Save", description: "This file is not writable.", variant: "destructive" });
+      setTimeout(() => toast({ title: "Cannot Save", description: "This file is not writable.", variant: "destructive" }), 0);
       return;
     }
     setIsSaving(true);
-    // Clear previous general errors before saving
-    // setError(null); // Removed to allow specific save errors to be shown by new effect
+    setError(null); 
     try {
       const response = await fetch(`${DAEMON_API_BASE_PATH}/file`, {
         method: 'POST',
@@ -228,10 +224,10 @@ export default function FileEditorPage() {
       if (!response.ok) {
         throw new Error(result.error || result.details || 'Failed to save file.');
       }
-      toast({ title: 'Success', description: result.message || `File ${fileName} saved.` });
+      setTimeout(() => toast({ title: 'Success', description: result.message || `File ${fileName} saved.` }), 0);
       setOriginalFileContent(fileContent);
     } catch (e: any) {
-      setError(e.message || "An unexpected error occurred while saving."); // This will trigger the error toast effect
+      setError(e.message || "An unexpected error occurred while saving.");
     } finally {
       setIsSaving(false);
     }
@@ -254,12 +250,12 @@ export default function FileEditorPage() {
 
   const handleFind = useCallback(() => {
     if (editorRef.current && editorRef.current.view) {
-      editorRef.current.view.dispatch({ effects: openSearchPanel.of() });
+      openSearchPanel(editorRef.current.view);
     } else {
-      toast({
+      setTimeout(() => toast({
         title: "Find Action",
         description: "Editor not ready or no active editor instance. Use Ctrl+F (Cmd+F).",
-      });
+      }),0);
     }
   }, [toast]);
 
@@ -272,12 +268,12 @@ export default function FileEditorPage() {
           const actualIndexToRemove = updatedSnapshots.length - 1 - oldestUnlockedIndex;
           updatedSnapshots.splice(actualIndexToRemove, 1);
         } else {
-          toast({
+          setTimeout(() => toast({
             title: "Snapshot Limit Reached",
             description: `Cannot create new snapshot. All ${MAX_SNAPSHOTS} snapshot slots are locked.`,
             variant: "destructive",
             duration: 7000,
-          });
+          }),0);
           return prevSnapshots;
         }
       }
@@ -290,10 +286,10 @@ export default function FileEditorPage() {
         isLocked: false,
       };
       console.log("[FileEditorPage] CLIENT-SIDE SNAPSHOT CREATED:", { id: newSnapshot.id, timestamp: newSnapshot.timestamp, lang: newSnapshot.language, locked: newSnapshot.isLocked });
-      toast({
+      setTimeout(() => toast({
         title: "Snapshot Created (Client-side)",
         description: `Created snapshot at ${format(new Date(newSnapshot.timestamp), 'HH:mm:ss')}. This snapshot is temporary.`,
-      });
+      }),0);
       return [newSnapshot, ...updatedSnapshots];
     });
   }, [fileContent, editorLanguage, toast]);
@@ -305,16 +301,16 @@ export default function FileEditorPage() {
       setOriginalFileContent(snapshotToLoad.content); 
       setEditorLanguage(snapshotToLoad.language);
       console.log("[FileEditorPage] CLIENT-SIDE SNAPSHOT LOADED:", { id: snapshotToLoad.id, timestamp: snapshotToLoad.timestamp, lang: snapshotToLoad.language });
-      toast({
+      setTimeout(() => toast({
         title: "Snapshot Loaded",
         description: `Loaded snapshot from ${format(new Date(snapshotToLoad.timestamp), 'PP HH:mm:ss')}`,
-      });
+      }),0);
     } else {
-      toast({
+      setTimeout(() => toast({
         title: "Error",
         description: "Could not find the selected snapshot.",
         variant: "destructive",
-      });
+      }),0);
     }
   }, [snapshots, toast]);
 
@@ -325,10 +321,10 @@ export default function FileEditorPage() {
       );
       const updatedSnapshot = updatedSnapshots.find(s => s.id === snapshotId);
       if (updatedSnapshot) {
-        toast({
+        setTimeout(() => toast({
           title: `Snapshot ${updatedSnapshot.isLocked ? "Locked" : "Unlocked"}`,
           description: `Snapshot from ${format(new Date(updatedSnapshot.timestamp), 'HH:mm:ss')} is now ${updatedSnapshot.isLocked ? "locked" : "unlocked"}.`,
-        });
+        }),0);
       }
       return updatedSnapshots;
     });
@@ -348,10 +344,10 @@ export default function FileEditorPage() {
     );
   }
   
-  if (error && !isImageFile && !isLoading) { // Only show full page error for non-image file loading issues
+  if (error && !isImageFile && !isLoading) {
     return (
       <div className="p-4">
-        <PageHeader title="Error Loading File" description={error /* error state now triggers toast via useEffect */} />
+        <PageHeader title="Error Loading File" description={error} />
         <Button onClick={() => router.push('/files')} variant="outline">
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to File Manager
         </Button>
@@ -397,7 +393,6 @@ export default function FileEditorPage() {
               className="max-w-full max-h-full object-contain rounded-md shadow-lg" 
               onError={() => {
                 setImageError('Failed to load image resource.');
-                // Toast call moved to useEffect listening on 'error' state (or 'imageError' if specific handling needed)
               }}
             />
           ) : (
