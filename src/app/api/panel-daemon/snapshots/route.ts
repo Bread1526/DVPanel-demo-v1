@@ -5,18 +5,17 @@ import fs from 'fs';
 import path from 'path';
 import { loadEncryptedData, saveEncryptedData } from "@/backend/services/storageService";
 import { v4 as uuidv4 } from 'uuid';
-import type { Snapshot } from '@/app/(app)/files/editor/[...filePath]/page';
+import type { Snapshot } from '@/app/(app)/files/components/editor-dialog'; // Corrected path
 import { loadPanelSettings } from '@/app/(app)/settings/actions';
 import { getDataPath } from '@/backend/lib/config';
 
 const BASE_DIR = process.env.FILE_MANAGER_BASE_DIR || '/';
-const MAX_SERVER_SNAPSHOTS = 10; // Matches client-side display limit
+const MAX_SERVER_SNAPSHOTS = 10; 
 
 interface SnapshotFile {
   snapshots: Snapshot[];
 }
 
-// Helper function to resolve safe paths for the *original file*
 function resolveSafeOriginalFilePath(relativePath: string): string {
   const normalizedUserPath = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '');
   let absolutePath: string;
@@ -44,13 +43,9 @@ function resolveSafeOriginalFilePath(relativePath: string): string {
   return absolutePath;
 }
 
-
-// Helper to get snapshot storage path info
-// originalFilePathRelativeFromBase should be the path *as sent by the client*,
-// relative to BASE_DIR (e.g., "myfolder/myfile.txt") or absolute if BASE_DIR is / (e.g., "/var/www/myfile.txt")
 function getSnapshotStorageInfo(originalFilePathRelativeFromBase: string): {
-  relativeSnapshotPathForStorage: string; // Path relative to dataPath for storageService
-  fullSnapshotDirForFs: string; // Absolute directory path on FS for mkdirSync
+  relativeSnapshotPathForStorage: string;
+  fullSnapshotDirForFs: string;
 } {
   const originalFilename = path.basename(originalFilePathRelativeFromBase);
   const originalDirRelativeToBase = path.dirname(originalFilePathRelativeFromBase);
@@ -58,12 +53,13 @@ function getSnapshotStorageInfo(originalFilePathRelativeFromBase: string): {
   const sanitizedOriginalFilename = originalFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
   const snapshotFilenameOnly = `${sanitizedOriginalFilename}-snapshots.json`;
 
-  // Path used as key for storageService (relative to its root, which is dataPath)
-  // This path includes the directory structure of the original file relative to BASE_DIR
   let relativeDirPathForStorage = originalDirRelativeToBase === '.' ? '' : originalDirRelativeToBase;
-  if (relativeDirPathForStorage.startsWith('/')) {
+  if (relativeDirPathForStorage.startsWith('/') && relativeDirPathForStorage !== '/') {
     relativeDirPathForStorage = relativeDirPathForStorage.substring(1);
+  } else if (relativeDirPathForStorage === '/') {
+    relativeDirPathForStorage = ''; // Store at the root of dataPath if original file is at FS root
   }
+
 
   const relativeSnapshotPathForStorage = path.join(
     relativeDirPathForStorage,
@@ -86,18 +82,18 @@ export async function GET(request: NextRequest) {
   const panelSettingsResult = await loadPanelSettings();
   const debugMode = panelSettingsResult.data?.debugMode ?? false;
 
+  if (debugMode) console.log(`[API /snapshots GET] Request for filePath: ${originalFilePathRelative}`);
+
   if (!originalFilePathRelative) {
     if (debugMode) console.warn("[API /snapshots GET] 'filePath' query parameter is required.");
     return NextResponse.json({ error: 'filePath query parameter is required.' }, { status: 400 });
   }
 
   try {
-    // First, ensure the original file itself is valid and accessible for context
-    // This resolveSafeOriginalFilePath works with the BASE_DIR from env
     const safeOriginalFilePath = resolveSafeOriginalFilePath(originalFilePathRelative);
     if (!fs.existsSync(safeOriginalFilePath) || fs.statSync(safeOriginalFilePath).isDirectory()) {
       if (debugMode) console.warn(`[API /snapshots GET] Original file for which snapshots are requested not found or is a directory: ${safeOriginalFilePath}`);
-      return NextResponse.json({ snapshots: [] }, { status: 200 });
+      return NextResponse.json({ snapshots: [] });
     }
 
     const { relativeSnapshotPathForStorage } = getSnapshotStorageInfo(originalFilePathRelative);
@@ -107,12 +103,11 @@ export async function GET(request: NextRequest) {
 
     if (data && Array.isArray(data.snapshots)) {
       if (debugMode) console.log(`[API /snapshots GET] Successfully loaded ${data.snapshots.length} snapshots for ${originalFilePathRelative}`);
-      // Sort snapshots by timestamp descending (newest first)
       const sortedSnapshots = data.snapshots.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       return NextResponse.json({ snapshots: sortedSnapshots });
     } else {
       if (debugMode) console.log(`[API /snapshots GET] No snapshots found or invalid format for ${originalFilePathRelative} (key: ${relativeSnapshotPathForStorage}), returning empty array.`);
-      return NextResponse.json({ snapshots: [] }, { status: 200 });
+      return NextResponse.json({ snapshots: [] });
     }
   } catch (error: any) {
     console.error(`[API /snapshots GET] Error listing snapshots for ${originalFilePathRelative}:`, error.message, error.stack);
@@ -152,7 +147,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Snapshot language is required.' }, { status: 400 });
     }
 
-    // Ensure original file exists and is not a directory before creating snapshot metadata for it
     const safeOriginalFilePath = resolveSafeOriginalFilePath(originalFilePathRelative);
     if (!fs.existsSync(safeOriginalFilePath) || fs.statSync(safeOriginalFilePath).isDirectory()) {
       if (debugMode) console.warn(`[API /snapshots POST] Original file for snapshot not found or is a directory: ${safeOriginalFilePath}`);
@@ -199,7 +193,6 @@ export async function POST(request: NextRequest) {
     let lockedSnapshots = existingSnapshots.filter(s => s.isLocked);
     let unlockedSnapshots = existingSnapshots.filter(s => !s.isLocked);
 
-    // Sort unlocked snapshots: oldest first to prune them correctly
     unlockedSnapshots.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
     const totalAllowedSnapshots = MAX_SERVER_SNAPSHOTS;
@@ -208,15 +201,12 @@ export async function POST(request: NextRequest) {
     if (unlockedSnapshots.length > numUnlockedToKeep) {
       const numToPrune = unlockedSnapshots.length - numUnlockedToKeep;
       if (debugMode) console.log(`[API /snapshots POST] Pruning ${numToPrune} oldest unlocked snapshot(s) for ${originalFilePathRelative}. Keeping ${numUnlockedToKeep} unlocked.`);
-      unlockedSnapshots = unlockedSnapshots.slice(numToPrune); // Keep the N newest unlocked
+      unlockedSnapshots = unlockedSnapshots.slice(numToPrune); 
     }
 
-    // Combine and sort final list: newest first
     let finalSnapshots = [...lockedSnapshots, ...unlockedSnapshots];
     finalSnapshots.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-    // Check if the new snapshot (which was added to existingSnapshots) is still in finalSnapshots.
-    // This handles the edge case where all slots are locked, and the new (unlocked) snapshot was pruned.
     if (lockedSnapshots.length >= totalAllowedSnapshots && !finalSnapshots.some(s => s.id === newSnapshot.id)) {
       const lockedErrorMsg = `Cannot create new snapshot for ${path.basename(originalFilePathRelative)}. All ${totalAllowedSnapshots} snapshot slots are effectively filled by locked snapshots. Unlock some or delete them.`;
       if (debugMode) console.warn(`[API /snapshots POST] ${lockedErrorMsg}`);
@@ -247,14 +237,58 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// TODO: Implement routes/logic for:
-// - PUT /api/panel-daemon/snapshots/{snapshotId}/lock (or POST with action: 'toggleLock')
-// - DELETE /api/panel-daemon/snapshots/{snapshotId} (or POST with action: 'delete')
-// These would likely involve loading the snapshot file, modifying the specific snapshot, and saving back.
-// For simplicity, these actions could also be implemented as POST requests to the main
-// /api/panel-daemon/snapshots route with an 'action' field in the body, e.g.,
-// { filePath: "...", snapshotId: "...", action: "toggleLock" }
-// { filePath: "...", snapshotId: "...", action: "delete" }
-// This avoids needing dynamic routes for snapshot IDs under the API.
+export async function DELETE(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams;
+  const originalFilePathRelative = searchParams.get('filePath');
+  const snapshotIdToDelete = searchParams.get('snapshotId');
+  const panelSettingsResult = await loadPanelSettings();
+  const debugMode = panelSettingsResult.data?.debugMode ?? false;
 
+  if (debugMode) console.log(`[API /snapshots DELETE] Request for filePath: ${originalFilePathRelative}, snapshotId: ${snapshotIdToDelete}`);
+
+  if (!originalFilePathRelative || !snapshotIdToDelete) {
+    if (debugMode) console.warn("[API /snapshots DELETE] 'filePath' and 'snapshotId' query parameters are required.");
+    return NextResponse.json({ error: 'filePath and snapshotId query parameters are required.' }, { status: 400 });
+  }
+
+  try {
+    const safeOriginalFilePath = resolveSafeOriginalFilePath(originalFilePathRelative);
+    if (!fs.existsSync(safeOriginalFilePath)) { // Check existence of original file
+      if (debugMode) console.warn(`[API /snapshots DELETE] Original file not found: ${safeOriginalFilePath}`);
+      return NextResponse.json({ error: 'Original file not found.' }, { status: 404 });
+    }
+
+    const { relativeSnapshotPathForStorage, fullSnapshotDirForFs } = getSnapshotStorageInfo(originalFilePathRelative);
+     if (!fs.existsSync(fullSnapshotDirForFs)) { // Check if snapshot directory exists
+      if (debugMode) console.log(`[API /snapshots DELETE] Snapshot directory not found for ${originalFilePathRelative}, no snapshots to delete.`);
+      return NextResponse.json({ message: 'Snapshot not found.', snapshots: [] });
+    }
+
+
+    const currentSnapshotData = await loadEncryptedData(relativeSnapshotPathForStorage) as SnapshotFile | null;
+    if (!currentSnapshotData || !Array.isArray(currentSnapshotData.snapshots) || currentSnapshotData.snapshots.length === 0) {
+      if (debugMode) console.log(`[API /snapshots DELETE] No snapshots found for ${originalFilePathRelative} or file empty/invalid.`);
+      return NextResponse.json({ message: 'Snapshot not found or no snapshots to delete.', snapshots: [] });
+    }
+
+    const updatedSnapshots = currentSnapshotData.snapshots.filter(snap => snap.id !== snapshotIdToDelete);
+
+    if (updatedSnapshots.length === currentSnapshotData.snapshots.length) {
+      if (debugMode) console.warn(`[API /snapshots DELETE] Snapshot ID ${snapshotIdToDelete} not found in file ${relativeSnapshotPathForStorage}.`);
+      // Still save and return the list, as the client might be out of sync
+    }
+
+    await saveEncryptedData(relativeSnapshotPathForStorage, { snapshots: updatedSnapshots });
+    if (debugMode) console.log(`[API /snapshots DELETE] Snapshot ${snapshotIdToDelete} deleted for ${originalFilePathRelative}. ${updatedSnapshots.length} snapshots remaining.`);
     
+    const sortedSnapshots = updatedSnapshots.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return NextResponse.json({ success: true, message: 'Snapshot deleted successfully.', snapshots: sortedSnapshots });
+
+  } catch (error: any) {
+    console.error(`[API /snapshots DELETE] Error deleting snapshot ${snapshotIdToDelete} for ${originalFilePathRelative}:`, error.message, error.stack);
+    if (error.message?.startsWith('Access denied')) {
+      return NextResponse.json({ error: error.message, details: `Path: ${originalFilePathRelative}` }, { status: 403 });
+    }
+    return NextResponse.json({ error: 'Failed to delete snapshot.', details: debugMode ? error.message : "Internal server error." , stack: debugMode ? error.stack : undefined }, { status: 500 });
+  }
+}
