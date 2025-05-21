@@ -2,6 +2,7 @@
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
+import { Loader2 } from "lucide-react" // Import Loader2
 
 import { cn } from "@/lib/utils"
 
@@ -37,17 +38,18 @@ const buttonVariants = cva(
 export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
-  asChild?: boolean
+  asChild?: boolean;
+  isLoading?: boolean; // Add isLoading prop
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
-    const Comp = asChild ? Slot : "button"
+  ({ className, variant, size, asChild = false, isLoading = false, children, ...props }, ref) => {
+    const Comp = asChild ? Slot : "button";
     
-    // If Comp is 'button', ensure 'asChild' from props is not spread onto the DOM element.
-    let finalProps = props;
+    // If Comp is 'button', ensure 'asChild' and 'isLoading' from props are not spread onto the DOM element.
+    let finalProps: any = props;
     if (Comp === "button") {
-      const { asChild: _forwardedAsChild, ...rest } = props;
+      const { asChild: _forwardedAsChild, isLoading: _forwardedIsLoading, ...rest } = props as ButtonProps & { asChild?: boolean, isLoading?: boolean };
       finalProps = rest;
     }
 
@@ -55,8 +57,23 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
+        disabled={isLoading || props.disabled} // Disable button when isLoading
         {...finalProps}
-      />
+      >
+        {isLoading ? (
+          <>
+            <Loader2 className="animate-spin" />
+            {/* Optionally keep children or replace with "Loading..." */}
+            {/* For icon buttons, you might want to hide children when loading */}
+            {/* Or, if children is just text, replace it: */}
+            {/* <span>Loading...</span> */} 
+            {/* For now, let's keep existing children but Loader will be prepended */}
+            {children} 
+          </>
+        ) : (
+          children
+        )}
+      </Comp>
     )
   }
 )
