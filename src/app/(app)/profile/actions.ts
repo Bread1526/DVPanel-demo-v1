@@ -1,3 +1,4 @@
+
 // src/app/(app)/profile/actions.ts
 "use server";
 
@@ -5,16 +6,15 @@ import { z } from "zod";
 import { cookies } from 'next/headers';
 import { getIronSession } from 'iron-session';
 import { sessionOptions, type SessionData } from '@/lib/session';
-import { saveEncryptedData } from "@/backend/services/storageService";
-import { hashPassword, verifyPassword, loadUserById, type UserData } from "@/app/(app)/roles/actions";
-import { userSettingsSchema, type UserSettingsData } from '@/lib/user-settings';
+import { hashPassword, verifyPassword, loadUserById, type UserData, updateUser as updateUserCoreDetails } from "@/app/(app)/roles/actions";
 import { logEvent } from '@/lib/logger';
 import { type UpdatePasswordState, updatePasswordSchema, type UpdateUserSettingsState } from './types';
+import { loadPanelSettings } from '@/app/(app)/settings/actions'; // For debug mode
+import { saveEncryptedData } from '@/backend/services/storageService'; // For user-specific settings
+import { userSettingsSchema, type UserSettingsData, defaultUserSettings } from '@/lib/user-settings'; // For user-specific settings structure
 import { getDataPath } from "@/backend/lib/config";
 import path from "path";
 import fs from 'fs/promises';
-import { loadPanelSettings } from '@/app/(app)/settings/actions';
-
 
 export async function updateUserPassword(prevState: UpdatePasswordState, formData: FormData): Promise<UpdatePasswordState> {
   let currentDebugMode = false;
@@ -47,7 +47,6 @@ export async function updateUserPassword(prevState: UpdatePasswordState, formDat
   }
 
   const { currentPassword, newPassword } = validatedFields.data;
-  const dataPath = getDataPath();
 
   try {
     const currentUserData = await loadUserById(session.userId);
@@ -56,16 +55,13 @@ export async function updateUserPassword(prevState: UpdatePasswordState, formDat
       return { status: "error", message: "User not found.", errors: { _form: ["User not found."] } };
     }
 
-    // Owner password check (if OWNER_PASSWORD is set in .env and current user is owner)
     let isCurrentPasswordValid = false;
     if (currentUserData.id === 'owner_root' && process.env.OWNER_PASSWORD) {
-        // For owner, always check against .env password first
         isCurrentPasswordValid = currentPassword === process.env.OWNER_PASSWORD;
-        // As a fallback, if .env check fails but a hash exists (e.g. if we allowed UI change for owner, which we don't), check hash
         if (!isCurrentPasswordValid && currentUserData.hashedPassword && currentUserData.salt) {
             isCurrentPasswordValid = await verifyPassword(currentPassword, currentUserData.hashedPassword, currentUserData.salt);
         }
-    } else if (currentUserData.hashedPassword && currentUserData.salt) { // For non-owner users
+    } else if (currentUserData.hashedPassword && currentUserData.salt) {
         isCurrentPasswordValid = await verifyPassword(currentPassword, currentUserData.hashedPassword, currentUserData.salt);
     }
 
@@ -75,76 +71,78 @@ export async function updateUserPassword(prevState: UpdatePasswordState, formDat
       return { status: "error", message: "Incorrect current password.", errors: { currentPassword: ["Incorrect current password."] } };
     }
 
-    // Owner password cannot be changed through this UI for now
     if (currentUserData.id === 'owner_root') {
         logEvent(session.username, session.role, 'UPDATE_PASSWORD_OWNER_ATTEMPT_UI', 'WARN');
         return { status: "error", message: "Owner password must be changed via .env.local configuration.", errors: { _form: ["Owner password cannot be changed here."] } };
     }
-
-    const { hash: newHashedPassword, salt: newSalt } = await hashPassword(newPassword);
     
-    const updatedUserData: UserData = {
-      ...currentUserData,
-      hashedPassword: newHashedPassword,
-      salt: newSalt,
-      updatedAt: new Date().toISOString(),
+    const userUpdatesForCore = {
+      id: currentUserData.id,
+      username: currentUserData.username, 
+      role: currentUserData.role,
+      projects: currentUserData.projects,
+      assignedPages: currentUserData.assignedPages,
+      allowedSettingsPages: currentUserData.allowedSettingsPages,
+      status: currentUserData.status,
+      password: newPassword, 
     };
 
-    const safeUsername = currentUserData.username.replace(/[^a-zA-Z0-9_.-]/g, '_');
-    const safeRole = currentUserData.role.replace(/[^a-zA-Z0-9]/g, '_');
-    const userFilename = `${safeUsername}-${safeRole}.json`;
-    const fullPath = path.join(dataPath, userFilename);
-
     if (currentDebugMode) {
-      console.log(`[UpdateUserPassword] Data to save to ${userFilename}:`, JSON.stringify(updatedUserData, null, 2).substring(0, 500) + "...");
-      console.log(`[UpdateUserPassword] Full path for saving: ${fullPath}`);
+      console.log(`[UpdateUserPassword] Calling updateUserCoreDetails for user ID ${currentUserData.id} with password update.`);
     }
     
-    await saveEncryptedData(userFilename, updatedUserData);
+    const updateResult = await updateUserCoreDetails(
+      { message: "", status: "idle"}, 
+      userUpdatesForCore
+    );
 
-    if (currentDebugMode) {
-      console.log(`[UpdateUserPassword] Successfully called saveEncryptedData for ${userFilename}. Verifying file existence...`);
-      try {
-        await fs.stat(fullPath);
-        console.log(`[UpdateUserPassword] VERIFIED: File ${userFilename} exists at ${fullPath} after save.`);
-      } catch (statError: any) {
-        console.error(`[UpdateUserPassword] VERIFICATION FAILED: File ${userFilename} DOES NOT exist at ${fullPath} after save attempt. Error:`, statError.message);
-      }
+    if (updateResult.status === 'error') {
+      logEvent(session.username, session.role, 'UPDATE_PASSWORD_CORE_UPDATE_FAILED', 'ERROR', { error: updateResult.message, errors: updateResult.errors });
+      return { 
+        status: "error", 
+        message: updateResult.message || "Failed to update user details.", 
+        errors: updateResult.errors || { _form: ["Core user update failed."] }
+      };
     }
 
     logEvent(session.username, session.role, 'UPDATE_PASSWORD_SUCCESS', 'INFO');
     return { status: "success", message: "Password updated successfully." };
 
   } catch (e: any) {
-    console.error("[UpdateUserPassword] CRITICAL: Error during password update. Full error object caught:", e);
-    console.error("[UpdateUserPassword] Error Name:", e.name);
-    console.error("[UpdateUserPassword] Error Message:", e.message);
-    console.error("[UpdateUserPassword] Error Stack:", e.stack);
-    logEvent(session.username, session.role, 'UPDATE_PASSWORD_EXCEPTION', 'ERROR', { error: e.message });
+    console.error("[UpdateUserPassword] CRITICAL: Error during password update:", e);
+    let clientErrorMessage = "Password update failed due to a server error.";
+    clientErrorMessage = `Password update failed. Server Error: ${e.name ? `${e.name}: ` : ''}${e.message || String(e)}${e.stack ? ` Stack (partial): ${String(e.stack).substring(0,200)}...` : ''}`;
     
-    const clientErrorMessage = `Password update failed. Server Error: ${e.name ? `${e.name}: ` : ''}${e.message || String(e)}${e.stack ? ` Stack (partial): ${String(e.stack).substring(0,200)}...` : ''}`;
+    logEvent(session.username, session.role, 'UPDATE_PASSWORD_EXCEPTION', 'ERROR', { error: e.message });
     return { status: "error", message: clientErrorMessage, errors: { _form: [clientErrorMessage] } };
   }
 }
 
-export async function updateCurrentUserSpecificSettings(prevState: UpdateUserSettingsState, settingsData: UserSettingsData): Promise<UpdateUserSettingsState> {
-  let userSpecificDebugMode = settingsData.debugMode ?? false; // Use the submitted debugMode for this action's own logging
 
+export async function updateCurrentUserSpecificSettings(prevState: UpdateUserSettingsState, settingsData: UserSettingsData): Promise<UpdateUserSettingsState> {
   const session = await getIronSession<SessionData>(cookies(), sessionOptions);
   if (!session.isLoggedIn || !session.username || !session.role) {
     logEvent('UnknownUser', 'Unknown', 'UPDATE_USER_SETTINGS_NO_SESSION', 'WARN');
     return { status: "error", message: "Not authenticated." };
   }
+  
+  // Determine debug mode for this action's logging from global settings
+  let currentGlobalDebugMode = false;
+  try {
+    const panelGlobalSettingsResult = await loadPanelSettings();
+    currentGlobalDebugMode = panelGlobalSettingsResult.data?.debugMode ?? false;
+  } catch { /* ignore */ }
 
-  if (userSpecificDebugMode) console.log("[UpdateUserSettings] Received user settings for validation:", settingsData);
+
+  if (currentGlobalDebugMode) console.log("[UpdateUserSettings] Received user settings for validation:", settingsData);
   const validatedSettings = userSettingsSchema.safeParse(settingsData);
   if (!validatedSettings.success) {
-    if (userSpecificDebugMode) console.error("[UpdateUserSettings] User settings validation failed:", validatedSettings.error.flatten().fieldErrors);
+    if (currentGlobalDebugMode) console.error("[UpdateUserSettings] User settings validation failed:", validatedSettings.error.flatten().fieldErrors);
     logEvent(session.username, session.role, 'UPDATE_USER_SETTINGS_VALIDATION_FAILED', 'WARN', { errors: validatedSettings.error.flatten().fieldErrors });
     return {
       status: "error",
       message: "Invalid settings data.",
-      errors: validatedSettings.error.flatten().fieldErrors as any, // Cast for simplicity, ensure your UI handles this
+      errors: validatedSettings.error.flatten().fieldErrors as any,
     };
   }
 
@@ -155,13 +153,13 @@ export async function updateCurrentUserSpecificSettings(prevState: UpdateUserSet
   const fullPath = path.join(dataPath, settingsFilename);
 
   try {
-    if (userSpecificDebugMode) {
-        console.log(`[UpdateUserSettings] Data to save to ${settingsFilename}:`, JSON.stringify(validatedSettings.data, null, 2));
+    if (currentGlobalDebugMode) {
+        console.log(`[UpdateUserSettings] Attempting to save user-specific settings to ${settingsFilename}:`, JSON.stringify(validatedSettings.data, null, 2));
         console.log(`[UpdateUserSettings] Full path for saving: ${fullPath}`);
     }
     await saveEncryptedData(settingsFilename, validatedSettings.data);
 
-    if (userSpecificDebugMode) {
+    if (currentGlobalDebugMode) {
       console.log(`[UpdateUserSettings] Successfully called saveEncryptedData for ${settingsFilename}. Verifying file existence...`);
       try {
         await fs.stat(fullPath);
@@ -173,13 +171,11 @@ export async function updateCurrentUserSpecificSettings(prevState: UpdateUserSet
     logEvent(session.username, session.role, 'UPDATE_USER_SETTINGS_SUCCESS', 'INFO', { settings: Object.keys(validatedSettings.data) });
     return { status: "success", message: "Your settings have been updated.", data: validatedSettings.data };
   } catch (e: any) {
-    console.error("[UpdateUserSettings] CRITICAL: Error saving user settings. Full error object caught:", e);
-    console.error("[UpdateUserSettings] Error Name:", e.name);
-    console.error("[UpdateUserSettings] Error Message:", e.message);
-    console.error("[UpdateUserSettings] Error Stack:", e.stack);
-    logEvent(session.username, session.role, 'UPDATE_USER_SETTINGS_EXCEPTION', 'ERROR', { error: e.message, path: fullPath });
+    console.error("[UpdateUserSettings] CRITICAL: Error saving user settings:", e);
+    let clientErrorMessage = "Failed to save settings due to a server error.";
+    clientErrorMessage = `Failed to save settings. Server Error: ${e.name ? `${e.name}: ` : ''}${e.message || String(e)}${e.stack ? ` Stack (partial): ${String(e.stack).substring(0,200)}...` : ''}`;
     
-    const clientErrorMessage = `Failed to save settings. Server Error: ${e.name ? `${e.name}: ` : ''}${e.message || String(e)}${e.stack ? ` Stack (partial): ${String(e.stack).substring(0,200)}...` : ''}`;
+    logEvent(session.username, session.role, 'UPDATE_USER_SETTINGS_EXCEPTION', 'ERROR', { error: e.message, path: fullPath });
     return { status: "error", message: clientErrorMessage, errors: { _form: [clientErrorMessage] } };
   }
 }

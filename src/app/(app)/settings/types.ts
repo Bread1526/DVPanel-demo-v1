@@ -1,12 +1,12 @@
 
 import { z } from 'zod';
 
-// Zod schema for popup settings (now user-specific, but defaults defined here for reference if needed elsewhere)
-export const userPopupSettingsSchema = z.object({
+// Zod schema for popup settings (now global)
+export const panelPopupSettingsSchema = z.object({
   notificationDuration: z.coerce.number().min(2).max(15).default(5),
   disableAllNotifications: z.boolean().default(false),
   disableAutoClose: z.boolean().default(false),
-  enableCopyError: z.boolean().default(true), // Defaulted to true as per typical user expectation
+  enableCopyError: z.boolean().default(true),
   showConsoleErrorsInNotifications: z.boolean().default(false),
 });
 
@@ -48,7 +48,7 @@ export const panelSettingsSchema = z.object({
     .boolean()
     .default(false)
     .describe('Disable automatic logout due to inactivity.'),
-  debugMode: z.boolean().default(false).describe('Global debug mode for the panel.'),
+  debugMode: z.boolean().default(false).describe('Global debug mode for the panel.'), // Moved back here
   daemonPort: z
     .string()
     .min(1, "Daemon Port is required.")
@@ -70,9 +70,17 @@ export const panelSettingsSchema = z.object({
       }
     )
     .default("127.0.0.1"),
+  popup: panelPopupSettingsSchema.default({ // Moved back here
+    notificationDuration: 5,
+    disableAllNotifications: false,
+    disableAutoClose: false,
+    enableCopyError: true,
+    showConsoleErrorsInNotifications: false,
+  }),
 });
 
 export type PanelSettingsData = z.infer<typeof panelSettingsSchema>;
+export type PanelPopupSettingsData = z.infer<typeof panelPopupSettingsSchema>;
 
 // Explicit default values for PanelSettingsData
 export const explicitDefaultPanelSettings: PanelSettingsData =
@@ -81,7 +89,7 @@ export const explicitDefaultPanelSettings: PanelSettingsData =
 export interface SavePanelSettingsState {
   message: string;
   status: 'idle' | 'success' | 'error' | 'validating';
-  errors?: Partial<Record<keyof PanelSettingsData | 'general', string[]>>;
+  errors?: Partial<Record<keyof PanelSettingsData | '_form' | 'general', string[]>>;
   data?: PanelSettingsData;
   isPending?: boolean;
 }

@@ -1,8 +1,9 @@
 
 // src/lib/session.ts
 import type { IronSessionOptions } from 'iron-session';
-import type { UserData } from '@/app/(app)/roles/types'; // Adjusted path
-import type { UserSettingsData } from './user-settings';
+import type { UserData } from '@/app/(app)/roles/types';
+// Removed: import type { UserSettingsData } from './user-settings';
+import type { PanelSettingsData, PanelPopupSettingsData } from '@/app/(app)/settings/types'; // Import global settings types
 
 // Define the shape of the data stored in the session (cookie)
 export interface SessionData {
@@ -11,7 +12,7 @@ export interface SessionData {
   username?: string;
   role?: UserData['role'] | 'Owner';
   lastActivity?: number;
-  // Store global panel settings for session inactivity at the time of login
+  // Store global panel settings for inactivity at the time of login
   sessionInactivityTimeoutMinutes?: number;
   disableAutoLogoutOnInactivity?: boolean;
 
@@ -31,8 +32,11 @@ export type AuthenticatedUser = {
   assignedPages?: string[];
   allowedSettingsPages?: string[];
   status?: 'Active' | 'Inactive';
-  userSettings?: UserSettingsData;
-  globalDebugMode?: boolean; // From global panel settings
+  // User-specific settings are removed. Global settings are passed instead.
+  // userSettings?: UserSettingsData; 
+  globalDebugMode?: boolean;
+  globalPopupSettings?: PanelPopupSettingsData;
+
 
   // Impersonation fields for client
   isImpersonating?: boolean;
@@ -40,12 +44,11 @@ export type AuthenticatedUser = {
 };
 
 // Define the shape of the server-side session files ({username}-{role}-Auth.json)
-// These files store the actual session token and activity details.
 export type FileSessionData = {
-  userId: string; // ID of the user this session file pertains to (could be original or impersonated)
-  username: string; // Username of the user this session file pertains to
-  role: string;     // Role of the user this session file pertains to
-  token: string;    // A unique session token stored in this file, validated by API
+  userId: string; 
+  username: string; 
+  role: string;     
+  token: string;    
   createdAt: number;
   lastActivity: number;
   sessionInactivityTimeoutMinutes: number;
@@ -56,7 +59,6 @@ export type FileSessionData = {
 // --- Session Configuration ---
 const sessionPassword = process.env.SESSION_PASSWORD;
 
-// This console.log runs once when the module is first loaded.
 console.log(
   '[SessionConfig] Raw SESSION_PASSWORD from process.env during module load:',
   sessionPassword ? `Set (length: ${sessionPassword.length})` : 'UNDEFINED or empty'
@@ -80,24 +82,21 @@ if (!sessionPassword || sessionPassword.length < 32) {
     '3. COMPLETELY RESTART your Next.js development server after correcting .env.local.\n' +
     '-----------------------------------------------------------------------------------\n';
   console.error(errorMessage);
-  // This will halt server startup if the password is not configured correctly.
   throw new Error("FATAL: SESSION_PASSWORD is not configured correctly. Halting server startup. Please check your .env.local file and server logs.");
 }
 
 export const sessionOptions: IronSessionOptions = {
   cookieName: process.env.SESSION_COOKIE_NAME || 'dvpanel_session_v2',
-  password: sessionPassword, // Ensured by the check above
+  password: sessionPassword, 
   cookieOptions: {
-    secure: true, // FORCE TRUE: Required for SameSite=None, and dev URL is HTTPS.
+    secure: true, 
     httpOnly: true,
-    sameSite: 'none', // FORCE 'none': Critical for cross-site contexts like cloud IDEs. Requires Secure=true.
-    // maxAge: undefined by default (session cookie), or set for "keep me logged in" in login action
+    sameSite: 'none', 
+    maxAge: undefined, // Default to session cookie, can be overridden on session.save()
     path: '/',
   },
 };
 
-// Log the final sessionOptions object for debugging, especially useful during startup
-// This runs once when the module is first loaded.
 if (process.env.NODE_ENV === 'development' || (process.env.DVSPANEL_DEBUG_LOGGING === 'true')) {
   console.log(
     '[SessionConfig] Final sessionOptions object being exported:',

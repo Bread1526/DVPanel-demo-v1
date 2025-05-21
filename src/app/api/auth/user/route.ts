@@ -1,14 +1,14 @@
 
-'use server';
+"use server";
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { getIronSession } from 'iron-session';
 import { cookies } from 'next/headers';
 import { sessionOptions, type SessionData, type AuthenticatedUser, type FileSessionData } from '@/lib/session';
 import { loadUserById, type UserData as FullUserData } from '@/app/(app)/roles/actions';
-import { loadPanelSettings, type PanelSettingsData } from '@/app/(app)/settings/actions';
+import { loadPanelSettings, type PanelSettingsData, explicitDefaultPanelSettings, type PanelPopupSettingsData } from '@/app/(app)/settings/actions'; // For global debug and popup settings
 import { loadEncryptedData, saveEncryptedData } from "@/backend/services/storageService";
-import { userSettingsSchema, defaultUserSettings, type UserSettingsData } from '@/lib/user-settings';
+// Removed: import { userSettingsSchema, defaultUserSettings, type UserSettingsData } from '@/lib/user-settings';
 import { getDataPath } from '@/backend/lib/config';
 import path from 'path';
 import fs from 'fs/promises';
@@ -17,6 +17,7 @@ import { logEvent } from '@/lib/logger';
 export async function GET(request: NextRequest) {
   const panelGlobalSettingsResult = await loadPanelSettings();
   const globalDebugModeForApi = panelGlobalSettingsResult.data?.debugMode ?? false;
+  const globalPopupSettingsForApi = panelGlobalSettingsResult.data?.popup ?? explicitDefaultPanelSettings.popup;
 
   if (globalDebugModeForApi) {
     console.log('[API /auth/user] Received GET request.');
@@ -33,12 +34,13 @@ export async function GET(request: NextRequest) {
       lastActivityCookie: session.lastActivity ? new Date(session.lastActivity).toISOString() : undefined,
       isImpersonating: session.isImpersonating,
       originalUsername: session.originalUsername,
+      sessionInactivityTimeoutMinutes: session.sessionInactivityTimeoutMinutes,
+      disableAutoLogoutOnInactivity: session.disableAutoLogoutOnInactivity,
     });
   }
 
   if (!session.isLoggedIn || !session.userId || !session.username || !session.role) {
     if (globalDebugModeForApi) console.log('[API /auth/user] No active session in iron-session cookie. Returning 401.');
-    // logEvent(session.username || 'UnknownUser', session.role || 'Unknown', 'AUTH_USER_NO_SESSION_COOKIE', 'INFO'); // User unknown here
     return NextResponse.json({ error: 'Not authenticated via cookie' }, { status: 401 });
   }
 
@@ -67,9 +69,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Session not found on server. Please log in again.' }, { status: 401 });
   }
 
-  // Inactivity Check
-  if (!serverSessionFileData.disableAutoLogoutOnInactivity) {
-    const timeoutMilliseconds = (serverSessionFileData.sessionInactivityTimeoutMinutes || 30) * 60 * 1000;
+  // Inactivity Check using settings from the Auth.json file
+  const sessionTimeoutMinutesToUse = serverSessionFileData.sessionInactivityTimeoutMinutes ?? (panelGlobalSettingsResult.data?.sessionInactivityTimeout ?? 30);
+  const disableAutoLogoutToUse = serverSessionFileData.disableAutoLogoutOnInactivity ?? (panelGlobalSettingsResult.data?.disableAutoLogoutOnInactivity ?? false);
+
+  if (!disableAutoLogoutToUse) {
+    const timeoutMilliseconds = sessionTimeoutMinutesToUse * 60 * 1000;
     if (Date.now() - serverSessionFileData.lastActivity > timeoutMilliseconds) {
       if (globalDebugModeForApi) console.log(`[API /auth/user] Session for ${effectiveUsername} timed out due to inactivity. Deleting server session file ${serverSessionFilename} and iron-session cookie.`);
       logEvent(effectiveUsername, effectiveRole, 'AUTH_USER_INACTIVITY_TIMEOUT', 'INFO', { filename: serverSessionFilename });
@@ -85,18 +90,16 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Update lastActivity in server-side session file
+  // Update lastActivity in server-side session file and refresh iron-session cookie
   serverSessionFileData.lastActivity = Date.now();
+  session.lastActivity = Date.now(); // Also update in cookie session data
   try {
     await saveEncryptedData(serverSessionFilename, serverSessionFileData);
-    // Also update lastActivity in the iron-session cookie data and re-save to refresh its maxAge
-    session.lastActivity = Date.now(); 
-    await session.save();
+    await session.save(); // Re-saving iron-session refreshes its cookie expiry
     if (globalDebugModeForApi) console.log(`[API /auth/user] Updated lastActivity in server session file ${serverSessionFilename} and refreshed iron-session cookie for ${effectiveUsername}.`);
   } catch (e: any) {
     console.error(`[API /auth/user] Error saving updated server session file ${serverSessionFilename} or iron-session:`, e);
     logEvent(effectiveUsername, effectiveRole, 'AUTH_USER_ACTIVITY_UPDATE_FAILED', 'ERROR', { error: e.message, filename: serverSessionFilename });
-    // Potentially invalidate session if saving fails critically
   }
   
   if (globalDebugModeForApi) console.log(`[API /auth/user] Attempting to load user profile for effective user ID: ${effectiveUserId} (Username: ${effectiveUsername}, Role: ${effectiveRole})`);
@@ -116,30 +119,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'User profile not found, session invalidated. Please log in again.' }, { status: 401 });
   }
   
-  // Load user-specific settings
-  let userSpecificSettings: UserSettingsData = defaultUserSettings;
-  const userSettingsFilename = `${effectiveUsername.replace(/[^a-zA-Z0-9_.-]/g, '_')}-${effectiveRole.replace(/[^a-zA-Z0-9]/g, '_')}-settings.json`;
-  try {
-    const loadedUserSettingsRaw = await loadEncryptedData(userSettingsFilename);
-    if (loadedUserSettingsRaw) {
-      const parsedSettings = userSettingsSchema.safeParse(loadedUserSettingsRaw);
-      if (parsedSettings.success) {
-        userSpecificSettings = parsedSettings.data;
-        if (globalDebugModeForApi) console.log(`[API /auth/user] Successfully loaded user-specific settings for ${effectiveUsername} from ${userSettingsFilename}`);
-      } else {
-        if (globalDebugModeForApi) console.warn(`[API /auth/user] User settings file ${userSettingsFilename} for ${effectiveUsername} is invalid. Using defaults and attempting to save. Errors:`, parsedSettings.error.flatten().fieldErrors);
-        await saveEncryptedData(userSettingsFilename, defaultUserSettings); // Save defaults back
-        logEvent(effectiveUsername, effectiveRole, 'USER_SETTINGS_INVALID_RESET', 'WARN', { filename: userSettingsFilename });
-      }
-    } else {
-       if (globalDebugModeForApi) console.log(`[API /auth/user] No specific settings file ${userSettingsFilename} for ${effectiveUsername}. Using defaults and attempting to save.`);
-       await saveEncryptedData(userSettingsFilename, defaultUserSettings); // Create with defaults
-       logEvent(effectiveUsername, effectiveRole, 'USER_SETTINGS_CREATED_DEFAULT', 'INFO', { filename: userSettingsFilename });
-    }
-  } catch (e: any) {
-    if (globalDebugModeForApi) console.error(`[API /auth/user] Error loading or saving user settings file ${userSettingsFilename} for ${effectiveUsername}:`, e.message);
-    // Continue with default user settings if loading/saving failed
-  }
+  // User-specific settings file ({username}-{role}-settings.json) is no longer used.
+  // We pass global debug and popup settings.
 
   const authenticatedUser: AuthenticatedUser = {
       id: fullUser.id,
@@ -149,20 +130,21 @@ export async function GET(request: NextRequest) {
       assignedPages: fullUser.assignedPages || [],
       allowedSettingsPages: fullUser.allowedSettingsPages || [],
       status: fullUser.status,
-      userSettings: userSpecificSettings, 
-      globalDebugMode: panelGlobalSettingsResult.data?.debugMode ?? false, // Send global debug mode status
+      // userSettings: undefined, // Removed user-specific settings object
+      globalDebugMode: globalDebugModeForApi, 
+      globalPopupSettings: globalPopupSettingsForApi,
       isImpersonating: session.isImpersonating,
       originalUsername: session.isImpersonating ? session.originalUsername : undefined,
   };
 
-  if (userSpecificSettings.debugMode || globalDebugModeForApi) { 
+  if (globalDebugModeForApi) { 
     console.log(`[API /auth/user] Successfully returning authenticated user for ${fullUser.username}:`, { 
         id: authenticatedUser.id, 
         username: authenticatedUser.username, 
         role: authenticatedUser.role, 
         status: authenticatedUser.status, 
-        userSettingsDebugMode: authenticatedUser.userSettings?.debugMode,
-        globalPanelDebugMode: authenticatedUser.globalDebugMode,
+        globalDebugMode: authenticatedUser.globalDebugMode,
+        globalPopupSettingsDuration: authenticatedUser.globalPopupSettings?.notificationDuration,
         isImpersonating: authenticatedUser.isImpersonating,
         originalUsername: authenticatedUser.originalUsername,
     });
