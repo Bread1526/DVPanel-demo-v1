@@ -5,7 +5,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import CodeEditor from '@/components/ui/code-editor';
+import CodeEditor from '@/components/ui/code-editor'; // Default import
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -43,7 +43,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { format, formatDistanceToNowStrict } from 'date-fns';
 import SnapshotViewerDialog from '../components/snapshot-viewer-dialog';
 
-import { SearchCursor } from '@codemirror/search';
+import { SearchCursor, openSearchPanel } from '@codemirror/search';
 import { EditorView } from '@codemirror/view';
 import { EditorSelection } from '@codemirror/state';
 
@@ -82,7 +82,7 @@ export interface Snapshot {
 }
 
 const MAX_SERVER_SNAPSHOTS = 10;
-const PRESET_SEARCH_TERMS = ["TODO", "FIXME", "NOTE"]; // Ensure this line is correct
+const PRESET_SEARCH_TERMS = ["TODO", "FIXME", "NOTE"]; // Ensured this has an assignment
 
 export default function FileEditorPage() {
   const params = useParams();
@@ -117,7 +117,6 @@ export default function FileEditorPage() {
   const [currentMatchIndex, setCurrentMatchIndex] = useState(-1);
   const [isCaseSensitiveSearch, setIsCaseSensitiveSearch] = useState(false);
 
-
   const encodedFilePathFromParams = params.filePath;
 
   const decodedFilePath = useMemo(() => {
@@ -140,7 +139,6 @@ export default function FileEditorPage() {
 
   useEffect(() => {
     if (error) {
-      // Defer toast to next tick to avoid "update during render" issues
       setTimeout(() => toast({ title: "File Operation Error", description: error, variant: "destructive" }), 0);
     }
   }, [error, toast]);
@@ -150,7 +148,6 @@ export default function FileEditorPage() {
       setTimeout(() => toast({ title: "Snapshot Operation Error", description: snapshotError, variant: "destructive" }), 0);
     }
   }, [snapshotError, toast]);
-
 
   const fetchSnapshots = useCallback(async () => {
     if (!decodedFilePath || isImageFile) return;
@@ -162,7 +159,7 @@ export default function FileEditorPage() {
       if (!response.ok) {
         let errData;
         let errorText = `Failed to fetch snapshots. Status: ${response.status}`;
-         try {
+        try {
           errData = await response.json();
           if (globalDebugModeActive) console.log("[FileEditorPage] fetchSnapshots API Error JSON:", errData);
           errorText = errData.error || errData.details || errData.message || errorText;
@@ -187,7 +184,7 @@ export default function FileEditorPage() {
     } finally {
       setIsLoadingSnapshots(false);
     }
-  }, [decodedFilePath, globalDebugModeActive, isImageFile, toast]); // Added toast
+  }, [decodedFilePath, globalDebugModeActive, isImageFile, toast]);
 
   const fetchFileContent = useCallback(async () => {
     if (!decodedFilePath) {
@@ -258,13 +255,13 @@ export default function FileEditorPage() {
         await fetchSnapshots(); 
       }
 
-    } catch (e: any)      {
+    } catch (e: any) {
         setError(e.message || "An unexpected error occurred while fetching file content.");
         setIsWritable(false); 
     } finally {
       setIsLoading(false);
     }
-  }, [decodedFilePath, fileName, fetchSnapshots, toast]); // Added toast
+  }, [decodedFilePath, fileName, fetchSnapshots, toast]);
 
   useEffect(() => {
     if (!decodedFilePath && encodedFilePathFromParams) {
@@ -295,7 +292,6 @@ export default function FileEditorPage() {
       const result = await response.json();
       if (globalDebugModeActive) console.log("[FileEditorPage] handleCreateSnapshot: API Response Status:", response.status, "Body:", JSON.stringify(result).substring(0,200) + "...");
 
-
       if (!response.ok) {
         const errorMsg = result.error || result.details || `API Error ${response.status}: ${result.message || "Failed to create snapshot."}`;
         throw new Error(errorMsg);
@@ -324,7 +320,7 @@ export default function FileEditorPage() {
     }
 
     if (hasUnsavedChanges) { 
-      await handleCreateSnapshot(); 
+      handleCreateSnapshot(); // Call directly, no await needed as it's async but we don't need its result to proceed with saving.
     }
 
     setIsSaving(true);
@@ -427,7 +423,6 @@ export default function FileEditorPage() {
   const toggleCaseSensitiveSearch = () => {
     const newCaseSensitivity = !isCaseSensitiveSearch;
     setIsCaseSensitiveSearch(newCaseSensitivity);
-    // Re-run search with new sensitivity if query is not empty
     if (searchQuery.trim()) {
         performSearch(searchQuery); 
     }
@@ -435,18 +430,15 @@ export default function FileEditorPage() {
 
   const handlePresetSearch = (term: string) => {
     setSearchQuery(term);
-    performSearch(term); // Call performSearch with the new term
+    performSearch(term);
   };
 
   useEffect(() => { 
     if (!isSearchWidgetOpen) {
-      // Keep searchQuery for reopening, clear matches
       setSearchMatches([]);
       setCurrentMatchIndex(-1);
-      // Deselect text in editor if a search was active
       if (editorRef.current?.view && searchMatches.length > 0) { 
         const view = editorRef.current.view;
-        // Only clear selection if there was an active search selection
         if (view.state.selection.main.from !== view.state.selection.main.to) {
              view.dispatch({ selection: EditorSelection.single(view.state.selection.main.anchor) });
         }
@@ -475,8 +467,6 @@ export default function FileEditorPage() {
   }, [toast, fileName]);
 
   const handleToggleLockSnapshot = useCallback(async (snapshotId: string) => {
-    // Placeholder for server-side lock toggling
-    // For now, just update client-side state and show a toast
     setServerSnapshots(prev => 
         prev.map(s => s.id === snapshotId ? {...s, isLocked: !s.isLocked} : s)
     );
@@ -488,8 +478,6 @@ export default function FileEditorPage() {
   }, [serverSnapshots, toast]);
 
   const handleDeleteSnapshot = useCallback(async (snapshotIdToDelete: string) => {
-    // Placeholder for server-side deletion
-    // For now, just update client-side state and show a toast
     setServerSnapshots(prev => prev.filter(s => s.id !== snapshotIdToDelete));
      setTimeout(() => toast({ title: "Snapshot Deleted (Client)", description: "Server-side deletion is not yet implemented."}), 0);
   }, [toast]);
@@ -588,93 +576,90 @@ export default function FileEditorPage() {
           )}
         </div>
         <div className="flex items-center gap-1 text-xs text-muted-foreground mr-1">
-          {!isImageFile && (
+          <DropdownMenu>
             <TooltipProvider>
-              <DropdownMenu>
-                  <Tooltip>
+                 <Tooltip>
                     <TooltipTrigger asChild>
-                      <DropdownMenuTrigger asChild>
-                          <Button
-                              variant="ghost"
-                              size="icon"
-                              className="shadow-sm hover:scale-105 w-7 h-7"
-                              disabled={isLoadingSnapshots}
-                          >
-                              {isLoadingSnapshots || isCreatingSnapshot ? <Loader2 className="h-3 w-3 animate-spin"/> : <Camera className="h-3 w-3" />}
-                          </Button>
-                      </DropdownMenuTrigger>
+                        <DropdownMenuTrigger asChild disabled={isImageFile || isLoadingSnapshots || isCreatingSnapshot}>
+                             <Button
+                                variant="ghost"
+                                size="icon"
+                                className="shadow-sm hover:scale-105 w-7 h-7"
+                              >
+                                {isLoadingSnapshots || isCreatingSnapshot ? <Loader2 className="h-3 w-3 animate-spin"/> : <Camera className="h-3 w-3" />}
+                            </Button>
+                        </DropdownMenuTrigger>
                     </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Snapshots</p>
-                    </TooltipContent>
-                  </Tooltip>
-                <DropdownMenuContent align="end" className="w-96 max-w-[90vw]">
-                  <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
-                    Server-side Snapshots (Max: {MAX_SERVER_SNAPSHOTS})
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onSelect={handleCreateSnapshot}
-                    disabled={createSnapshotButtonDisabled}
-                  >
-                    {isCreatingSnapshot ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
-                    Create Snapshot (Content & Lang)
-                  </DropdownMenuItem>
-
-                  {serverSnapshots.length > 0 && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuGroup>
-                        <DropdownMenuLabel className="text-xs px-2">Recent Snapshots ({serverSnapshots.length})</DropdownMenuLabel>
-                        {snapshotError && <DropdownMenuLabel className="text-xs px-2 text-destructive">{snapshotError}</DropdownMenuLabel>}
-                        {serverSnapshots.map(snapshot => (
-                          <DropdownMenuItem key={snapshot.id} className="flex justify-between items-center" onSelect={(e) => e.preventDefault()}>
-                            <span onClick={() => handleLoadSnapshot(snapshot)} className="cursor-pointer flex-grow hover:text-primary text-xs truncate pr-2">
-                              {format(new Date(snapshot.timestamp), 'HH:mm:ss')} ({formatDistanceToNowStrict(new Date(snapshot.timestamp))} ago) - Lang: {snapshot.language}
-                            </span>
-                            <div className="flex items-center ml-1 gap-0.5 flex-shrink-0">
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSnapshotInPopup(snapshot)} title="View Snapshot">
-                                    <Eye className="h-3 w-3" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent><p>View Snapshot</p></TooltipContent>
-                              </Tooltip>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleLockSnapshot(snapshot.id)} title={snapshot.isLocked ? "Unlock Snapshot" : "Lock Snapshot"}>
-                                    {snapshot.isLocked ? <Lock className="h-3 w-3 text-destructive" /> : <Unlock className="h-3 w-3 text-muted-foreground" />}
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent><p>{snapshot.isLocked ? "Unlock Snapshot" : "Lock Snapshot"}</p></TooltipContent>
-                              </Tooltip>
-                              <Tooltip>
-                                 <TooltipTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground hover:bg-destructive/10" onClick={() => handleDeleteSnapshot(snapshot.id)} title="Delete Snapshot">
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent><p>Delete Snapshot</p></TooltipContent>
-                              </Tooltip>
-                            </div>
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuGroup>
-                    </>
-                  )}
-                  {serverSnapshots.length === 0 && !isLoadingSnapshots && !isCreatingSnapshot && !snapshotError && (
-                    <DropdownMenuLabel className="text-xs text-muted-foreground px-2 italic py-1">No snapshots yet.</DropdownMenuLabel>
-                  )}
-
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel className="text-xs text-muted-foreground px-2 whitespace-normal">
-                    Snapshots are stored on the server. Locked snapshots are less likely to be auto-pruned.
-                  </DropdownMenuLabel>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    <TooltipContent><p>Snapshots</p></TooltipContent>
+                 </Tooltip>
             </TooltipProvider>
-          )}
+            <DropdownMenuContent align="end" className="w-96 max-w-[90vw]">
+              <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
+                Server-side Snapshots (Max: {MAX_SERVER_SNAPSHOTS})
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={handleCreateSnapshot}
+                disabled={createSnapshotButtonDisabled}
+              >
+                {isCreatingSnapshot ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
+                Create Snapshot (Content & Lang)
+              </DropdownMenuItem>
+
+              {serverSnapshots.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel className="text-xs px-2">Recent Snapshots ({serverSnapshots.length})</DropdownMenuLabel>
+                    {snapshotError && <DropdownMenuLabel className="text-xs px-2 text-destructive">{snapshotError}</DropdownMenuLabel>}
+                    {serverSnapshots.map(snapshot => (
+                      <DropdownMenuItem key={snapshot.id} className="flex justify-between items-center" onSelect={(e) => e.preventDefault()}>
+                        <span onClick={() => handleLoadSnapshot(snapshot)} className="cursor-pointer flex-grow hover:text-primary text-xs truncate pr-2">
+                          {format(new Date(snapshot.timestamp), 'HH:mm:ss')} ({formatDistanceToNowStrict(new Date(snapshot.timestamp))} ago) - Lang: {snapshot.language}
+                        </span>
+                        <div className="flex items-center ml-1 gap-0.5 flex-shrink-0">
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSnapshotInPopup(snapshot)} title="View Snapshot">
+                                  <Eye className="h-3 w-3" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent><p>View Snapshot</p></TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleLockSnapshot(snapshot.id)} title={snapshot.isLocked ? "Unlock Snapshot" : "Lock Snapshot"}>
+                                  {snapshot.isLocked ? <Lock className="h-3 w-3 text-destructive" /> : <Unlock className="h-3 w-3 text-muted-foreground" />}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent><p>{snapshot.isLocked ? "Unlock Snapshot" : "Lock Snapshot"}</p></TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground hover:bg-destructive/10" onClick={() => handleDeleteSnapshot(snapshot.id)} title="Delete Snapshot">
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent><p>Delete Snapshot</p></TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </>
+              )}
+              {serverSnapshots.length === 0 && !isLoadingSnapshots && !isCreatingSnapshot && !snapshotError && (
+                <DropdownMenuLabel className="text-xs text-muted-foreground px-2 italic py-1">No snapshots yet.</DropdownMenuLabel>
+              )}
+
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs text-muted-foreground px-2 whitespace-normal">
+                Snapshots are stored on the server. Locked snapshots are less likely to be auto-pruned.
+              </DropdownMenuLabel>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <span className="truncate max-w-[100px] sm:max-w-[150px]">{fileName}</span>
           {!isImageFile && (
             <>
@@ -831,3 +816,5 @@ export default function FileEditorPage() {
     </div>
   );
 }
+
+    
