@@ -23,6 +23,7 @@ import {
   ChevronUp,
   ChevronDown,
   X,
+  CaseSensitive, // Import CaseSensitive
 } from "lucide-react";
 import path from 'path-browserify';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -81,6 +82,7 @@ export interface Snapshot {
 }
 
 const MAX_SERVER_SNAPSHOTS = 10;
+const PRESET_SEARCH_TERMS = ["TODO", "FIXME", "NOTE"];
 
 export default function FileEditorPage() {
   const params = useParams();
@@ -113,6 +115,8 @@ export default function FileEditorPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMatches, setSearchMatches] = useState<Array<{ from: number; to: number }>>([]);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(-1);
+  const [isCaseSensitiveSearch, setIsCaseSensitiveSearch] = useState(false);
+
 
   const encodedFilePathFromParams = params.filePath;
 
@@ -127,13 +131,24 @@ export default function FileEditorPage() {
       return decodeURIComponent(joinedPath);
     } catch (e) {
       console.error("[FileEditorPage] Failed to decode file path from params:", encodedFilePathFromParams, e);
-      // setError("Invalid file path in URL."); // This causes toast in render
       return '';
     }
   }, [encodedFilePathFromParams]);
 
   const fileName = useMemo(() => path.basename(decodedFilePath || 'Untitled'), [decodedFilePath]);
   const hasUnsavedChanges = useMemo(() => fileContent !== originalFileContent, [fileContent, originalFileContent]);
+
+  useEffect(() => {
+    if (error) {
+      setTimeout(() => toast({ title: "File Operation Error", description: error, variant: "destructive" }), 0);
+    }
+  }, [error, toast]);
+
+  useEffect(() => {
+    if (snapshotError) {
+      setTimeout(() => toast({ title: "Snapshot Operation Error", description: snapshotError, variant: "destructive" }), 0);
+    }
+  }, [snapshotError, toast]);
 
   const fetchSnapshots = useCallback(async () => {
     if (!decodedFilePath || isImageFile) return;
@@ -174,7 +189,7 @@ export default function FileEditorPage() {
 
   const fetchFileContent = useCallback(async () => {
     if (!decodedFilePath) {
-      // Error is set by the useEffect that watches decodedFilePath
+      setError("Invalid file path specified.");
       setIsLoading(false);
       return;
     }
@@ -232,7 +247,6 @@ export default function FileEditorPage() {
           }
           setFileContent(data.content);
           setOriginalFileContent(data.content);
-          setEditorLanguage(getLanguageFromFilename(fileName)); 
       } else {
           setFileContent(''); 
           setOriginalFileContent('');
@@ -252,8 +266,7 @@ export default function FileEditorPage() {
 
   useEffect(() => {
     if (!decodedFilePath && encodedFilePathFromParams) {
-      setError("Invalid file path parameter detected after decoding attempts.");
-      setIsLoading(false);
+      setError("Invalid file path in URL.");
     } else if (decodedFilePath) {
       fetchFileContent();
     }
@@ -281,7 +294,7 @@ export default function FileEditorPage() {
       if (globalDebugModeActive) console.log("[FileEditorPage] handleCreateSnapshot: API Response Status:", response.status, "Body:", result);
 
       if (!response.ok) {
-        const errorMsg = result.error || result.details || result.message || `API Error: ${response.status}. ${result.message || "Failed to create snapshot."}`;
+        const errorMsg = result.error || result.details || `API Error ${response.status}: ${result.message || "Failed to create snapshot."}`;
         throw new Error(errorMsg);
       }
       
@@ -296,7 +309,6 @@ export default function FileEditorPage() {
       const apiErrorMsg = e.message || "An unexpected error occurred while creating the snapshot.";
       if (globalDebugModeActive) console.error("[FileEditorPage] handleCreateSnapshot API Error:", e);
       setSnapshotError(apiErrorMsg);
-       setTimeout(() => toast({ title: "Snapshot Error", description: apiErrorMsg, variant: "destructive" }), 0);
     } finally {
       setIsCreatingSnapshot(false);
     }
@@ -308,7 +320,7 @@ export default function FileEditorPage() {
       return;
     }
 
-    if (hasUnsavedChanges) {
+    if (hasUnsavedChanges) { 
       await handleCreateSnapshot(); 
     }
 
@@ -356,8 +368,8 @@ export default function FileEditorPage() {
       return;
     }
     const view = editorRef.current.view;
-    const cursor = new SearchCursor(view.state.doc, query);
-    const matches: Array<{ from: number; to: number }> = [];
+    const cursor = new SearchCursor(view.state.doc, query, 0, view.state.doc.length, isCaseSensitiveSearch ? undefined : (a,b) => a.toLowerCase() === b.toLowerCase());
+    const matches: Array<{ from: number; to: number }>> = [];
     while (!cursor.next().done) {
       matches.push({ from: cursor.value.from, to: cursor.value.to });
     }
@@ -373,15 +385,14 @@ export default function FileEditorPage() {
       setCurrentMatchIndex(-1);
       setTimeout(() => toast({ title: "Not Found", description: `"${query}" was not found in the file.`, duration: 2000 }),0);
     }
-  }, [toast]);
+  }, [isCaseSensitiveSearch, toast]);
 
   const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newQuery = e.target.value;
     setSearchQuery(newQuery);
-    // Only perform search if there's a query, to avoid clearing selection on empty input
-    if (newQuery.trim()) {
+    if (newQuery.trim()) { // Only search if query is not empty
       performSearch(newQuery);
-    } else {
+    } else { // Clear results if query is empty
       setSearchMatches([]);
       setCurrentMatchIndex(-1);
     }
@@ -410,17 +421,33 @@ export default function FileEditorPage() {
     goToMatch(prevIndex);
   }, [currentMatchIndex, searchMatches, goToMatch]);
 
+  const toggleCaseSensitiveSearch = () => {
+    const newCaseSensitivity = !isCaseSensitiveSearch;
+    setIsCaseSensitiveSearch(newCaseSensitivity);
+    if (searchQuery.trim()) {
+        performSearch(searchQuery); // Re-run search with new sensitivity
+    }
+  };
+
+  const handlePresetSearch = (term: string) => {
+    setSearchQuery(term);
+    performSearch(term);
+  };
+
   useEffect(() => { 
     if (!isSearchWidgetOpen) {
-      setSearchQuery("");
+      // setSearchQuery(""); // Keep query for reopening, clear matches
       setSearchMatches([]);
       setCurrentMatchIndex(-1);
-      if (editorRef.current?.view) { // Clear selection if editor exists
+      if (editorRef.current?.view) { 
         const view = editorRef.current.view;
-        view.dispatch({ selection: EditorSelection.single(view.state.selection.main.anchor) });
+        // Only clear selection if there was an active search selection
+        if (searchMatches.length > 0 && view.state.selection.main.from !== view.state.selection.main.to) {
+             view.dispatch({ selection: EditorSelection.single(view.state.selection.main.anchor) });
+        }
       }
     }
-  }, [isSearchWidgetOpen]);
+  }, [isSearchWidgetOpen, searchMatches.length]); // Added searchMatches.length to dependencies
   
   const handleLoadSnapshot = useCallback((snapshotToLoad: Snapshot) => {
      setTimeout(() => {
@@ -462,26 +489,6 @@ export default function FileEditorPage() {
     setSelectedSnapshotForViewer(snapshot);
     setIsSnapshotViewerOpen(true);
   };
-
-  useEffect(() => {
-    if (error && !isImageFile) { // Show specific file operation errors
-        setTimeout(() => toast({ title: "File Operation Error", description: error, variant: "destructive" }), 0);
-    }
-  }, [error, isImageFile, toast]);
-
-  useEffect(() => {
-    if (snapshotError && !isImageFile) { // Show snapshot-specific errors
-        setTimeout(() => toast({ title: "Snapshot Operation Error", description: snapshotError, variant: "destructive" }), 0);
-    }
-  }, [snapshotError, toast, isImageFile]);
-
-
-  useEffect(() => {
-    if (!decodedFilePath && encodedFilePathFromParams) {
-      setError("Invalid file path in URL.");
-    }
-  }, [decodedFilePath, encodedFilePathFromParams]);
-
 
   if (isLoading) {
     return (
@@ -572,92 +579,94 @@ export default function FileEditorPage() {
           )}
         </div>
         <div className="flex items-center gap-1 text-xs text-muted-foreground mr-1">
-           <TooltipProvider>
-            <DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="shadow-sm hover:scale-105 w-7 h-7"
-                            disabled={isLoadingSnapshots || isImageFile}
-                        >
-                            {isLoadingSnapshots || isCreatingSnapshot ? <Loader2 className="h-3 w-3 animate-spin"/> : <Camera className="h-3 w-3" />}
-                        </Button>
-                    </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Snapshots</p>
-                  </TooltipContent>
-                </Tooltip>
-              <DropdownMenuContent align="end" className="w-96 max-w-[90vw]">
-                <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
-                  Server-side Snapshots (Max: {MAX_SERVER_SNAPSHOTS})
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onSelect={handleCreateSnapshot}
-                  disabled={createSnapshotButtonDisabled}
-                >
-                  {isCreatingSnapshot ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
-                  Create Snapshot (Content & Lang)
-                </DropdownMenuItem>
+          {!isImageFile && (
+            <TooltipProvider>
+              <DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                          <Button
+                              variant="ghost"
+                              size="icon"
+                              className="shadow-sm hover:scale-105 w-7 h-7"
+                              disabled={isLoadingSnapshots}
+                          >
+                              {isLoadingSnapshots || isCreatingSnapshot ? <Loader2 className="h-3 w-3 animate-spin"/> : <Camera className="h-3 w-3" />}
+                          </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Snapshots</p>
+                    </TooltipContent>
+                  </Tooltip>
+                <DropdownMenuContent align="end" className="w-96 max-w-[90vw]">
+                  <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
+                    Server-side Snapshots (Max: {MAX_SERVER_SNAPSHOTS})
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={handleCreateSnapshot}
+                    disabled={createSnapshotButtonDisabled}
+                  >
+                    {isCreatingSnapshot ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
+                    Create Snapshot (Content & Lang)
+                  </DropdownMenuItem>
 
-                {serverSnapshots.length > 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuGroup>
-                      <DropdownMenuLabel className="text-xs px-2">Recent Snapshots ({serverSnapshots.length})</DropdownMenuLabel>
-                      {snapshotError && <DropdownMenuLabel className="text-xs px-2 text-destructive">{snapshotError}</DropdownMenuLabel>}
-                      {serverSnapshots.map(snapshot => (
-                        <DropdownMenuItem key={snapshot.id} className="flex justify-between items-center" onSelect={(e) => e.preventDefault()}>
-                          <span onClick={() => handleLoadSnapshot(snapshot)} className="cursor-pointer flex-grow hover:text-primary text-xs truncate pr-2">
-                            {format(new Date(snapshot.timestamp), 'HH:mm:ss')} ({formatDistanceToNowStrict(new Date(snapshot.timestamp))} ago) - Lang: {snapshot.language}
-                          </span>
-                          <div className="flex items-center ml-1 gap-0.5 flex-shrink-0">
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSnapshotInPopup(snapshot)} title="View Snapshot">
-                                  <Eye className="h-3 w-3" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent><p>View Snapshot</p></TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleLockSnapshot(snapshot.id)} title={snapshot.isLocked ? "Unlock Snapshot" : "Lock Snapshot"}>
-                                  {snapshot.isLocked ? <Lock className="h-3 w-3 text-destructive" /> : <Unlock className="h-3 w-3 text-muted-foreground" />}
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent><p>{snapshot.isLocked ? "Unlock Snapshot" : "Lock Snapshot"}</p></TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                               <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground hover:bg-destructive/10" onClick={() => handleDeleteSnapshot(snapshot.id)} title="Delete Snapshot">
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent><p>Delete Snapshot</p></TooltipContent>
-                            </Tooltip>
-                          </div>
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuGroup>
-                  </>
-                )}
-                {serverSnapshots.length === 0 && !isLoadingSnapshots && !isCreatingSnapshot && !snapshotError && (
-                  <DropdownMenuLabel className="text-xs text-muted-foreground px-2 italic py-1">No snapshots yet.</DropdownMenuLabel>
-                )}
+                  {serverSnapshots.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuGroup>
+                        <DropdownMenuLabel className="text-xs px-2">Recent Snapshots ({serverSnapshots.length})</DropdownMenuLabel>
+                        {snapshotError && <DropdownMenuLabel className="text-xs px-2 text-destructive">{snapshotError}</DropdownMenuLabel>}
+                        {serverSnapshots.map(snapshot => (
+                          <DropdownMenuItem key={snapshot.id} className="flex justify-between items-center" onSelect={(e) => e.preventDefault()}>
+                            <span onClick={() => handleLoadSnapshot(snapshot)} className="cursor-pointer flex-grow hover:text-primary text-xs truncate pr-2">
+                              {format(new Date(snapshot.timestamp), 'HH:mm:ss')} ({formatDistanceToNowStrict(new Date(snapshot.timestamp))} ago) - Lang: {snapshot.language}
+                            </span>
+                            <div className="flex items-center ml-1 gap-0.5 flex-shrink-0">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSnapshotInPopup(snapshot)} title="View Snapshot">
+                                    <Eye className="h-3 w-3" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent><p>View Snapshot</p></TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleToggleLockSnapshot(snapshot.id)} title={snapshot.isLocked ? "Unlock Snapshot" : "Lock Snapshot"}>
+                                    {snapshot.isLocked ? <Lock className="h-3 w-3 text-destructive" /> : <Unlock className="h-3 w-3 text-muted-foreground" />}
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent><p>{snapshot.isLocked ? "Unlock Snapshot" : "Lock Snapshot"}</p></TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                 <TooltipTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground hover:bg-destructive/10" onClick={() => handleDeleteSnapshot(snapshot.id)} title="Delete Snapshot">
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent><p>Delete Snapshot</p></TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuGroup>
+                    </>
+                  )}
+                  {serverSnapshots.length === 0 && !isLoadingSnapshots && !isCreatingSnapshot && !snapshotError && (
+                    <DropdownMenuLabel className="text-xs text-muted-foreground px-2 italic py-1">No snapshots yet.</DropdownMenuLabel>
+                  )}
 
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel className="text-xs text-muted-foreground px-2 whitespace-normal">
-                  Snapshots are stored on the server. Locked snapshots are less likely to be auto-pruned.
-                </DropdownMenuLabel>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </TooltipProvider>
-          <span className="truncate max-w-[150px] sm:max-w-[200px]">{fileName}</span>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-xs text-muted-foreground px-2 whitespace-normal">
+                    Snapshots are stored on the server. Locked snapshots are less likely to be auto-pruned.
+                  </DropdownMenuLabel>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </TooltipProvider>
+          )}
+          <span className="truncate max-w-[100px] sm:max-w-[150px]">{fileName}</span>
           {!isImageFile && (
             <>
               <span className="mx-1">|</span>
@@ -731,11 +740,11 @@ export default function FileEditorPage() {
         )}
         
         {isSearchWidgetOpen && !isImageFile && (
-          <div className="absolute top-2 right-2 z-10 bg-card p-2 rounded-lg shadow-lg border w-64 space-y-1.5">
+          <div className="absolute top-2 right-2 z-10 bg-card p-2 rounded-lg shadow-lg border w-60 space-y-1.5">
             <div className="flex items-center justify-between mb-1">
-                <p className="text-sm font-medium px-1">Find in File</p>
+                <span className="text-xs text-muted-foreground px-1">Find:</span>
                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsSearchWidgetOpen(false)}>
-                    <X className="h-4 w-4" />
+                    <X className="h-3 w-3" />
                 </Button>
             </div>
             <Input
@@ -743,22 +752,61 @@ export default function FileEditorPage() {
               value={searchQuery}
               onChange={handleSearchInputChange}
               placeholder="Search..."
-              className="h-8 text-sm"
+              className="h-7 text-xs px-2 py-1"
               autoFocus
               onKeyDown={(e) => { if (e.key === 'Enter' && searchQuery.trim()) performSearch(searchQuery); }}
             />
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1">
-                <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={handlePreviousSearchMatch} disabled={searchMatches.length === 0}>
-                  <ChevronUp className="h-4 w-4" />
-                </Button>
-                <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={handleNextSearchMatch} disabled={searchMatches.length === 0}>
-                  <ChevronDown className="h-4 w-4" />
-                </Button>
+             <div className="flex items-center justify-between gap-1 flex-wrap">
+              <div className="flex items-center gap-0.5">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={handlePreviousSearchMatch} disabled={searchMatches.length === 0}>
+                        <ChevronUp className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent><p>Previous</p></TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={handleNextSearchMatch} disabled={searchMatches.length === 0}>
+                        <ChevronDown className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent><p>Next</p></TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                       <Button 
+                        type="button" 
+                        variant={isCaseSensitiveSearch ? "secondary" : "ghost"} 
+                        size="icon" 
+                        className="h-6 w-6" 
+                        onClick={toggleCaseSensitiveSearch}
+                      >
+                        <CaseSensitive className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent><p>Case Sensitive ({isCaseSensitiveSearch ? "On" : "Off"})</p></TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
-              <span className="text-xs text-muted-foreground px-1">
-                {searchMatches.length > 0 ? `${currentMatchIndex + 1} of ${searchMatches.length}` : searchQuery ? "No matches" : ""}
+               <span className="text-xs text-muted-foreground px-1 truncate">
+                {searchMatches.length > 0 ? `${currentMatchIndex + 1} of ${searchMatches.length}` : searchQuery.trim() ? "No matches" : ""}
               </span>
+            </div>
+            <div className="flex flex-wrap gap-1 pt-1">
+                {PRESET_SEARCH_TERMS.map(term => (
+                    <Button
+                        key={term}
+                        variant="outline"
+                        size="xs" 
+                        className="text-xs px-1.5 py-0.5 h-auto"
+                        onClick={() => handlePresetSearch(term)}
+                    >
+                        {term}
+                    </Button>
+                ))}
             </div>
           </div>
         )}
