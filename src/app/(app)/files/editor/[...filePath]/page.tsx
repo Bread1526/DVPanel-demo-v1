@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { v4 as uuidv4 } from 'uuid';
 import { format, formatDistanceToNowStrict } from 'date-fns';
-import SnapshotViewerDialog from './components/snapshot-viewer-dialog';
+import SnapshotViewerDialog from '../components/snapshot-viewer-dialog'; // Corrected import path
 
 // Helper function to get language from filename
 function getLanguageFromFilename(filename: string): string {
@@ -48,7 +48,7 @@ function getLanguageFromFilename(filename: string): string {
     case 'html': case 'htm': return 'html';
     case 'css': case 'scss': return 'css';
     case 'json': return 'json';
-    case 'yaml': case 'yml': return 'yaml'; // Added yaml/yml
+    case 'yaml': case 'yml': return 'yaml';
     case 'md': return 'markdown';
     case 'py': return 'python';
     case 'sh': return 'shell';
@@ -65,6 +65,7 @@ export interface Snapshot {
 }
 
 const DAEMON_API_BASE_PATH = '/api/panel-daemon';
+const MAX_SERVER_SNAPSHOTS = 10; // As defined in the backend API
 
 export default function FileEditorPage() {
   const params = useParams();
@@ -81,7 +82,6 @@ export default function FileEditorPage() {
   
   const [globalDebugModeActive, setGlobalDebugModeActive] = useState<boolean>(false);
   
-  // Server-side snapshots
   const [serverSnapshots, setServerSnapshots] = useState<Snapshot[]>([]);
   const [isLoadingSnapshots, setIsLoadingSnapshots] = useState<boolean>(false);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
@@ -113,6 +113,7 @@ export default function FileEditorPage() {
 
   const fetchSnapshots = useCallback(async () => {
     if (!decodedFilePath) return;
+    console.log(`[FileEditorPage] fetchSnapshots called for: ${decodedFilePath}`);
     setIsLoadingSnapshots(true);
     setSnapshotError(null);
     try {
@@ -123,7 +124,9 @@ export default function FileEditorPage() {
       }
       const data = await response.json();
       setServerSnapshots(Array.isArray(data.snapshots) ? data.snapshots : []);
+      console.log(`[FileEditorPage] fetchSnapshots SUCCESS for: ${decodedFilePath}, count: ${data.snapshots?.length || 0}`);
     } catch (e: any) {
+      console.error(`[FileEditorPage] fetchSnapshots ERROR for: ${decodedFilePath}`, e);
       setSnapshotError(e.message || "An unexpected error occurred while fetching snapshots.");
       setServerSnapshots([]);
       setTimeout(() => toast({ title: "Snapshot Error", description: e.message, variant: "destructive" }), 0);
@@ -138,7 +141,7 @@ export default function FileEditorPage() {
       setIsLoading(false);
       return;
     }
-
+    console.log(`[FileEditorPage] fetchFileContent called for: ${decodedFilePath}`);
     setIsLoading(true);
     setError(null);
     
@@ -150,6 +153,7 @@ export default function FileEditorPage() {
         setGlobalDebugModeActive(false);
       }
     } catch (settingsError) {
+      console.warn("[FileEditorPage] Error loading global panel settings for debug mode:", settingsError);
       setGlobalDebugModeActive(false);
     }
     
@@ -169,8 +173,10 @@ export default function FileEditorPage() {
       setFileContent(data.content);
       setOriginalFileContent(data.content);
       setIsWritable(data.writable);
-      await fetchSnapshots(); // Fetch snapshots after successfully loading file content
+      console.log(`[FileEditorPage] fetchFileContent SUCCESS for: ${decodedFilePath}, writable: ${data.writable}`);
+      await fetchSnapshots(); 
     } catch (e: any) {
+      console.error(`[FileEditorPage] fetchFileContent ERROR for: ${decodedFilePath}`, e);
       setError(e.message || "An unexpected error occurred while fetching file content.");
       setIsWritable(false); 
     } finally {
@@ -189,7 +195,7 @@ export default function FileEditorPage() {
       setIsLoading(false);
     }
   }, [decodedFilePath, encodedFilePathFromParams, fetchFileContent]);
-
+  
   useEffect(() => {
     if (error) {
       setTimeout(() => toast({ title: "File Editor Error", description: error, variant: "destructive" }), 0);
@@ -201,7 +207,9 @@ export default function FileEditorPage() {
       setTimeout(() => toast({ title: "Error", description: "No active file to create snapshot for.", variant: "destructive" }), 0);
       return;
     }
-    setIsLoadingSnapshots(true); // Indicate snapshot operation
+    console.log(`[FileEditorPage] handleCreateSnapshot called for: ${decodedFilePath}, Lang: ${editorLanguage}`);
+    setIsLoadingSnapshots(true); 
+    setSnapshotError(null);
     try {
       const response = await fetch(`${DAEMON_API_BASE_PATH}/snapshots`, {
         method: 'POST',
@@ -213,8 +221,10 @@ export default function FileEditorPage() {
         throw new Error(result.error || result.details || 'Failed to create snapshot.');
       }
       setTimeout(() => toast({ title: 'Snapshot Created', description: result.message || `Snapshot for ${fileName} created.` }), 0);
-      setServerSnapshots(Array.isArray(result.snapshots) ? result.snapshots : []); // Update with list from server
+      setServerSnapshots(Array.isArray(result.snapshots) ? result.snapshots : []); 
+      console.log(`[FileEditorPage] handleCreateSnapshot SUCCESS. New snapshot count: ${result.snapshots?.length || 0}`);
     } catch (e: any) {
+      console.error(`[FileEditorPage] handleCreateSnapshot ERROR for: ${decodedFilePath}`, e);
       setTimeout(() => toast({ title: "Error Creating Snapshot", description: e.message, variant: "destructive" }), 0);
       setSnapshotError(e.message);
     } finally {
@@ -231,13 +241,14 @@ export default function FileEditorPage() {
       setTimeout(() => toast({ title: "Cannot Save", description: "This file is not writable.", variant: "destructive" }), 0);
       return;
     }
+    console.log(`[FileEditorPage] handleSaveChanges called for: ${decodedFilePath}`);
 
     if (hasUnsavedChanges) {
-      await handleCreateSnapshot(); // Await to ensure snapshot is attempted before saving
+      await handleCreateSnapshot(); 
     }
 
     setIsSaving(true);
-    setError(null);
+    setError(null); // Clear previous page-level errors
     try {
       const response = await fetch(`${DAEMON_API_BASE_PATH}/file`, {
         method: 'POST',
@@ -250,9 +261,11 @@ export default function FileEditorPage() {
       }
       setTimeout(() => toast({ title: 'Success', description: result.message || `File ${fileName} saved.` }), 0);
       setOriginalFileContent(fileContent); 
+      console.log(`[FileEditorPage] handleSaveChanges SUCCESS for: ${decodedFilePath}`);
     } catch (e: any) {
-      setError(e.message || "An unexpected error occurred while saving.");
-      setTimeout(() => toast({ title: "Error Saving File", description: e.message, variant: "destructive" }),0);
+      console.error(`[FileEditorPage] handleSaveChanges ERROR for: ${decodedFilePath}`, e);
+      setError(e.message || "An unexpected error occurred while saving."); // Set page-level error
+      // Toast is handled by the useEffect watching 'error' state
     } finally {
       setIsSaving(false);
     }
@@ -265,6 +278,8 @@ export default function FileEditorPage() {
         const canSave = !isSaving && isWritable && (hasUnsavedChanges || globalDebugModeActive);
         if (canSave) {
           handleSaveChanges();
+        } else {
+            if (globalDebugModeActive) console.log("[FileEditorPage] Ctrl+S: Save skipped.", {isSaving, isWritable, hasUnsavedChanges, globalDebugModeActive});
         }
       }
     };
@@ -304,13 +319,19 @@ export default function FileEditorPage() {
   }, [toast, fileName]);
 
   const handleToggleLockSnapshot = useCallback((snapshotId: string) => {
-    // Placeholder: Server-side implementation needed
-    setTimeout(() => toast({ title: "Feature Coming Soon", description: "Locking/unlocking server-side snapshots will be implemented later."}), 0);
-  }, [toast]);
+    // Placeholder: Server-side implementation needed for actual locking
+    setServerSnapshots(prev => prev.map(s => s.id === snapshotId ? {...s, isLocked: !s.isLocked} : s));
+    const snapshot = serverSnapshots.find(s => s.id === snapshotId);
+    setTimeout(() => toast({ 
+        title: snapshot?.isLocked ? "Snapshot Unlocked (Client)" : "Snapshot Locked (Client)", 
+        description: "Server-side locking will be implemented later."
+    }), 0);
+  }, [toast, serverSnapshots]);
 
   const handleDeleteSnapshot = useCallback((snapshotIdToDelete: string) => {
-    // Placeholder: Server-side implementation needed
-    setTimeout(() => toast({ title: "Feature Coming Soon", description: "Deleting server-side snapshots will be implemented later."}), 0);
+     // Placeholder: Server-side implementation needed for actual deletion
+    setServerSnapshots(prev => prev.filter(s => s.id !== snapshotIdToDelete));
+    setTimeout(() => toast({ title: "Snapshot Deleted (Client)", description: "Server-side deletion will be implemented later."}), 0);
   }, [toast]);
 
   const handleViewSnapshotInPopup = (snapshot: Snapshot) => {
@@ -327,7 +348,7 @@ export default function FileEditorPage() {
     );
   }
 
-  if (error && !isLoading) { 
+  if (error && !isLoading && !fileContent) { // Show general error if content couldn't be loaded at all
     return (
       <div className="p-4">
         <PageHeader title="Error Loading File" description={error} />
@@ -397,9 +418,9 @@ export default function FileEditorPage() {
                   {isLoadingSnapshots ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Camera className="mr-2 h-4 w-4" />} Snapshots
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-96">
+              <DropdownMenuContent align="start" className="w-96 max-w-[90vw]">
                 <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
-                  Server-side Snapshots
+                  Server-side Snapshots (MAX_SERVER_SNAPSHOTS: {MAX_SERVER_SNAPSHOTS})
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -413,7 +434,7 @@ export default function FileEditorPage() {
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuGroup>
-                      <DropdownMenuLabel className="text-xs px-2">Recent Snapshots ({serverSnapshots.length} / {10})</DropdownMenuLabel>
+                      <DropdownMenuLabel className="text-xs px-2">Recent Snapshots ({serverSnapshots.length})</DropdownMenuLabel>
                       {snapshotError && <DropdownMenuLabel className="text-xs px-2 text-destructive">{snapshotError}</DropdownMenuLabel>}
                       {serverSnapshots.map(snapshot => (
                         <DropdownMenuItem key={snapshot.id} className="flex justify-between items-center" onSelect={(e) => e.preventDefault()}>
@@ -442,7 +463,7 @@ export default function FileEditorPage() {
 
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel className="text-xs text-muted-foreground px-2 whitespace-normal">
-                  (Server-side snapshots will expire after {10} new ones are above that snapshot and it has been 3 weeks unless marked as locked)
+                  (Server-side snapshots will expire after {MAX_SERVER_SNAPSHOTS} new ones are above that snapshot and it has been 3 weeks unless marked as locked)
                 </DropdownMenuLabel>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -469,6 +490,13 @@ export default function FileEditorPage() {
             </AlertDescription>
           </Alert>
         )}
+        {error && fileContent && ( // Show specific save error if file content is loaded but save failed
+            <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
+              <FileWarning className="h-4 w-4" />
+              <AlertTitle>Save Error</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+        )}
         <div className="flex-grow relative p-0 bg-background min-h-0"> 
           <CodeEditor
             ref={editorRef}
@@ -490,4 +518,3 @@ export default function FileEditorPage() {
     </div>
   );
 }
-
