@@ -127,7 +127,7 @@ export default function FileEditorPage() {
       return decodeURIComponent(joinedPath);
     } catch (e) {
       console.error("[FileEditorPage] Failed to decode file path from params:", encodedFilePathFromParams, e);
-      setError("Invalid file path in URL.");
+      // setError("Invalid file path in URL."); // This causes toast in render
       return '';
     }
   }, [encodedFilePathFromParams]);
@@ -148,9 +148,8 @@ export default function FileEditorPage() {
         try {
           errData = await response.json();
           if (globalDebugModeActive) console.log("[FileEditorPage] fetchSnapshots API Error JSON:", errData);
-          errorText = errData.error || errData.details || errorText;
+          errorText = errData.error || errData.details || errData.message || errorText;
         } catch (e) {
-          // If response is not JSON, use text.
            const rawText = await response.text().catch(() => "Could not read error response.");
            if (globalDebugModeActive) console.log("[FileEditorPage] fetchSnapshots API Error Text:", rawText);
            errorText = `${errorText}. Server response: ${rawText.substring(0, 100)}`;
@@ -175,7 +174,7 @@ export default function FileEditorPage() {
 
   const fetchFileContent = useCallback(async () => {
     if (!decodedFilePath) {
-      setError("File path is invalid or missing.");
+      // Error is set by the useEffect that watches decodedFilePath
       setIsLoading(false);
       return;
     }
@@ -197,6 +196,7 @@ export default function FileEditorPage() {
     } catch (settingsError) {
       setGlobalDebugModeActive(false);
     }
+
     if (currentGlobalDebug) console.log(`[FileEditorPage] fetchFileContent CALLED for: ${decodedFilePath}. Global debug mode: ${currentGlobalDebug}`);
     
     const currentFileLang = getLanguageFromFilename(fileName);
@@ -208,19 +208,18 @@ export default function FileEditorPage() {
       const response = await fetch(`/api/panel-daemon/file?path=${encodeURIComponent(decodedFilePath)}&view=true`);
       let data;
       if (!response.ok) {
+        let errorMsg = `Failed to fetch file. Status: ${response.status}`;
         try {
             data = await response.json();
-            throw new Error(data.error || data.details || `Failed to fetch file. Status: ${response.status}`);
+            errorMsg = data.error || data.details || data.message || errorMsg;
         } catch (e) {
-             const textError = await response.text();
-             throw new Error(`Failed to fetch file. Status: ${response.status}. Response: ${textError || "Empty response"}`);
+             const textError = await response.text().catch(() => "Unknown server response");
+             errorMsg = `${errorMsg}. Response: ${textError.substring(0,150) || "Empty response"}`;
         }
+        throw new Error(errorMsg);
       }
-      try {
-        data = await response.json();
-      } catch (jsonError: any) {
-        throw new Error("Failed to parse file content response from server. Response might be empty or not valid JSON.");
-      }
+      
+      data = await response.json();
 
       if (typeof data.writable !== 'boolean') {
         throw new Error("Invalid response format from server: missing 'writable' status.");
@@ -245,15 +244,14 @@ export default function FileEditorPage() {
 
     } catch (e: any)      {
         setError(e.message || "An unexpected error occurred while fetching file content.");
-        setIsWritable(false); // Assume not writable if fetch fails
+        setIsWritable(false); 
     } finally {
       setIsLoading(false);
     }
-  }, [decodedFilePath, fileName, fetchSnapshots]); // fetchSnapshots removed from direct call here
+  }, [decodedFilePath, fileName, fetchSnapshots]);
 
   useEffect(() => {
     if (!decodedFilePath && encodedFilePathFromParams) {
-      // This handles cases where the path parameter itself might be invalid from the start
       setError("Invalid file path parameter detected after decoding attempts.");
       setIsLoading(false);
     } else if (decodedFilePath) {
@@ -263,7 +261,7 @@ export default function FileEditorPage() {
   
   const handleCreateSnapshot = useCallback(async () => {
     if (!decodedFilePath || isImageFile) {
-       setTimeout(() => toast({ title: isImageFile ? "Info" : "Error", description: isImageFile ? "Snapshots are not supported for image files." : "No active file to create snapshot for.", variant: isImageFile ? "default" : "destructive" }),0);
+      setTimeout(() => toast({ title: isImageFile ? "Info" : "Error", description: isImageFile ? "Snapshots are not supported for image files." : "No active file to create snapshot for.", variant: isImageFile ? "default" : "destructive" }),0);
       return;
     }
     if (globalDebugModeActive) console.log(`[FileEditorPage] handleCreateSnapshot CALLED for: ${decodedFilePath}, Lang: ${editorLanguage}, Content Length: ${fileContent.length}`);
@@ -283,7 +281,7 @@ export default function FileEditorPage() {
       if (globalDebugModeActive) console.log("[FileEditorPage] handleCreateSnapshot: API Response Status:", response.status, "Body:", result);
 
       if (!response.ok) {
-        const errorMsg = result.error || result.details || `API Error: ${response.status}. ${result.message || "Failed to create snapshot."}`;
+        const errorMsg = result.error || result.details || result.message || `API Error: ${response.status}. ${result.message || "Failed to create snapshot."}`;
         throw new Error(errorMsg);
       }
       
@@ -292,12 +290,13 @@ export default function FileEditorPage() {
       if(Array.isArray(result.snapshots)) {
         setServerSnapshots(result.snapshots);
       } else {
-        await fetchSnapshots(); // Re-fetch to get the updated list if API doesn't return it directly
+        await fetchSnapshots();
       }
     } catch (e: any) {
       const apiErrorMsg = e.message || "An unexpected error occurred while creating the snapshot.";
       if (globalDebugModeActive) console.error("[FileEditorPage] handleCreateSnapshot API Error:", e);
       setSnapshotError(apiErrorMsg);
+       setTimeout(() => toast({ title: "Snapshot Error", description: apiErrorMsg, variant: "destructive" }), 0);
     } finally {
       setIsCreatingSnapshot(false);
     }
@@ -323,7 +322,7 @@ export default function FileEditorPage() {
       });
       const result = await response.json();
       if (!response.ok) {
-        throw new Error(result.error || result.details || 'Failed to save file.');
+        throw new Error(result.error || result.details || result.message || 'Failed to save file.');
       }
       setTimeout(() => toast({ title: 'Success', description: result.message || `File ${fileName} saved.` }),0);
       setOriginalFileContent(fileContent); 
@@ -379,7 +378,13 @@ export default function FileEditorPage() {
   const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newQuery = e.target.value;
     setSearchQuery(newQuery);
-    performSearch(newQuery); 
+    // Only perform search if there's a query, to avoid clearing selection on empty input
+    if (newQuery.trim()) {
+      performSearch(newQuery);
+    } else {
+      setSearchMatches([]);
+      setCurrentMatchIndex(-1);
+    }
   };
   
   const goToMatch = useCallback((index: number) => {
@@ -405,11 +410,15 @@ export default function FileEditorPage() {
     goToMatch(prevIndex);
   }, [currentMatchIndex, searchMatches, goToMatch]);
 
-  useEffect(() => { // Clear search if widget closes
+  useEffect(() => { 
     if (!isSearchWidgetOpen) {
       setSearchQuery("");
       setSearchMatches([]);
       setCurrentMatchIndex(-1);
+      if (editorRef.current?.view) { // Clear selection if editor exists
+        const view = editorRef.current.view;
+        view.dispatch({ selection: EditorSelection.single(view.state.selection.main.anchor) });
+      }
     }
   }, [isSearchWidgetOpen]);
   
@@ -434,21 +443,19 @@ export default function FileEditorPage() {
   }, [toast, fileName]);
 
   const handleToggleLockSnapshot = useCallback(async (snapshotId: string) => {
-     // TODO: API call to persist lock state on server
     setServerSnapshots(prev => 
         prev.map(s => s.id === snapshotId ? {...s, isLocked: !s.isLocked} : s)
     );
     const snapshot = serverSnapshots.find(s => s.id === snapshotId);
     setTimeout(() => toast({ 
-        title: snapshot && !snapshot.isLocked ? "Snapshot Locked (Client)" : "Snapshot Unlocked (Client)", // Logic is reversed due to state update timing
-        description: "Server-side persistence pending API implementation."
+        title: snapshot && !snapshot.isLocked ? "Snapshot Locked (Client)" : "Snapshot Unlocked (Client)",
+        description: "Server-side persistence for lock status is not yet implemented."
     }), 0);
   }, [serverSnapshots, toast]);
 
   const handleDeleteSnapshot = useCallback(async (snapshotIdToDelete: string) => {
-    // TODO: API call to delete snapshot on server
     setServerSnapshots(prev => prev.filter(s => s.id !== snapshotIdToDelete));
-     setTimeout(() => toast({ title: "Snapshot Deleted (Client)", description: "Server-side deletion pending API implementation."}), 0);
+     setTimeout(() => toast({ title: "Snapshot Deleted (Client)", description: "Server-side deletion is not yet implemented."}), 0);
   }, [toast]);
 
   const handleViewSnapshotInPopup = (snapshot: Snapshot) => {
@@ -457,18 +464,24 @@ export default function FileEditorPage() {
   };
 
   useEffect(() => {
-    // Effect to show general errors as toasts
-    if (error && !isLoading && !isImageFile) {
+    if (error && !isImageFile) { // Show specific file operation errors
         setTimeout(() => toast({ title: "File Operation Error", description: error, variant: "destructive" }), 0);
     }
-  }, [error, isLoading, isImageFile, toast]);
+  }, [error, isImageFile, toast]);
 
   useEffect(() => {
-    // Effect to show snapshot-specific errors as toasts
-    if (snapshotError && !isImageFile) {
+    if (snapshotError && !isImageFile) { // Show snapshot-specific errors
         setTimeout(() => toast({ title: "Snapshot Operation Error", description: snapshotError, variant: "destructive" }), 0);
     }
   }, [snapshotError, toast, isImageFile]);
+
+
+  useEffect(() => {
+    if (!decodedFilePath && encodedFilePathFromParams) {
+      setError("Invalid file path in URL.");
+    }
+  }, [decodedFilePath, encodedFilePathFromParams]);
+
 
   if (isLoading) {
     return (
@@ -478,12 +491,10 @@ export default function FileEditorPage() {
       </div>
     );
   }
-
+  
   const topLevelError = error || (snapshotError && !isImageFile ? snapshotError : null);
 
-  // If there's a critical error AND we couldn't load file content (and it's not an image we're trying to display),
-  // show a full error page.
-  if (topLevelError && (!fileContent && !isImageFile) && decodedFilePath) { 
+  if (topLevelError && (!fileContent && !isImageFile && !isLoading) && decodedFilePath) { 
     return (
       <div className="p-4">
         <PageHeader title="Error Loading File" description={topLevelError} />
@@ -495,7 +506,6 @@ export default function FileEditorPage() {
   }
   
   if (!decodedFilePath && !isLoading) {
-     // This handles cases where the decodedFilePath itself is invalid (e.g., bad URL param)
      return (
       <div className="p-4">
         <PageHeader title="Invalid File Path" description="The file path specified in the URL is invalid or missing." />
@@ -562,25 +572,25 @@ export default function FileEditorPage() {
           )}
         </div>
         <div className="flex items-center gap-1 text-xs text-muted-foreground mr-1">
-          <TooltipProvider>
+           <TooltipProvider>
             <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                      <Button
-                          variant="ghost"
-                          size="icon"
-                          className="shadow-sm hover:scale-105 w-7 h-7"
-                          disabled={isLoadingSnapshots || isImageFile}
-                      >
-                          {isLoadingSnapshots || isCreatingSnapshot ? <Loader2 className="h-3 w-3 animate-spin"/> : <Camera className="h-3 w-3" />}
-                      </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Snapshots</p>
-                </TooltipContent>
-              </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="shadow-sm hover:scale-105 w-7 h-7"
+                            disabled={isLoadingSnapshots || isImageFile}
+                        >
+                            {isLoadingSnapshots || isCreatingSnapshot ? <Loader2 className="h-3 w-3 animate-spin"/> : <Camera className="h-3 w-3" />}
+                        </Button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Snapshots</p>
+                  </TooltipContent>
+                </Tooltip>
               <DropdownMenuContent align="end" className="w-96 max-w-[90vw]">
                 <DropdownMenuLabel className="text-xs text-muted-foreground px-2">
                   Server-side Snapshots (Max: {MAX_SERVER_SNAPSHOTS})
@@ -672,16 +682,13 @@ export default function FileEditorPage() {
           </AlertDescription>
         </Alert>
       )}
-      {/* Only show general 'error' if it exists AND we still have content OR it's an image.
-          If no content and error, it's handled by the full page error above. */}
-      {error && (fileContent || isImageFile) && !isLoading && ( 
+      {error && (fileContent || isImageFile) && !isLoading && !isImageFile && ( 
           <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
             <FileWarning className="h-4 w-4" />
             <AlertTitle>File Operation Error</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
       )}
-      {/* Only show snapshotError if it's not an image file being viewed */}
       {snapshotError && !isImageFile && (
          <Alert variant="destructive" className="m-2 rounded-md flex-shrink-0">
               <Camera className="h-4 w-4"/>
@@ -700,7 +707,7 @@ export default function FileEditorPage() {
                 <p>Error loading image: {error}</p>
               </div>
             ) : (
-               <img // Using <img> for direct image display to avoid next/image issues with unoptimized external dynamic sources
+               <img 
                 src={`/api/panel-daemon/file?path=${encodeURIComponent(decodedFilePath)}`} 
                 alt={`Preview of ${fileName}`}
                 className="max-w-full max-h-full object-contain"
@@ -723,11 +730,10 @@ export default function FileEditorPage() {
           />
         )}
         
-        {/* Custom Search Widget */}
         {isSearchWidgetOpen && !isImageFile && (
-          <div className="absolute top-2 right-2 z-10 bg-card p-3 rounded-lg shadow-lg border w-72 space-y-2">
+          <div className="absolute top-2 right-2 z-10 bg-card p-2 rounded-lg shadow-lg border w-64 space-y-1.5">
             <div className="flex items-center justify-between mb-1">
-                <p className="text-sm font-medium">Find in File</p>
+                <p className="text-sm font-medium px-1">Find in File</p>
                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsSearchWidgetOpen(false)}>
                     <X className="h-4 w-4" />
                 </Button>
@@ -739,7 +745,7 @@ export default function FileEditorPage() {
               placeholder="Search..."
               className="h-8 text-sm"
               autoFocus
-              onKeyDown={(e) => { if (e.key === 'Enter') performSearch(searchQuery); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && searchQuery.trim()) performSearch(searchQuery); }}
             />
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1">
@@ -750,7 +756,7 @@ export default function FileEditorPage() {
                   <ChevronDown className="h-4 w-4" />
                 </Button>
               </div>
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground px-1">
                 {searchMatches.length > 0 ? `${currentMatchIndex + 1} of ${searchMatches.length}` : searchQuery ? "No matches" : ""}
               </span>
             </div>
