@@ -27,8 +27,6 @@ import {
   ChevronUp,
   ChevronDown,
   CaseSensitive,
-  // Expand, // Removed as maximize is removed
-  // Shrink, // Removed as maximize is removed
   ArrowLeft,
   Folder as FolderIcon,
   FileText as FileTextIcon,
@@ -145,7 +143,7 @@ function getFileIcon(filename: string, fileType: FileItemForTree['type']): React
     case '.mp4': case '.mov': case '.avi': case '.mkv': return <VideoIconLucide className="h-4 w-4 text-red-500 shrink-0" />;
     case '.db': case '.sqlite': case '.sql': return <DatabaseIcon className="h-4 w-4 text-indigo-500 shrink-0" />;
     case '.csv': case '.xls': case '.xlsx': return <ListIcon className="h-4 w-4 text-green-700 shrink-0" />;
-    case '.exe': case '.dmg': case '.app': return <FileTextIcon className="h-4 w-4 text-gray-800 shrink-0" />; // Changed from Settings2 for clarity
+    case '.exe': case '.dmg': case '.app': return <FileTextIcon className="h-4 w-4 text-gray-800 shrink-0" />;
     case '.pem': case '.crt': case '.key': return <ShieldIcon className="h-4 w-4 text-teal-500 shrink-0" />;
     case '.gitignore': case '.gitattributes': case '.gitmodules': return <GithubIcon className="h-4 w-4 text-neutral-700 shrink-0" />;
     default: return <FileIconDefault className="h-4 w-4 text-muted-foreground shrink-0" />;
@@ -272,7 +270,8 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       setSnapshotError(null);
       if (globalDebugModeActive) console.log("[EditorDialog] Dialog closing, non-persistent states reset.");
     }
-  }, [isOpen, filePathToEdit, globalDebugModeActive, decodedFilePathToEdit]); // Removed activeTabPath and openedTabs to avoid re-init on tab changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, filePathToEdit, globalDebugModeActive]); // decodedFilePathToEdit is derived from filePathToEdit
 
   const fetchFileTreeItems = useCallback(async (pathToDisplay: string) => {
     if (!isOpen) {
@@ -446,7 +445,8 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     } else if (currentActiveTab.content !== null && !currentActiveTab.isLoading) {
       fetchSnapshots(currentActiveP);
     }
-  }, [activeTabPath, openedTabs, isOpen, globalDebugModeActive, fetchSnapshots, toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabPath, openedTabs, isOpen, globalDebugModeActive, fetchSnapshots]); // toast removed
 
 
   const handleCloseDialog = useCallback(() => {
@@ -505,7 +505,8 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         setSnapshotError(e.message || "Error creating snapshot");
         setTimeout(() => toast({ title: "Snapshot Error", description: e.message, variant: "destructive" }), 0);
     } finally { setIsCreatingSnapshot(false); }
-  }, [openedTabs, globalDebugModeActive, toast, fetchSnapshots]); 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openedTabs, globalDebugModeActive, fetchSnapshots]); // toast removed
 
   const handleSaveChanges = useCallback(async () => {
     const currentActiveP = activeTabPathRef.current;
@@ -544,7 +545,8 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         setTimeout(() => toast({ title: "Save Error", description: e.message, variant: "destructive" }), 0);
         setOpenedTabs(prevTabs => prevTabs.map(tab => tab.path === currentActiveTab.path ? { ...tab, error: e.message, isLoading: false } : tab));
     }
-  }, [openedTabs, globalDebugModeActive, toast, handleCreateSnapshot, setActiveTabPath]); 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openedTabs, globalDebugModeActive, handleCreateSnapshot, setActiveTabPath]); // toast removed
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -621,7 +623,8 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         )
       );
     }
-  }, [toast, fetchSnapshots]); 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchSnapshots]); // toast removed
 
   const handleDeleteSnapshot = useCallback(async (snapshotId: string) => {
     const currentActiveP = activeTabPathRef.current;
@@ -646,7 +649,8 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       setTimeout(() => toast({ title: "Snapshot Delete Error", description: e.message, variant: "destructive" }), 0);
       setServerSnapshots(originalSnapshots); 
     }
-  }, [serverSnapshots, toast, fetchSnapshots]); 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverSnapshots, fetchSnapshots]); // toast removed
 
   const handleCloseTab = useCallback((tabToClosePath: string, event?: React.MouseEvent) => {
     event?.stopPropagation(); 
@@ -845,7 +849,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         ref={dialogContentRef}
         className={cn(
             "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
-            "w-[calc(100vw-300px)] h-[calc(100vh-300px)] max-w-7xl max-h-[calc(100vh-100px)]", // Sizing with margins
+            "w-[calc(100vw-250px)] h-[calc(100vh-30px)] max-w-7xl max-h-[calc(100vh-100px)]",
             "p-0 border-border/50 shadow-xl overflow-hidden bg-secondary text-foreground flex flex-col rounded-lg"
         )}
         hideCloseButton={true} 
@@ -855,7 +859,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         >
           <div className="flex items-center space-x-1 flex-grow">
             <DialogTitle className="text-base font-semibold truncate">
-              File Editor {activeTabData ? `- ${path.basename(activeTabData.path)}` : ''}
+              File Editor
             </DialogTitle>
           </div>
           <div className="flex items-center space-x-1 flex-shrink-0">
@@ -1126,3 +1130,4 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     </Dialog>
   );
 }
+
