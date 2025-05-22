@@ -47,6 +47,7 @@ import {
   Shield as ShieldIcon,
   Github as GithubIcon,
   File as FileIconDefault,
+  SaveAll, // New icon
 } from "lucide-react";
 import path from 'path-browserify';
 import { Alert, AlertDescription, AlertTitle as ShadcnAlertTitle } from "@/components/ui/alert";
@@ -163,6 +164,8 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   const activeTabPathRef = useRef<string | null>(null);
 
   const [fileTreePath, setFileTreePathInternal] = useState<string>('/');
+  const [fileTreePathInput, setFileTreePathInput] = useState<string>('/');
+  const [initialDirForReset, setInitialDirForReset] = useState<string>('/');
   const [fileTreeItems, setFileTreeItems] = useState<FileItemForTree[]>([]);
   const [isFileTreeLoading, setIsFileTreeLoading] = useState<boolean>(false);
   const [fileTreeError, setFileTreeError] = useState<string | null>(null);
@@ -183,8 +186,9 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   const [searchMatches, setSearchMatches] = useState<Array<{ from: number; to: number }>>([]);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(-1);
   const [isCaseSensitiveSearch, setIsCaseSensitiveSearch] = useState(false);
+  
+  const [isSavingAll, setIsSavingAll] = useState(false);
 
-  const dialogContentRef = useRef<HTMLDivElement>(null);
 
   const setActiveTabPath = useCallback((newActivePath: string | null) => {
     if (globalDebugModeActive) console.log(`[EditorDialog] setActiveTabPath CALLED with: ${newActivePath}`);
@@ -198,6 +202,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     if (globalDebugModeActive) console.log(`[EditorDialog] setFileTreePath CALLED with: ${newPath}, normalized to: ${finalPath}`);
     fileTreePathRef.current = finalPath;
     setFileTreePathInternal(finalPath);
+    setFileTreePathInput(finalPath); 
   }, [globalDebugModeActive]);
 
   const decodedFilePathToEdit = useMemo(() => {
@@ -233,10 +238,12 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         if (globalDebugModeActive) console.log("[EditorDialog] Initializing with decodedFilePathToEdit:", decodedFilePathToEdit);
         const initialDir = path.dirname(decodedFilePathToEdit) || '/';
         setFileTreePath(initialDir);
+        setInitialDirForReset(initialDir);
         handleOpenOrActivateTab(decodedFilePathToEdit, path.basename(decodedFilePathToEdit));
       } else {
         const defaultTreePath = openedTabs.length > 0 && activeTabPath ? (path.dirname(activeTabPath) || '/') : '/';
         setFileTreePath(defaultTreePath);
+        setInitialDirForReset(defaultTreePath);
         if (openedTabs.length > 0 && !activeTabPath && !activeTabPathRef.current) {
           setActiveTabPath(openedTabs[openedTabs.length - 1].path);
         } else if (openedTabs.length === 0) {
@@ -252,9 +259,9 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       if (globalDebugModeActive) console.log("[EditorDialog] Dialog closing, non-persistent states reset.");
       setFileTreeError(null);
       setSnapshotError(null);
+      // Do not reset openedTabs or activeTabPath here to persist them if dialog is re-opened without new file
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, decodedFilePathToEdit, globalDebugModeActive]); 
+  }, [isOpen, decodedFilePathToEdit, globalDebugModeActive]); // Only re-init if isOpen or initial file changes
 
   useEffect(() => { activeTabPathRef.current = activeTabPath; }, [activeTabPath]);
   useEffect(() => { fileTreePathRef.current = fileTreePath; }, [fileTreePath]);
@@ -280,11 +287,11 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       if (fileTreePathRef.current === pathToDisplay) { 
         if (globalDebugModeActive) console.log(`[EditorDialog] fetchFileTreeItems API response for ${pathToDisplay}:`, data.files?.length);
         setFileTreeItems(Array.isArray(data.files) ? data.files : []);
-        // Update fileTreePath from server response to ensure consistency (e.g. if API normalizes it differently)
         if (data.path && path.normalize(data.path) !== path.normalize(pathToDisplay)) {
              if(globalDebugModeActive) console.log(`[EditorDialog] File tree path updated by server from ${pathToDisplay} to ${data.path}`);
-             setFileTreePathInternal(data.path); // Use internal setter to avoid re-fetch loop
+             setFileTreePathInternal(data.path); 
              fileTreePathRef.current = data.path;
+             setFileTreePathInput(data.path);
         }
       } else {
         if (globalDebugModeActive) console.log(`[EditorDialog] fetchFileTreeItems: Stale data for ${pathToDisplay}, current tree path is ${fileTreePathRef.current}. Discarding.`);
@@ -310,6 +317,17 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         fetchFileTreeItems(fileTreePath);
     }
   }, [fileTreePath, isOpen, fetchFileTreeItems, globalDebugModeActive]);
+  
+  useEffect(() => {
+    // Effect to reset file tree path if an error occurred after path submission
+    if (fileTreeError && fileTreePathInput !== fileTreePathRef.current) {
+        console.warn(`[EditorDialog] File tree error for path '${fileTreePathRef.current}', resetting to '${initialDirForReset}' because input was '${fileTreePathInput}'`);
+        toast({ title: "Invalid Path", description: `Path "${fileTreePathRef.current}" could not be listed. ${fileTreeError}`, variant: "destructive" });
+        setFileTreePath(initialDirForReset); // This will also update fileTreePathInput due to its own effect
+        setFileTreeError(null); // Clear error after handling
+    }
+  }, [fileTreeError, fileTreePathInput, initialDirForReset, setFileTreePath, toast]);
+
 
   const fetchSnapshots = useCallback(async (filePathForSnapshots: string | null) => {
     if (!filePathForSnapshots || !isOpen) {
@@ -374,6 +392,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   }, [globalDebugModeActive, openedTabs, setActiveTabPath]);
 
   useEffect(() => {
+    // Effect to fetch content for the active tab if needed
     const currentActiveP = activeTabPathRef.current;
     if (!currentActiveP || !isOpen) return;
 
@@ -416,6 +435,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
           }
         });
     } else if (currentActiveTab.content !== null && !currentActiveTab.isLoading) {
+        // If content is loaded, check if snapshots need fetching
         if (serverSnapshots.length === 0 && !isLoadingSnapshots && !snapshotError) {
              fetchSnapshots(currentActiveP);
         }
@@ -458,11 +478,10 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filePath: currentActiveTab.path, content: currentActiveTab.content, language: currentActiveTab.language }),
       });
+      const result = await response.json(); // Try to parse JSON first
       if (!response.ok) {
-        const errResult = await response.json().catch(() => ({ error: "Failed to parse snapshot creation error" }));
-        throw new Error(errResult.error || errResult.details || `Server error ${response.status} creating snapshot.`);
+        throw new Error(result.error || result.details || `Server error ${response.status} creating snapshot.`);
       }
-      const result = await response.json();
       setTimeout(() => toast({ title: 'Snapshot Created', description: result.message || `Snapshot for ${currentActiveTab.name} created.` }), 0);
       
       if (Array.isArray(result.snapshots)) {
@@ -477,49 +496,75 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     } finally { setIsCreatingSnapshot(false); }
   }, [openedTabs, globalDebugModeActive, toast, fetchSnapshots]);
 
-  const handleSaveChanges = useCallback(async () => {
-    const currentActiveP = activeTabPathRef.current;
-    const currentActiveTabIndex = openedTabs.findIndex(tab => tab.path === currentActiveP);
+  const handleSaveChanges = useCallback(async (tabToSavePath?: string) => {
+    const pathOfFileToSave = tabToSavePath || activeTabPathRef.current;
+    const tabIndexToSave = openedTabs.findIndex(tab => tab.path === pathOfFileToSave);
 
-    if (currentActiveTabIndex === -1) {
-        setTimeout(() => toast({ title: "Cannot Save", description: "No active file.", variant: "destructive" }), 0);
+    if (tabIndexToSave === -1) {
+        setTimeout(() => toast({ title: "Cannot Save", description: "No active file specified.", variant: "destructive" }), 0);
         return;
     }
-    const currentActiveTab = openedTabs[currentActiveTabIndex];
+    const tabToSave = openedTabs[tabIndexToSave];
 
-    if (currentActiveTab.content === null || currentActiveTab.isWritable === false) {
-        setTimeout(() => toast({ title: "Cannot Save", description: "File is not writable, has no content, or no file is active.", variant: "destructive" }), 0);
+    if (tabToSave.content === null || tabToSave.isWritable === false) {
+        setTimeout(() => toast({ title: "Cannot Save", description: `File "${tabToSave.name}" is not writable or has no content.`, variant: "destructive" }), 0);
         return;
     }
     
-    const shouldCreateSnapshotBeforeSave = currentActiveTab.unsavedChanges; 
+    const shouldCreateSnapshotBeforeSave = tabToSave.unsavedChanges; 
     
-    setOpenedTabs(prev => prev.map((t, idx) => idx === currentActiveTabIndex ? {...t, isLoading: true, error: null } : t));
+    setOpenedTabs(prev => prev.map((t, idx) => idx === tabIndexToSave ? {...t, isLoading: true, error: null } : t));
 
     try {
-      if (shouldCreateSnapshotBeforeSave) { 
+      if (shouldCreateSnapshotBeforeSave && pathOfFileToSave === activeTabPathRef.current) { // Only auto-snapshot active tab on its save
         await handleCreateSnapshot(); 
       }
 
       const response = await fetch(`/api/panel-daemon/file`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: currentActiveTab.path, content: currentActiveTab.content }),
+        body: JSON.stringify({ path: tabToSave.path, content: tabToSave.content }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || result.details || 'Failed to save file.');
       
-      setTimeout(() => toast({ title: 'Success', description: result.message || `File ${currentActiveTab.name} saved.` }), 0);
+      setTimeout(() => toast({ title: 'Success', description: result.message || `File ${tabToSave.name} saved.` }), 0);
       setOpenedTabs(prevTabs => prevTabs.map((tab, idx) =>
-        idx === currentActiveTabIndex
+        idx === tabIndexToSave
           ? { ...tab, originalContent: tab.content, unsavedChanges: false, error: null, isLoading: false }
           : tab
       ));
     } catch (e: any) {
-        if (globalDebugModeActive) console.error("[EditorDialog] Error saving file:", e.message);
+        if (globalDebugModeActive) console.error(`[EditorDialog] Error saving file ${tabToSave.name}:`, e.message);
         setTimeout(() => toast({ title: "Save Error", description: e.message, variant: "destructive" }), 0);
-        setOpenedTabs(prevTabs => prevTabs.map((tab, idx) => idx === currentActiveTabIndex ? { ...tab, error: e.message, isLoading: false } : tab));
+        setOpenedTabs(prevTabs => prevTabs.map((tab, idx) => idx === tabIndexToSave ? { ...tab, error: e.message, isLoading: false } : tab));
     }
   }, [openedTabs, globalDebugModeActive, handleCreateSnapshot, toast]);
+
+  const handleSaveAll = useCallback(async () => {
+    if (globalDebugModeActive) console.log("[EditorDialog] handleSaveAll CALLED");
+    setIsSavingAll(true);
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const tab of openedTabs) {
+        if (tab.unsavedChanges && tab.isWritable !== false && tab.content !== null) {
+            try {
+                await handleSaveChanges(tab.path); // Pass specific path to save
+                successCount++;
+            } catch (e) {
+                errorCount++;
+            }
+        }
+    }
+    setIsSavingAll(false);
+    if (errorCount > 0) {
+        toast({ title: "Save All Complete", description: `${successCount} file(s) saved. ${errorCount} file(s) failed.`, variant: "destructive" });
+    } else if (successCount > 0) {
+        toast({ title: "Save All Complete", description: `${successCount} file(s) saved successfully.` });
+    } else {
+        toast({ title: "Save All", description: "No unsaved changes to save." });
+    }
+  }, [openedTabs, handleSaveChanges, toast, globalDebugModeActive]);
 
 
   useEffect(() => {
@@ -530,6 +575,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       const activeElement = document.activeElement;
       const isEditorWidgetFocused = activeElement?.closest('.cm-editor') !== null;
       const isSearchInputFocused = activeElement?.id === "editor-search-input";
+      const isTreeInputFocused = activeElement?.id === "file-tree-path-input";
 
       if ((event.ctrlKey || event.metaKey) && event.key === 's') {
         event.preventDefault();
@@ -540,8 +586,8 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
 
       if ((event.ctrlKey || event.metaKey) && event.key === 'f' && isOpen && currentActiveP) {
         if (isEditorWidgetFocused && !isSearchWidgetOpen && editorRef.current?.view) {
-           openSearchPanel(editorRef.current.view);
-        } else if (!isEditorWidgetFocused && !isSearchInputFocused) {
+           // openSearchPanel(editorRef.current.view); // Standard CodeMirror search
+        } else if (!isEditorWidgetFocused && !isSearchInputFocused && !isTreeInputFocused) {
           event.preventDefault(); 
           if (!isSearchWidgetOpen) {
             setIsSearchWidgetOpen(true);
@@ -594,9 +640,9 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       }
     } catch (e: any) {
       setTimeout(() => toast({ title: "Snapshot Lock Error", description: e.message, variant: "destructive" }), 0);
-      setServerSnapshots(originalSnapshots);
+      setServerSnapshots(originalSnapshots); // Revert optimistic update
     }
-  }, [serverSnapshots, fetchSnapshots, toast]);
+  }, [serverSnapshots, fetchSnapshots, toast, activeTabPathRef]);
 
   const handleDeleteSnapshot = useCallback(async (snapshotId: string) => {
     const currentActiveP = activeTabPathRef.current;
@@ -625,9 +671,9 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       }
     } catch (e: any) {
       setTimeout(() => toast({ title: "Snapshot Delete Error", description: e.message, variant: "destructive" }), 0);
-      setServerSnapshots(originalSnapshots);
+      setServerSnapshots(originalSnapshots); // Revert optimistic update
     }
-  }, [serverSnapshots, fetchSnapshots, toast]);
+  }, [serverSnapshots, fetchSnapshots, toast, activeTabPathRef]);
 
   const handleCloseTab = useCallback((tabToClosePath: string, event?: React.MouseEvent) => {
     event?.stopPropagation(); 
@@ -648,7 +694,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         if (updatedTabs.length > 0) {
           const newIndexToActivate = Math.max(0, Math.min(originalIndex -1 , updatedTabs.length - 1));
           const newActivePath = updatedTabs[newIndexToActivate]?.path || null;
-          setTimeout(() => setActiveTabPath(newActivePath), 0);
+          setTimeout(() => setActiveTabPath(newActivePath), 0); // setActiveTabPath will trigger content load if needed
         } else {
           setTimeout(() => setActiveTabPath(null), 0); 
         }
@@ -672,10 +718,13 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     setFileTreePath(parentDir);
   }, [setFileTreePath]);
   
-  const normalizedCurrentFileTreePath = useMemo(() => path.normalize(fileTreePath || '/'), [fileTreePath]);
-  const canGoBackInTree = useMemo(() => {
-    return normalizedCurrentFileTreePath !== '/';
-  }, [normalizedCurrentFileTreePath]);
+  const handleFileTreePathSubmit = useCallback(() => {
+    const trimmedPath = fileTreePathInput.trim();
+    let normalized = path.normalize(trimmedPath === '' ? '/' : trimmedPath);
+    if (normalized !== '/' && !normalized.startsWith('/')) { normalized = '/' + normalized; }
+    if (normalized !== '/' && normalized.endsWith('/')) { normalized = normalized.slice(0, -1); }
+    setFileTreePath(normalized || '/');
+  }, [fileTreePathInput, setFileTreePath]);
 
   const activeTabData = useMemo(() => {
     if (!activeTabPath) return null;
@@ -685,9 +734,10 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   const editorContent = useMemo(() => activeTabData?.content ?? "", [activeTabData]);
   const editorLanguage = useMemo(() => activeTabData?.language ?? "plaintext", [activeTabData]);
   const isEditorLoading = useMemo(() => activeTabData?.isLoading ?? false, [activeTabData]);
-  const isEditorSaving = useMemo(() => openedTabs.some(tab => tab.isLoading && tab.path === activeTabPathRef.current && !tab.unsavedChanges), [openedTabs]);
+  const isEditorSaving = useMemo(() => openedTabs.some(tab => tab.isLoading && tab.path === activeTabPathRef.current && !tab.unsavedChanges && !tab.error), [openedTabs]);
   const hasUnsavedChanges = useMemo(() => activeTabData?.unsavedChanges ?? false, [activeTabData]);
   const isCurrentFileWritable = useMemo(() => activeTabData?.isWritable ?? false, [activeTabData]);
+  const anyUnsavedFiles = useMemo(() => openedTabs.some(tab => tab.unsavedChanges), [openedTabs]);
 
   const performSearch = useCallback(() => {
     const view = editorRef.current?.view;
@@ -717,8 +767,9 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       }, 0);
     } else {
       setCurrentMatchIndex(-1);
+      setTimeout(() => toast({ title: "Not Found", description: `"${searchQuery}" was not found.`, duration: 2000 }),0);
     }
-  }, [searchQuery, isCaseSensitiveSearch]);
+  }, [searchQuery, isCaseSensitiveSearch, toast, editorRef]);
 
   const handleSearchInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newQuery = e.target.value;
@@ -746,7 +797,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       effects: EditorView.scrollIntoView(match.from, { y: "center" })
     });
     setCurrentMatchIndex(index);
-  }, [searchMatches]);
+  }, [searchMatches, editorRef]);
 
   const handleNextSearchMatch = useCallback(() => {
     if (searchMatches.length === 0) return;
@@ -768,40 +819,43 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   const toggleCaseSensitiveSearch = useCallback(() => {
     setIsCaseSensitiveSearch(prev => {
       const newSensitivity = !prev;
+      // Re-perform search immediately after state is updated (in a timeout to allow state to propagate)
       setTimeout(() => performSearch(),0); 
       return newSensitivity;
     });
   }, [performSearch]);
 
   useEffect(() => {
+    // Clear search highlights if widget closes
     if (!isSearchWidgetOpen && searchMatches.length > 0) { 
         setSearchMatches([]);
         setCurrentMatchIndex(-1);
         if (editorRef.current?.view) {
+            // Clear selection in editor
             const currentSelection = editorRef.current.view.state.selection.main;
             editorRef.current.view.dispatch({ selection: EditorSelection.single(currentSelection.anchor) });
         }
     }
-  }, [isSearchWidgetOpen, searchMatches.length]);
+  }, [isSearchWidgetOpen, searchMatches.length, editorRef]);
 
   const editorDisplayError = activeTabData?.error;
+  const saveButtonDisabled = isEditorSaving || !isCurrentFileWritable || (!hasUnsavedChanges && !globalDebugModeActive);
 
   if (!isOpen) return null;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) handleCloseDialog(); else onOpenChange(true); }}>
       <DialogContent
-        ref={dialogContentRef}
         className={cn(
-            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
-            "w-[calc(100vw-250px)] h-[calc(100vh-30px)] max-w-7xl max-h-[calc(100vh-100px)]",
-            "p-0 border-border/50 shadow-xl overflow-hidden bg-secondary text-foreground flex flex-col rounded-lg"
+          "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
+          "w-[calc(100vw-250px)] h-[calc(100vh-30px)] max-w-7xl max-h-[calc(100vh-100px)]",
+          "p-0 border-border/50 shadow-xl overflow-hidden bg-secondary text-foreground flex flex-col rounded-lg"
         )}
-        hideCloseButton={true} 
+        hideCloseButton={true}
       >
         <DialogHeader className="relative flex items-center justify-between border-b border-border py-1 px-3 flex-shrink-0">
           <DialogTitle className="text-sm font-semibold truncate">
-             {activeTabData?.name ? path.basename(activeTabData.path) : (decodedFilePathToEdit ? path.basename(decodedFilePathToEdit) : 'File Editor')}
+             File Editor
           </DialogTitle>
           <TooltipProvider><Tooltip><TooltipTrigger asChild>
             <Button variant="ghost" size="icon" onClick={handleCloseDialog} className="h-6 w-6">
@@ -809,9 +863,97 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
             </Button>
           </TooltipTrigger><TooltipContent><p>Close Editor (Esc)</p></TooltipContent></Tooltip></TooltipProvider>
         </DialogHeader>
+        
+        {/* Main Toolbar */}
+        <div className="flex items-center justify-between p-2 border-b border-border bg-muted/50 flex-shrink-0">
+            <div className="flex items-center space-x-1">
+                <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                <Button
+                    variant="ghost" size="icon"
+                    onClick={() => handleSaveChanges()}
+                    disabled={saveButtonDisabled}
+                    isLoading={isEditorSaving}
+                    className="h-7 w-7"
+                >
+                    <Save className="h-4 w-4" />
+                </Button>
+                </TooltipTrigger><TooltipContent><p>Save Changes (Ctrl+S)</p></TooltipContent></Tooltip></TooltipProvider>
+                
+                <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                <Button
+                    variant="ghost" size="icon"
+                    onClick={handleSaveAll}
+                    disabled={isSavingAll || !anyUnsavedFiles}
+                    isLoading={isSavingAll}
+                    className="h-7 w-7"
+                >
+                    <SaveAll className="h-4 w-4" />
+                </Button>
+                </TooltipTrigger><TooltipContent><p>Save All Unsaved Tabs</p></TooltipContent></Tooltip></TooltipProvider>
 
-        <div className="flex-shrink-0 border-b border-border bg-muted/50 overflow-x-auto no-scrollbar">
-          <ScrollArea orientation="horizontal" className="h-auto whitespace-nowrap">
+                <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={() => setIsSearchWidgetOpen(prev => !prev)} className="h-7 w-7">
+                    <SearchIconLucide className="h-4 w-4" />
+                </Button>
+                </TooltipTrigger><TooltipContent><p>Find (Ctrl+F)</p></TooltipContent></Tooltip></TooltipProvider>
+            </div>
+            <div className="flex items-center space-x-1">
+                 <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                    <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-7 w-7">
+                        <Camera className="h-4 w-4" />
+                        </Button>
+                    </TooltipTrigger><TooltipContent><p>Snapshots</p></TooltipContent></Tooltip></TooltipProvider>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-64">
+                        <DropdownMenuLabel className="text-xs">File Snapshots</DropdownMenuLabel>
+                        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground py-0">(Max {MAX_SERVER_SNAPSHOTS} server-side)</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        {isLoadingSnapshots ? (
+                        <DropdownMenuItem disabled className="text-xs"><Loader2 className="mr-2 h-3 w-3 animate-spin" />Loading...</DropdownMenuItem>
+                        ) : snapshotError ? (
+                        <DropdownMenuItem disabled className="text-xs text-destructive"><AlertTriangle className="mr-2 h-3 w-3" />{snapshotError}</DropdownMenuItem>
+                        ) : serverSnapshots.length === 0 ? (
+                        <DropdownMenuItem disabled className="text-xs">No server snapshots.</DropdownMenuItem>
+                        ) : (
+                        <ScrollArea className="max-h-48">
+                            {serverSnapshots.map((snapshot) => (
+                            <DropdownMenuItem key={snapshot.id} onSelect={(e) => e.preventDefault()} className="flex justify-between items-center text-xs p-1.5">
+                                <div className="flex flex-col items-start cursor-pointer flex-grow mr-1" onClick={() => handleViewSnapshotInPopup(snapshot)}>
+                                <span className={cn(snapshot.isLocked && "font-semibold")}>
+                                    {formatDistanceToNowStrict(new Date(snapshot.timestamp), { addSuffix: true })}
+                                    {snapshot.isLocked && <Lock className="inline h-3 w-3 ml-1 text-amber-500" />}
+                                </span>
+                                <span className="text-muted-foreground text-[0.65rem]">{format(new Date(snapshot.timestamp), 'MMM dd, yyyy h:mm a')}</span>
+                                </div>
+                                <div className="flex items-center shrink-0">
+                                <TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSnapshotInPopup(snapshot)}><Eye className="h-3 w-3" /></Button></TooltipTrigger><TooltipContent><p>View</p></TooltipContent></Tooltip></TooltipProvider>
+                                <TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleSnapshotLock(snapshot.id, !!snapshot.isLocked)}>{snapshot.isLocked ? <Lock className="h-3 w-3 text-amber-500" /> : <Unlock className="h-3 w-3" />}</Button></TooltipTrigger><TooltipContent><p>{snapshot.isLocked ? "Unlock" : "Lock"}</p></TooltipContent></Tooltip></TooltipProvider>
+                                <TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground" onClick={() => handleDeleteSnapshot(snapshot.id)} disabled={snapshot.isLocked}><Trash2 className="h-3 w-3" /></Button></TooltipTrigger><TooltipContent><p>Delete (Locked snapshots cannot be deleted)</p></TooltipContent></Tooltip></TooltipProvider>
+                                </div>
+                            </DropdownMenuItem>
+                            ))}
+                        </ScrollArea>
+                        )}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                        onSelect={() => { setTimeout(() => handleCreateSnapshot(), 0); }}
+                        disabled={isCreatingSnapshot || (!globalDebugModeActive && !hasUnsavedChanges)}
+                        className="text-xs"
+                        >
+                        {isCreatingSnapshot ? <Loader2 className="mr-2 h-3 w-3 animate-spin"/> : <Camera className="mr-2 h-3 w-3" />}
+                        Create Snapshot
+                        </DropdownMenuItem>
+                        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground pt-1">Snapshots expire unless locked.</DropdownMenuLabel>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            </div>
+        </div>
+
+        {/* Tab Bar */}
+        <div className="flex-shrink-0 border-b border-border bg-muted/50">
+          <ScrollArea orientation="horizontal" className="h-auto whitespace-nowrap no-scrollbar">
             <div className="flex p-1.5 gap-1">
               {openedTabs.map((tab) => (
                 <div
@@ -852,17 +994,39 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
           </ScrollArea>
         </div>
 
+        {/* Active File Header - below tabs */}
+        {activeTabData && (
+            <div className="flex-shrink-0 flex items-center justify-between p-2 border-b border-border bg-muted/40 text-xs text-muted-foreground">
+                 <span className="truncate max-w-[150px] sm:max-w-xs md:max-w-sm lg:max-w-md xl:max-w-lg" title={activeTabData.path}>{activeTabData.path}</span>
+                 <div className="flex items-center space-x-2">
+                    <span>{editorLanguage}</span>
+                    <span>|</span>
+                    <span>{editorContent.length} chars</span>
+                    <span>|</span>
+                    <span>{editorContent.split('\n').length} lines</span>
+                    {hasUnsavedChanges && <span className="text-orange-400 font-semibold ml-2">* Unsaved</span>}
+                 </div>
+            </div>
+        )}
+
+        {/* Main Content Area (File Tree + Editor Pane) */}
         <div className="flex flex-grow overflow-hidden min-h-0">
+          {/* File Tree Sidebar */}
           <div className="w-64 border-r border-border bg-muted/30 flex-shrink-0 flex flex-col min-h-0">
-            <div className="p-2 border-b border-border flex items-center flex-shrink-0">
+            <div className="p-2 border-b border-border flex items-center gap-1 flex-shrink-0">
               <TooltipProvider><Tooltip><TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={handleTreeBackClick} disabled={!canGoBackInTree} className="h-7 w-7">
+                <Button variant="ghost" size="icon" onClick={handleTreeBackClick} disabled={fileTreePathRef.current === '/'} className="h-7 w-7">
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
               </TooltipTrigger><TooltipContent><p>Go Up</p></TooltipContent></Tooltip></TooltipProvider>
-              <ScrollArea orientation="horizontal" className="ml-2 flex-grow whitespace-nowrap">
-                 <span className="text-xs font-medium truncate text-muted-foreground">{fileTreePathRef.current}</span>
-              </ScrollArea>
+              <Input
+                id="file-tree-path-input"
+                className="h-7 text-xs px-2 py-1 flex-grow font-mono"
+                value={fileTreePathInput}
+                onChange={(e) => setFileTreePathInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleFileTreePathSubmit(); } }}
+                placeholder="Enter path..."
+              />
             </div>
             <ScrollArea className="flex-grow p-1">
               {isFileTreeLoading ? (
@@ -895,168 +1059,94 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
             </ScrollArea>
           </div>
 
-          {activeTabData ? (
-            <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-card m-1 border border-border rounded-md shadow-sm">
-              <div className="flex items-center justify-between p-2 border-b border-border bg-muted/50 flex-shrink-0">
-                <div className="flex items-center space-x-1">
-                  <TooltipProvider><Tooltip><TooltipTrigger asChild>
-                    <Button
-                      variant="ghost" size="icon"
-                      onClick={handleSaveChanges}
-                      disabled={isEditorSaving || !isCurrentFileWritable || (!hasUnsavedChanges && !globalDebugModeActive)}
-                      isLoading={isEditorSaving}
-                      className="h-7 w-7"
-                    >
-                       <Save className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger><TooltipContent><p>Save (Ctrl+S)</p></TooltipContent></Tooltip></TooltipProvider>
-                  <TooltipProvider><Tooltip><TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" onClick={() => setIsSearchWidgetOpen(prev => !prev)} className="h-7 w-7">
-                      <SearchIconLucide className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger><TooltipContent><p>Find (Ctrl+F)</p></TooltipContent></Tooltip></TooltipProvider>
-                </div>
-                <div className="flex items-center space-x-2 text-xs text-muted-foreground truncate">
-                  <span className="truncate max-w-[150px] sm:max-w-xs md:max-w-sm lg:max-w-md xl:max-w-lg" title={activeTabData.path}>{path.basename(activeTabData.path)}</span>
-                  <span>|</span>
-                  <span>{editorLanguage}</span>
-                  <span>|</span>
-                  <span>{editorContent.length} chars</span>
-                  <span>|</span>
-                  <span>{editorContent.split('\n').length} lines</span>
-                  {hasUnsavedChanges && <span className="text-orange-400 font-semibold ml-2">* Unsaved</span>}
-                   <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                       <TooltipProvider><Tooltip><TooltipTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-7 w-7">
-                            <Camera className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger><TooltipContent><p>Snapshots</p></TooltipContent></Tooltip></TooltipProvider>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-64">
-                      <DropdownMenuLabel className="text-xs">File Snapshots</DropdownMenuLabel>
-                      <DropdownMenuLabel className="text-xs font-normal text-muted-foreground py-0">(Max {MAX_SERVER_SNAPSHOTS} server-side)</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      {isLoadingSnapshots ? (
-                        <DropdownMenuItem disabled className="text-xs"><Loader2 className="mr-2 h-3 w-3 animate-spin" />Loading...</DropdownMenuItem>
-                      ) : snapshotError ? (
-                        <DropdownMenuItem disabled className="text-xs text-destructive"><AlertTriangle className="mr-2 h-3 w-3" />{snapshotError}</DropdownMenuItem>
-                      ) : serverSnapshots.length === 0 ? (
-                        <DropdownMenuItem disabled className="text-xs">No server snapshots.</DropdownMenuItem>
-                      ) : (
-                        <ScrollArea className="max-h-48">
-                          {serverSnapshots.map((snapshot) => (
-                            <DropdownMenuItem key={snapshot.id} onSelect={(e) => e.preventDefault()} className="flex justify-between items-center text-xs p-1.5">
-                              <div className="flex flex-col items-start cursor-pointer flex-grow mr-1" onClick={() => handleViewSnapshotInPopup(snapshot)}>
-                                <span className={cn(snapshot.isLocked && "font-semibold")}>
-                                  {formatDistanceToNowStrict(new Date(snapshot.timestamp), { addSuffix: true })}
-                                  {snapshot.isLocked && <Lock className="inline h-3 w-3 ml-1 text-amber-500" />}
-                                </span>
-                                <span className="text-muted-foreground text-[0.65rem]">{format(new Date(snapshot.timestamp), 'MMM dd, yyyy h:mm a')}</span>
-                              </div>
-                              <div className="flex items-center shrink-0">
-                                <TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleViewSnapshotInPopup(snapshot)}><Eye className="h-3 w-3" /></Button></TooltipTrigger><TooltipContent><p>View</p></TooltipContent></Tooltip></TooltipProvider>
-                                <TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleSnapshotLock(snapshot.id, !!snapshot.isLocked)}>{snapshot.isLocked ? <Lock className="h-3 w-3 text-amber-500" /> : <Unlock className="h-3 w-3" />}</Button></TooltipTrigger><TooltipContent><p>{snapshot.isLocked ? "Unlock" : "Lock"}</p></TooltipContent></Tooltip></TooltipProvider>
-                                <TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive-foreground" onClick={() => handleDeleteSnapshot(snapshot.id)} disabled={snapshot.isLocked}><Trash2 className="h-3 w-3" /></Button></TooltipTrigger><TooltipContent><p>Delete (Locked snapshots cannot be deleted)</p></TooltipContent></Tooltip></TooltipProvider>
-                              </div>
-                            </DropdownMenuItem>
-                          ))}
-                        </ScrollArea>
-                      )}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onSelect={() => { setTimeout(() => handleCreateSnapshot(), 0); }}
-                        disabled={isCreatingSnapshot || (!globalDebugModeActive && !hasUnsavedChanges)}
-                        className="text-xs"
-                      >
-                        {isCreatingSnapshot ? <Loader2 className="mr-2 h-3 w-3 animate-spin"/> : <Camera className="mr-2 h-3 w-3" />}
-                        Create Snapshot
-                      </DropdownMenuItem>
-                      <DropdownMenuLabel className="text-xs font-normal text-muted-foreground pt-1">Snapshots expire unless locked.</DropdownMenuLabel>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-
-              <div className="flex-grow relative p-0 bg-background min-h-0">
-                {isEditorLoading ? (
-                  <div className="absolute inset-0 flex items-center justify-center text-sm">
-                    <Loader2 className="h-5 w-5 animate-spin mr-2" />Loading {activeTabData.name}...
-                  </div>
-                ) : editorDisplayError ? (
-                  <Alert variant="destructive" className="m-4 absolute inset-0 flex flex-col items-center justify-center text-center">
-                    <AlertTriangle className="h-6 w-6 mb-2" />
-                    <ShadcnAlertTitle>Error Loading File</ShadcnAlertTitle>
-                    <AlertDescription>{editorDisplayError}</AlertDescription>
-                     <Button variant="outline" size="sm" className="mt-3" onClick={() => {
-                        setOpenedTabs(prev => prev.map(t => t.path === activeTabPath ? {...t, isLoading: true, error: null, content: null, originalContent: null} : t));
-                     }}>Retry</Button>
-                  </Alert>
-                ) : (
-                  <CodeEditor
-                    ref={editorRef}
-                    value={editorContent}
-                    language={editorLanguage}
-                    onChange={handleEditorContentChange}
-                    readOnly={isEditorSaving || !isCurrentFileWritable}
-                    className="h-full w-full border-0 rounded-none"
-                  />
-                )}
-                {isSearchWidgetOpen && activeTabData && !isEditorLoading && !editorDisplayError && (
-                  <div className="absolute top-2 right-2 bg-card border border-border rounded-md shadow-lg p-2 w-60 z-10 space-y-1.5">
-                    <div className="flex items-center gap-1">
-                      <Input
-                        id="editor-search-input"
-                        type="text"
-                        placeholder="Find..."
-                        value={searchQuery}
-                        onChange={handleSearchInputChange}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
-                        className="h-7 text-xs px-2 py-1 flex-grow"
-                      />
-                       <TooltipProvider><Tooltip><TooltipTrigger asChild>
-                        <Button variant="ghost" size="icon" onClick={toggleCaseSensitiveSearch} className={cn("h-6 w-6", isCaseSensitiveSearch && "bg-accent text-accent-foreground")}>
-                          <CaseSensitive className="h-3 w-3" />
-                        </Button>
-                      </TooltipTrigger><TooltipContent>Case Sensitive</TooltipContent></Tooltip></TooltipProvider>
-                      <TooltipProvider><Tooltip><TooltipTrigger asChild>
-                        <Button variant="ghost" size="icon" onClick={() => setIsSearchWidgetOpen(false)} className="h-6 w-6">
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </TooltipTrigger><TooltipContent>Close Search</TooltipContent></Tooltip></TooltipProvider>
+          {/* Editor Pane */}
+          <div className={cn("flex-1 flex flex-col min-h-0 min-w-0 bg-card border-l border-border shadow-sm", !activeTabData && "items-center justify-center")}>
+             {activeTabData ? (
+                <div className="flex-grow relative p-0 bg-background min-h-0">
+                    {isEditorLoading ? (
+                    <div className="absolute inset-0 flex items-center justify-center text-sm">
+                        <Loader2 className="h-5 w-5 animate-spin mr-2" />Loading {activeTabData.name}...
                     </div>
-                    <div className="flex items-center justify-between gap-1">
-                      <div className="flex gap-0.5">
-                         <TooltipProvider><Tooltip><TooltipTrigger asChild>
-                          <Button variant="outline" size="icon" onClick={handlePreviousSearchMatch} disabled={searchMatches.length === 0} className="h-6 w-6">
-                            <ChevronUp className="h-3 w-3" />
-                          </Button>
-                        </TooltipTrigger><TooltipContent>Previous</TooltipContent></Tooltip></TooltipProvider>
+                    ) : editorDisplayError ? (
+                    <Alert variant="destructive" className="m-4 absolute inset-0 flex flex-col items-center justify-center text-center">
+                        <AlertTriangle className="h-6 w-6 mb-2" />
+                        <ShadcnAlertTitle>Error Loading File</ShadcnAlertTitle>
+                        <AlertDescription>{editorDisplayError}</AlertDescription>
+                        <Button variant="outline" size="sm" className="mt-3" onClick={() => {
+                            setOpenedTabs(prev => prev.map(t => t.path === activeTabPath ? {...t, isLoading: true, error: null, content: null, originalContent: null} : t));
+                        }}>Retry</Button>
+                    </Alert>
+                    ) : (
+                    <CodeEditor
+                        ref={editorRef}
+                        value={editorContent}
+                        language={editorLanguage}
+                        onChange={handleEditorContentChange}
+                        readOnly={isEditorSaving || !isCurrentFileWritable}
+                        className="h-full w-full border-0 rounded-none"
+                    />
+                    )}
+                    {isSearchWidgetOpen && activeTabData && !isEditorLoading && !editorDisplayError && (
+                    <div className="absolute top-2 right-2 bg-card border border-border rounded-md shadow-lg p-2 w-60 z-10 space-y-1.5">
+                        <div className="flex items-center gap-1">
+                        <Input
+                            id="editor-search-input"
+                            type="text"
+                            placeholder="Find..."
+                            value={searchQuery}
+                            onChange={handleSearchInputChange}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
+                            className="h-7 text-xs px-2 py-1 flex-grow"
+                        />
                         <TooltipProvider><Tooltip><TooltipTrigger asChild>
-                          <Button variant="outline" size="icon" onClick={handleNextSearchMatch} disabled={searchMatches.length === 0} className="h-6 w-6">
-                            <ChevronDown className="h-3 w-3" />
-                          </Button>
-                        </TooltipTrigger><TooltipContent>Next</TooltipContent></Tooltip></TooltipProvider>
-                      </div>
-                      <span className="text-xs text-muted-foreground truncate">
-                        {searchMatches.length > 0 ? `${currentMatchIndex + 1} / ${searchMatches.length}` : "No matches"}
-                      </span>
+                            <Button variant="ghost" size="icon" onClick={toggleCaseSensitiveSearch} className={cn("h-6 w-6", isCaseSensitiveSearch && "bg-accent text-accent-foreground")}>
+                            <CaseSensitive className="h-3 w-3" />
+                            </Button>
+                        </TooltipTrigger><TooltipContent>Case Sensitive</TooltipContent></Tooltip></TooltipProvider>
+                        <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                            <Button variant="ghost" size="icon" onClick={() => setIsSearchWidgetOpen(false)} className="h-6 w-6">
+                            <X className="h-3 w-3" />
+                            </Button>
+                        </TooltipTrigger><TooltipContent>Close Search</TooltipContent></Tooltip></TooltipProvider>
+                        </div>
+                        <div className="flex items-center justify-between gap-1">
+                        <div className="flex gap-0.5">
+                            <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                            <Button variant="outline" size="icon" onClick={handlePreviousSearchMatch} disabled={searchMatches.length === 0} className="h-6 w-6">
+                                <ChevronUp className="h-3 w-3" />
+                            </Button>
+                            </TooltipTrigger><TooltipContent>Previous</TooltipContent></Tooltip></TooltipProvider>
+                            <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                            <Button variant="outline" size="icon" onClick={handleNextSearchMatch} disabled={searchMatches.length === 0} className="h-6 w-6">
+                                <ChevronDown className="h-3 w-3" />
+                            </Button>
+                            </TooltipTrigger><TooltipContent>Next</TooltipContent></Tooltip></TooltipProvider>
+                        </div>
+                        <span className="text-xs text-muted-foreground truncate">
+                            {searchMatches.length > 0 ? `${currentMatchIndex + 1} / ${searchMatches.length}` : "No matches"}
+                        </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1 pt-1">
+                        {PRESET_SEARCH_TERMS.map((term) => (
+                            <Button key={term} variant="outline" className="text-xs px-1.5 py-0.5 h-auto" onClick={() => handlePresetSearch(term)}>{term}</Button>
+                        ))}
+                        </div>
                     </div>
-                    <div className="flex flex-wrap gap-1 pt-1">
-                      {PRESET_SEARCH_TERMS.map((term) => (
-                        <Button key={term} variant="outline" className="text-xs px-1.5 py-0.5 h-auto" onClick={() => handlePresetSearch(term)}>{term}</Button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-muted-foreground p-4 text-center">
-              <p>{decodedFilePathToEdit && !activeTabData ? "Error opening file or file path is invalid." : "Select a file from the tree or open a tab to start editing."}</p>
-            </div>
-          )}
+                    )}
+                </div>
+            ) : (
+                <div className="flex-1 flex items-center justify-center text-muted-foreground p-4 text-center">
+                <p>{decodedFilePathToEdit && !activeTabData ? "Error opening file or file path is invalid." : "Select a file from the tree or open a tab to start editing."}</p>
+                </div>
+            )}
+          </div>
         </div>
+
+        {/* Copyright Footer */}
+        <DialogFooter className="p-2 border-t border-border bg-muted/50 flex-shrink-0 text-xs text-muted-foreground text-center">
+            © {new Date().getFullYear()} DVPanel
+        </DialogFooter>
+
          {isSnapshotViewerOpen && selectedSnapshotForViewer && (
           <SnapshotViewerDialog
             isOpen={isSnapshotViewerOpen}
@@ -1068,3 +1158,4 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     </Dialog>
   );
 }
+
