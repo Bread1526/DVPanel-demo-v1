@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from "@/components/ui/button";
-import CodeEditor from '@/components/ui/code-editor'; // Corrected from default import if named
+import CodeEditor from '@/components/ui/code-editor';
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -224,7 +224,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     fileTreePathRef.current = fileTreePath;
   }, [fileTreePath]);
 
-  useEffect(() => {
+ useEffect(() => {
     if (globalDebugModeActive) console.log("[EditorDialog] Main Init useEffect - isOpen:", isOpen, "filePathToEdit:", filePathToEdit);
     
     const initializeDialog = async () => {
@@ -242,7 +242,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         }
       } catch (err) {
         console.error("[EditorDialog] Failed to load panel settings for debug mode", err);
-        setGlobalDebugModeActive(false); // Default to false on error
+        setGlobalDebugModeActive(false); 
       }
 
       if (decodedFilePathToEdit) {
@@ -252,11 +252,11 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       } else if (filePathToEdit && !decodedFilePathToEdit) {
         // Error already set by decodedFilePathToEdit useMemo
       } else {
-        setFileTreePath('/'); // Default to root if no specific path
+        setFileTreePath('/'); 
         if (openedTabs.length > 0 && !activeTabPath) {
             setActiveTabPath(openedTabs[openedTabs.length -1].path);
         } else if (openedTabs.length === 0) {
-            setActiveTabPath(null); // No tabs, no active tab
+            setActiveTabPath(null); 
         }
       }
       
@@ -266,14 +266,13 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       setCurrentMatchIndex(-1);
 
       if (!isMaximized && dialogContentRef.current) {
-        // Use larger default dimensions
-        const defaultWidth = Math.min(window.innerWidth * 0.96, 1500);
-        const defaultHeight = Math.min(window.innerHeight * 0.92, 950);
+        const vminInPixels = Math.min(window.innerWidth, window.innerHeight);
+        const sideLength = Math.min(vminInPixels * 0.85, 900);
         
         if (position.x === 0 && position.y === 0) { 
             setPosition({
-              x: Math.max(0, window.innerWidth / 2 - defaultWidth / 2),
-              y: Math.max(0, window.innerHeight / 2 - defaultHeight / 2)
+              x: Math.max(0, window.innerWidth / 2 - sideLength / 2),
+              y: Math.max(0, window.innerHeight / 2 - sideLength / 2)
             });
         }
       }
@@ -282,7 +281,6 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     if (isOpen) {
       initializeDialog();
     } else {
-      // Reset non-persistent states when dialog closes
       setFileTreeError(null);
       setEditorError(null);
       setSnapshotError(null);
@@ -315,6 +313,8 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       if (fileTreePathRef.current === pathToDisplay) { 
           if (globalDebugModeActive) console.log(`[EditorDialog] fetchFileTreeItems API response for ${pathToDisplay}:`, data.files?.length);
           setFileTreeItems(Array.isArray(data.files) ? data.files : []);
+          // Do NOT call setFileTreePath here from the response (data.path) as it can cause loops.
+          // fileTreePath state is the source of truth for what path to fetch.
       } else {
           if (globalDebugModeActive) console.log(`[EditorDialog] fetchFileTreeItems: Stale data for ${pathToDisplay}, current tree path is ${fileTreePathRef.current}. Discarding.`);
       }
@@ -332,6 +332,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       }
     }
   }, [isOpen, globalDebugModeActive]);
+
 
   useEffect(() => {
     if (isOpen && fileTreePath) {
@@ -390,7 +391,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
 
         if (existingTabIndex !== -1) {
             const existingTab = prevTabs[existingTabIndex];
-            newTabs = [...prevTabs.slice(0, existingTabIndex), ...prevTabs.slice(existingTabIndex + 1), existingTab];
+            newTabs = [...prevTabs.slice(0, existingTabIndex), ...prevTabs.slice(existingTabIndex + 1), existingTab]; // Move to end
         } else {
             const newTab: OpenedTabInfo = {
                 path: filePath,
@@ -484,7 +485,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     
     setOpenedTabs(prevTabs => prevTabs.map(tab => {
       if (tab.path === currentActiveP) {
-        const hasChanged = tab.originalContent !== null ? newContent !== tab.originalContent : true;
+        const hasChanged = tab.originalContent !== null ? newContent !== tab.originalContent : true; // Simplified for now
         return { ...tab, content: newContent, unsavedChanges: hasChanged };
       }
       return tab;
@@ -522,7 +523,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         setSnapshotError(e.message || "Error creating snapshot");
         setTimeout(() => toast({ title: "Snapshot Error", description: e.message, variant: "destructive" }), 0);
     } finally { setIsCreatingSnapshot(false); }
-  }, [openedTabs, globalDebugModeActive, toast, fetchSnapshots]); 
+  }, [openedTabs, globalDebugModeActive, toast, fetchSnapshots, activeTabPathRef]); 
 
   const handleSaveChanges = useCallback(async () => {
     const currentActiveP = activeTabPathRef.current;
@@ -559,7 +560,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         setTimeout(() => toast({ title: "Save Error", description: e.message, variant: "destructive" }), 0);
         setOpenedTabs(prevTabs => prevTabs.map(tab => tab.path === currentActiveTab.path ? { ...tab, error: e.message, isLoading: false } : tab));
     }
-  }, [openedTabs, globalDebugModeActive, toast, handleCreateSnapshot]); 
+  }, [openedTabs, globalDebugModeActive, toast, handleCreateSnapshot, activeTabPathRef, setActiveTabPath]); 
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -567,8 +568,8 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       const currentActiveTabForShortcut = openedTabs.find(tab => tab.path === currentActiveP);
       
       const activeElement = document.activeElement;
-      const isDialogInputFocused = activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement;
       const isEditorWidgetFocused = activeElement?.closest('.cm-editor') !== null;
+      const isSearchInputFocused = activeElement?.id === "editor-search-input";
 
       if ((event.ctrlKey || event.metaKey) && event.key === 's') {
         event.preventDefault();
@@ -579,10 +580,10 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
 
       if ((event.ctrlKey || event.metaKey) && event.key === 'f' && isOpen && currentActiveP) {
         if (isEditorWidgetFocused && !isSearchWidgetOpen) {
-        } 
-        else if (isSearchWidgetOpen && isDialogInputFocused && activeElement?.id === "editor-search-input" ) {
-        }
-        else {
+            // Allow CodeMirror's native search to open if editor has focus and custom widget is not open
+        } else if (isSearchInputFocused) {
+            // Allow default find-in-input behavior if custom search input has focus
+        } else {
           event.preventDefault(); 
           if (!isSearchWidgetOpen) {
             setIsSearchWidgetOpen(true);
@@ -596,7 +597,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, openedTabs, handleSaveChanges, globalDebugModeActive, isSearchWidgetOpen]); 
+  }, [isOpen, openedTabs, handleSaveChanges, globalDebugModeActive, isSearchWidgetOpen, activeTabPathRef]); 
 
   const handleViewSnapshotInPopup = useCallback((snapshot: Snapshot) => {
     setSelectedSnapshotForViewer(snapshot);
@@ -636,7 +637,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         )
       );
     }
-  }, [toast, fetchSnapshots]); 
+  }, [toast, fetchSnapshots, activeTabPathRef]); 
 
   const handleDeleteSnapshot = useCallback(async (snapshotId: string) => {
     const currentActiveP = activeTabPathRef.current;
@@ -661,7 +662,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       setTimeout(() => toast({ title: "Snapshot Delete Error", description: e.message, variant: "destructive" }), 0);
       setServerSnapshots(originalSnapshots); 
     }
-  }, [serverSnapshots, toast, fetchSnapshots]); 
+  }, [serverSnapshots, toast, fetchSnapshots, activeTabPathRef]); 
 
   const handleCloseTab = useCallback((tabToClosePath: string, event?: React.MouseEvent) => {
     event?.stopPropagation(); 
@@ -718,7 +719,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   }, [fileTreePath]);
   
   const canGoBackInTree = useMemo(() => {
-    return normalizedCurrentFileTreePath !== '/';
+     return normalizedCurrentFileTreePath !== '/';
   }, [normalizedCurrentFileTreePath]);
 
   const activeTabData = useMemo(() => {
@@ -731,13 +732,14 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   const isEditorLoading = useMemo(() => activeTabData?.isLoading ?? false, [activeTabData]);
   const isEditorSaving = useMemo(() => openedTabs.some(tab => tab.isLoading && tab.path === activeTabPathRef.current), [openedTabs]); 
   const hasUnsavedChanges = useMemo(() => activeTabData?.unsavedChanges ?? false, [activeTabData]);
-  const isCurrentFileWritable = useMemo(() => activeTabData?.isWritable ?? false, [activeTabData]);
+  const isCurrentFileWritable = useMemo(() => activeTabData?.isWritable ?? true, [activeTabData]); // Default to true if null
 
-  const performSearch = useCallback((queryToSearch?: string) => {
-    const currentSearchQuery = queryToSearch === undefined ? searchQuery : queryToSearch;
+
+  const performSearch = useCallback(() => {
     const view = editorRef.current?.view;
+    const currentSearchQuery = searchQuery.trim(); // Use a local const for the query inside performSearch
 
-    if (!view || !currentSearchQuery.trim()) {
+    if (!view || !currentSearchQuery) {
       setSearchMatches([]);
       setCurrentMatchIndex(-1);
       return;
@@ -762,7 +764,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
 
     if (matchesFound.length > 0) {
       setCurrentMatchIndex(0);
-      setTimeout(() => {
+      setTimeout(() => { // Defer dispatch to avoid issues during render
          if (editorRef.current?.view) { 
             editorRef.current.view.dispatch({
                 selection: EditorSelection.single(matchesFound[0].from, matchesFound[0].to),
@@ -773,11 +775,11 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     } else {
       setCurrentMatchIndex(-1);
     }
-  }, [searchQuery, isCaseSensitiveSearch]); 
+  }, [searchQuery, isCaseSensitiveSearch, editorRef]); 
 
   const handleSearchInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newQuery = e.target.value;
-    setSearchQuery(newQuery);
+    setSearchQuery(newQuery); // Update searchQuery state
     if (newQuery.trim() === "") {
         setSearchMatches([]);
         setCurrentMatchIndex(-1);
@@ -788,9 +790,11 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
             });
         }
     } else {
-      performSearch(newQuery); 
+      // Perform search immediately on change for live feedback
+      // No, performSearch is not called here directly to avoid excessive calls.
+      // It will be called by handleSearchSubmit or preset click.
     }
-  }, [performSearch]);
+  }, [editorRef]);
 
   const handleSearchSubmit = useCallback((e?: React.FormEvent) => {
     e?.preventDefault(); 
@@ -805,7 +809,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
       effects: EditorView.scrollIntoView(match.from, { y: "center" })
     });
     setCurrentMatchIndex(index);
-  }, [searchMatches]);
+  }, [searchMatches, editorRef]);
 
   const handleNextSearchMatch = useCallback(() => {
     if (searchMatches.length === 0) return;
@@ -820,21 +824,26 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   }, [currentMatchIndex, searchMatches, goToMatch]);
 
   const handlePresetSearch = useCallback((term: string) => {
-    setSearchQuery(term);
-    setTimeout(() => performSearch(term), 0); 
+    setSearchQuery(term); // Update searchQuery state
+    // performSearch will be called due to searchQuery changing in its dependency array
+    // For more immediate effect, we call it directly after setting.
+    setTimeout(() => performSearch(), 0); // Pass no arg, performSearch uses searchQuery state
   }, [performSearch]);
 
   const toggleCaseSensitiveSearch = useCallback(() => {
     setIsCaseSensitiveSearch(prev => {
       const newSensitivity = !prev;
-      setTimeout(() => performSearch(searchQuery),0); 
+      // performSearch will be called due to isCaseSensitiveSearch changing in its dependency array
+      // For more immediate effect, we call it directly after setting.
+      setTimeout(() => performSearch(),0); // Pass no arg, performSearch uses searchQuery state
       return newSensitivity;
     });
-  }, [searchQuery, performSearch]);
+  }, [performSearch]);
+
 
   useEffect(() => {
     if (globalDebugModeActive) console.log("[EditorDialog] Search widget effect, isSearchWidgetOpen:", isSearchWidgetOpen, "searchMatches.length:", searchMatches.length);
-    if (!isSearchWidgetOpen && searchMatches.length > 0) {
+    if (!isSearchWidgetOpen && searchMatches.length > 0) { // Clear selection if widget closes
         setSearchMatches([]);
         setCurrentMatchIndex(-1);
         if (editorRef.current?.view) {
@@ -844,7 +853,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
             });
         }
     }
-  }, [isSearchWidgetOpen, searchMatches.length, globalDebugModeActive]); 
+  }, [isSearchWidgetOpen, searchMatches.length, globalDebugModeActive, editorRef]); 
 
   const handleMaximize = useCallback(() => {
     if (isMaximized) {
@@ -857,8 +866,10 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   }, [isMaximized, position, prevPosition]);
 
   const handleMouseDownDrag = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // Allow dragging only if not maximized AND mousedown is on header (not its buttons)
     if (isMaximized || !(e.target === e.currentTarget || (e.target as HTMLElement).closest('.drag-handle-area'))) return;
     
+    // Prevent dragging if a button within the header is the target
     if ((e.target as HTMLElement).closest('button')) {
       return;
     }
@@ -871,16 +882,21 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         y: e.clientY - dialogRect.top
       });
     } else {
+      // Fallback if dialogContentRef is not available yet (should be rare)
       setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
     }
   }, [isMaximized, position.x, position.y]);
 
   const handleMouseMoveDrag = useCallback((e: MouseEvent) => {
     if (!isDragging || isMaximized) return;
-    e.preventDefault(); 
+    e.preventDefault(); // Prevent text selection while dragging
     
     let newX = e.clientX - dragStart.x;
     let newY = e.clientY - dragStart.y;
+    
+    // Optional: Add boundary checks for window edges if needed
+    // newX = Math.max(0, Math.min(newX, window.innerWidth - (dialogContentRef.current?.offsetWidth || 0)));
+    // newY = Math.max(0, Math.min(newY, window.innerHeight - (dialogContentRef.current?.offsetHeight || 0)));
     
     setPosition({ x: newX, y: newY });
   }, [isDragging, dragStart, isMaximized]);
@@ -893,7 +909,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
     if (isDragging) {
       window.addEventListener('mousemove', handleMouseMoveDrag);
       window.addEventListener('mouseup', handleMouseUpDrag);
-      window.addEventListener('mouseleave', handleMouseUpDrag); 
+      window.addEventListener('mouseleave', handleMouseUpDrag); // Handle mouse leaving window
     }
     return () => {
       window.removeEventListener('mousemove', handleMouseMoveDrag);
@@ -915,10 +931,10 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
           position: 'fixed', left: 0, top: 0, transform: 'none', margin: 0,
         } : {
           position: 'fixed', left: position.x, top: position.y, transform: 'none', margin: 0,
-          width: 'min(96vw, 1500px)', height: 'min(92vh, 950px)', 
+          width: 'min(85vmin, 900px)', height: 'min(85vmin, 900px)',
         }}
         className={cn(
-            "p-0 border-0 shadow-xl overflow-hidden bg-secondary text-foreground flex flex-col", 
+            "p-0 border-border/50 shadow-xl overflow-hidden bg-secondary text-foreground flex flex-col", 
             isMaximized ? 'rounded-none' : 'rounded-lg' 
         )}
         hideCloseButton={true} 
@@ -928,7 +944,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
           style={{ cursor: isMaximized ? 'default' : 'move' }}
           onMouseDown={handleMouseDownDrag} 
         >
-          <div className="flex items-center space-x-1 flex-grow drag-handle-area"> 
+          <div className="flex items-center space-x-1 flex-grow drag-handle-area"> {/* Area for dragging */}
             <DialogTitle className="text-base font-semibold truncate">
               File Editor {activeTabData ? `- ${activeTabData.name}` : ''}
             </DialogTitle>
@@ -938,7 +954,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
               </Button>
             </TooltipTrigger><TooltipContent><p>{isMaximized ? "Restore" : "Maximize"}</p></TooltipContent></Tooltip></TooltipProvider>
           </div>
-          <div className="flex items-center space-x-1 flex-shrink-0"> 
+          <div className="flex items-center space-x-1 flex-shrink-0"> {/* Buttons are not draggable */}
             <TooltipProvider><Tooltip><TooltipTrigger asChild>
               <Button variant="ghost" size="icon" onClick={handleCloseDialog} className="h-7 w-7">
                 <X className="h-4 w-4" />
@@ -964,7 +980,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
                       ? "bg-primary text-primary-foreground shadow-sm"
                       : "bg-secondary hover:bg-accent hover:text-accent-foreground text-muted-foreground"
                   )}
-                  style={{ paddingRight: '24px' }} 
+                  style={{ paddingRight: '24px' }} // Make space for close button
                 >
                   {tab.name}
                   {tab.unsavedChanges && <span className="ml-1.5 text-orange-400">*</span>}
@@ -974,7 +990,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
                     className={cn(
                       "absolute right-0.5 top-1/2 -translate-y-1/2 h-4 w-4 rounded-sm transition-opacity",
                        activeTabPath === tab.path ? "text-primary-foreground/70 hover:text-primary-foreground hover:bg-primary/80" : "text-muted-foreground/70 hover:text-accent-foreground hover:bg-accent/80",
-                       "opacity-50 group-hover:opacity-100" 
+                       "opacity-50 group-hover:opacity-100" // Show on group hover for better UX
                     )}
                     onClick={(e) => handleCloseTab(tab.path, e)}
                   >
@@ -991,7 +1007,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
         </div>
 
         {/* Main Content Area: File Tree + Editor Pane */}
-        <div className="flex flex-grow overflow-hidden min-h-0"> 
+        <div className="flex flex-grow overflow-hidden min-h-0"> {/* Added min-h-0 for flex-grow */}
           {/* File Tree Sidebar */}
           <div className="w-64 border-r border-border bg-muted/30 flex-shrink-0 flex flex-col min-h-0">
             <div className="p-2 border-b border-border flex items-center flex-shrink-0">
@@ -1037,7 +1053,7 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
 
           {/* Editor Pane (Toolbar + CodeEditor) */}
           {activeTabData ? (
-            <div className="flex-1 flex flex-col min-h-0 min-w-0 border border-neutral-700 rounded-md shadow-sm bg-card m-1"> 
+            <div className="flex-1 flex flex-col min-h-0 min-w-0 border-neutral-700 rounded-md shadow-sm bg-card m-1"> {/* Added border-neutral-700 */}
               {/* Editor Toolbar */}
               <div className="flex items-center justify-between p-2 border-b border-border bg-muted/50 flex-shrink-0">
                 <div className="flex items-center space-x-1">
@@ -1214,3 +1230,5 @@ export default function EditorDialog({ isOpen, onOpenChange, filePathToEdit }: E
   );
 }
 
+
+    
