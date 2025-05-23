@@ -30,23 +30,26 @@ const DialogOverlay = React.forwardRef<
 ))
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
+// Define props for our DialogContent wrapper
+// aria-labelledby is part of React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+// so it will be included in ...props if passed by the consumer.
+interface DialogContentProps extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
+  hideCloseButton?: boolean;
+}
+
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { 
-    hideCloseButton?: boolean;
-    "aria-labelledby"?: string; // Explicitly define for clarity and direct use
-  }
->(({ className, children, hideCloseButton = false, "aria-labelledby": ariaLabelledById, ...props }, ref) => (
+  DialogContentProps
+>(({ className, children, hideCloseButton = false, ...props }, ref) => ( // Removed explicit "aria-labelledby": alias
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
-      aria-labelledby={ariaLabelledById} // Use the destructured prop
       className={cn(
         "fixed left-1/2 top-1/2 z-50 grid w-full -translate-x-1/2 -translate-y-1/2 gap-4 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]",
         className
       )}
-      {...props}
+      {...props} // This will spread aria-labelledby if passed by the consumer (e.g., EditorDialog)
     >
       {children}
       {!hideCloseButton && (
@@ -90,11 +93,11 @@ DialogFooter.displayName = "DialogFooter"
 
 const DialogTitle = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Title>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title> & { id?: string } // Explicitly define for clarity and direct use
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title> & { id?: string }
 >(({ className, id, ...props }, ref) => (
   <DialogPrimitive.Title
     ref={ref}
-    id={id} // Use the destructured prop
+    id={id}
     className={cn(
       "text-lg font-semibold leading-none tracking-tight",
       className
