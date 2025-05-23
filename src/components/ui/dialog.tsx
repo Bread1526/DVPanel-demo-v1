@@ -22,7 +22,7 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 backdrop-blur-sm",
+      "fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 backdrop-blur-sm", // Added backdrop-blur-sm
       className
     )}
     {...props}
@@ -31,8 +31,6 @@ const DialogOverlay = React.forwardRef<
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
 // Define props for our DialogContent wrapper
-// aria-labelledby is part of React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
-// so it will be included in ...props if passed by the consumer.
 interface DialogContentProps extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
   hideCloseButton?: boolean;
 }
@@ -40,16 +38,17 @@ interface DialogContentProps extends React.ComponentPropsWithoutRef<typeof Dialo
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, hideCloseButton = false, ...props }, ref) => ( // Removed explicit "aria-labelledby": alias
+>(({ className, children, hideCloseButton = false, "aria-labelledby": ariaLabelledById, ...props }, ref) => ( 
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
-      className={cn(
+      aria-labelledby={ariaLabelledById} // Use the destructured prop
+      className={cn( // Base classes for positioning and initial state, specific sizing will be applied by EditorDialog
         "fixed left-1/2 top-1/2 z-50 grid w-full -translate-x-1/2 -translate-y-1/2 gap-4 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]",
-        className
+        className // This allows EditorDialog to pass its specific sizing classes
       )}
-      {...props} // This will spread aria-labelledby if passed by the consumer (e.g., EditorDialog)
+      {...props} 
     >
       {children}
       {!hideCloseButton && (
@@ -93,11 +92,11 @@ DialogFooter.displayName = "DialogFooter"
 
 const DialogTitle = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Title>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title> & { id?: string }
->(({ className, id, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
+>(({ className, ...props }, ref) => ( // Removed id prop from here as it's passed directly
   <DialogPrimitive.Title
     ref={ref}
-    id={id}
+    // id={id} // No longer needed here, EditorDialog will pass aria-labelledby to DialogContent
     className={cn(
       "text-lg font-semibold leading-none tracking-tight",
       className
@@ -131,3 +130,5 @@ export {
   DialogTitle,
   DialogDescription,
 }
+
+    
